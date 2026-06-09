@@ -29,3 +29,8 @@ frontend/dist/
 # OS
 .DS_Store
 Thumbs.db
+
+#ep dtd
+backend/tests/fixtures/enterprise_sample.dtd
+dtd_schemas/
+dtd_schemas/
