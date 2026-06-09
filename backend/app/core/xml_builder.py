@@ -1,0 +1,251 @@
+"""XML document builder from parsed DTD schemas."""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from lxml import etree
+from pydantic import BaseModel, Field
+
+from app.core.dtd_models import AttributeDef, ContentNode, DTDSchema, ElementDef
+
+BuildMode = Literal["minimal", "maximal", "custom"]
+
+
+class BuildConfig(BaseModel):
+    schema_id: str = ""
+    root_element: str
+    mode: BuildMode = "minimal"
+    repeat_count: int = Field(default=1, ge=1, le=100)
+    custom_paths: set[str] = Field(default_factory=set)
+
+
+class BuildResult(BaseModel):
+    xml_text: str
+    node_count: int
+    warnings: list[str] = Field(default_factory=list)
+
+
+class XMLBuilder:
+    """Build XML trees from a DTDSchema in minimal, maximal, or custom mode."""
+
+    def __init__(self, schema: DTDSchema, config: BuildConfig) -> None:
+        self.schema = schema
+        self.config = config
+        self.warnings: list[str] = []
+        self.node_count = 0
+
+    def build(self) -> BuildResult:
+        if self.config.root_element not in self.schema.elements:
+            raise ValueError(f"Root element '{self.config.root_element}' not found in schema")
+
+        root_def = self.schema.elements[self.config.root_element]
+        root_el = self._build_element(root_def, self.config.root_element, parent_path="")
+        xml_text = etree.tostring(
+            root_el,
+            pretty_print=True,
+            encoding="UTF-8",
+            xml_declaration=False,
+        ).decode("UTF-8")
+        return BuildResult(
+            xml_text=xml_text,
+            node_count=self.node_count,
+            warnings=self.warnings,
+        )
+
+    def _build_element(
+        self,
+        elem_def: ElementDef,
+        elem_name: str,
+        parent_path: str,
+    ) -> etree._Element:
+        self.node_count += 1
+        current_path = f"{parent_path}.{elem_name}" if parent_path else elem_name
+
+        el = etree.Element(elem_name)
+        self._apply_attributes(el, elem_def, current_path)
+        self._build_content(el, elem_def.content_model, current_path, {elem_name})
+        return el
+
+    def _apply_attributes(
+        self,
+        el: etree._Element,
+        elem_def: ElementDef,
+        current_path: str,
+    ) -> None:
+        for name, attr in elem_def.attributes.items():
+            if not self._should_include_attribute(attr, current_path, name):
+                continue
+            value = self._attribute_placeholder(attr)
+            el.set(name, value)
+
+    def _should_include_attribute(
+        self,
+        attr: AttributeDef,
+        current_path: str,
+        attr_name: str,
+    ) -> bool:
+        if attr.default_decl == "#REQUIRED":
+            return True
+        if self.config.mode == "minimal":
+            return attr.default_decl.startswith("#FIXED")
+        if self.config.mode == "maximal":
+            return True
+        # custom: required + optional if element path or attr path selected
+        attr_path = f"{current_path}@{attr_name}"
+        if attr.default_decl.startswith("#FIXED"):
+            return True
+        return current_path in self.config.custom_paths or attr_path in self.config.custom_paths
+
+    def _attribute_placeholder(self, attr: AttributeDef) -> str:
+        if attr.default_decl.startswith("#FIXED"):
+            fixed = attr.default_decl.replace("#FIXED", "").strip().strip("\"'")
+            return fixed
+        if attr.attr_type == "ENUM" and attr.allowed_values:
+            return attr.allowed_values[0]
+        if attr.attr_type == "ID":
+            return "id-1"
+        return ""
+
+    def _build_content(
+        self,
+        parent_el: etree._Element,
+        node: ContentNode,
+        parent_path: str,
+        ancestry: set[str],
+    ) -> None:
+        if node.kind == "EMPTY":
+            return
+        if node.kind == "ANY":
+            if self.config.mode == "maximal":
+                self.warnings.append(f"ANY content at '{parent_path}' — no child elements generated")
+            return
+        if node.kind == "PCDATA":
+            parent_el.text = ""
+            return
+        if node.kind == "REF":
+            self._expand_node(parent_el, node, parent_path, ancestry)
+            return
+        if node.kind == "SEQUENCE":
+            for child in node.children:
+                self._expand_node(parent_el, child, parent_path, ancestry)
+            return
+        if node.kind == "CHOICE":
+            options = self._select_choice_children(node, parent_path)
+            for child in options:
+                self._expand_node(parent_el, child, parent_path, ancestry)
+
+    def _expand_node(
+        self,
+        parent_el: etree._Element,
+        node: ContentNode,
+        parent_path: str,
+        ancestry: set[str],
+    ) -> None:
+        count = self._repeat_count(node)
+        if count == 0:
+            return
+        for _ in range(count):
+            if node.kind == "REF":
+                self._append_ref(parent_el, node, parent_path, ancestry)
+            else:
+                self._build_content(parent_el, node, parent_path, ancestry)
+
+    def _repeat_count(self, node: ContentNode) -> int:
+        q = node.quantifier
+        if self.config.mode == "minimal":
+            if q in ("?", "*"):
+                return 0
+            return 1
+        # maximal / custom
+        if q in ("*", "+"):
+            return self.config.repeat_count
+        if q == "?":
+            return 1
+        return 1
+
+    def _append_ref(
+        self,
+        parent_el: etree._Element,
+        node: ContentNode,
+        parent_path: str,
+        ancestry: set[str],
+    ) -> None:
+        ref_name = node.ref
+        if not ref_name:
+            return
+
+        child_path = f"{parent_path}.{ref_name}" if parent_path else ref_name
+        if not self._should_include_element(ref_name, child_path, node):
+            return
+
+        if ref_name in ancestry:
+            self.warnings.append(f"Cyclic reference skipped: {' -> '.join(ancestry)} -> {ref_name}")
+            return
+
+        child_def = self.schema.elements.get(ref_name)
+        if child_def is None:
+            self.warnings.append(f"Unknown element reference: {ref_name}")
+            child_el = etree.SubElement(parent_el, ref_name)
+            self.node_count += 1
+            return
+
+        new_ancestry = set(ancestry)
+        new_ancestry.add(ref_name)
+        child_el = etree.SubElement(parent_el, ref_name)
+        self.node_count += 1
+        self._apply_attributes(child_el, child_def, child_path)
+
+        if child_def.content_model.kind == "PCDATA":
+            child_el.text = ""
+        else:
+            self._build_content(child_el, child_def.content_model, child_path, new_ancestry)
+
+    def _should_include_element(
+        self,
+        ref_name: str,
+        child_path: str,
+        node: ContentNode,
+    ) -> bool:
+        if self.config.mode == "minimal":
+            return node.quantifier not in ("?", "*")
+
+        if self.config.mode == "maximal":
+            return True
+
+        # custom: required children (no ?/*) always; others if path matches
+        if node.quantifier not in ("?", "*"):
+            return True
+        if child_path in self.config.custom_paths:
+            return True
+        return any(p.startswith(child_path + ".") or p == child_path for p in self.config.custom_paths)
+
+    def _select_choice_children(self, node: ContentNode, parent_path: str) -> list[ContentNode]:
+        if self.config.mode == "maximal":
+            return list(node.children)
+
+        if self.config.mode == "minimal":
+            for child in node.children:
+                if child.kind == "REF" and child.quantifier not in ("?", "*"):
+                    return [child]
+                if child.kind != "REF" and child.quantifier not in ("?", "*"):
+                    return [child]
+            return []
+
+        # custom: include selected branches
+        selected: list[ContentNode] = []
+        for child in node.children:
+            ref_name = child.ref if child.kind == "REF" else ""
+            child_path = f"{parent_path}.{ref_name}" if ref_name and parent_path else ref_name
+            if child.quantifier not in ("?", "*"):
+                selected.append(child)
+            elif child_path in self.config.custom_paths or any(
+                p.startswith(child_path + ".") for p in self.config.custom_paths if child_path
+            ):
+                selected.append(child)
+        return selected
+
+
+def build_xml(schema: DTDSchema, config: BuildConfig) -> BuildResult:
+    """Build XML from a parsed DTD schema."""
+    return XMLBuilder(schema, config).build()

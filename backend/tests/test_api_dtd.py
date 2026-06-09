@@ -1,0 +1,98 @@
+"""Tests for DTD API endpoints."""
+
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.api.routes import dtd as dtd_routes
+from app.main import app
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def clear_registry():
+    dtd_routes._schema_registry.clear()
+    yield
+    dtd_routes._schema_registry.clear()
+
+
+@pytest.fixture
+def client() -> TestClient:
+    return TestClient(app)
+
+
+def test_health(client: TestClient):
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_config_aliases_no_secrets(client: TestClient):
+    response = client.get("/api/config/aliases")
+    assert response.status_code == 200
+    data = response.json()
+    assert "databases" in data
+    assert "llm" in data
+
+
+def test_upload_dtd(client: TestClient):
+    dtd_path = FIXTURES / "main.dtd"
+    with dtd_path.open("rb") as f:
+        response = client.post(
+            "/api/dtd/upload",
+            files={"file": ("main.dtd", f, "application/xml-dtd")},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "schema_id" in data
+    assert data["element_count"] > 0
+    assert "PayDoc" in data["elements"]
+
+
+def test_list_elements(client: TestClient):
+    schema_id = _upload_fixture(client)
+
+    response = client.get(f"/api/dtd/{schema_id}/elements")
+    assert response.status_code == 200
+    elements = response.json()
+    names = [e["name"] for e in elements]
+    assert "PayDoc" in names
+
+
+def test_get_element_detail(client: TestClient):
+    schema_id = _upload_fixture(client)
+
+    response = client.get(f"/api/dtd/{schema_id}/elements/PayDoc")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["element"]["name"] == "PayDoc"
+    assert "Основной корневой элемент" in data["element"]["doc"]
+    assert "kladr" in data["element"]["required_attributes"]
+
+
+def test_get_element_tree(client: TestClient):
+    schema_id = _upload_fixture(client)
+
+    response = client.get(f"/api/dtd/{schema_id}/elements/PayDoc/tree")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["element"] == "PayDoc"
+    assert data["content_model"]["kind"] == "SEQUENCE"
+
+
+def test_schema_not_found(client: TestClient):
+    response = client.get("/api/dtd/nonexistent/elements")
+    assert response.status_code == 404
+
+
+def _upload_fixture(client: TestClient) -> str:
+    dtd_path = FIXTURES / "main.dtd"
+    with dtd_path.open("rb") as f:
+        response = client.post(
+            "/api/dtd/upload",
+            files={"file": ("main.dtd", f, "application/xml-dtd")},
+        )
+    return response.json()["schema_id"]
