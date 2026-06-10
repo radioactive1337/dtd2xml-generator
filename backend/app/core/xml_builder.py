@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from lxml import etree
@@ -205,10 +206,19 @@ class XMLBuilder:
         child_name = child.ref if child.kind == "REF" else f"group-{index}"
         return f"{parent_path}.{child_name}" if parent_path else child_name
 
+    def _normalize_custom_path(self, path: str) -> str:
+        """Strip UI-only group-N segments so tree paths match element paths."""
+        return re.sub(r"\.group-\d+(?=\.|$)", "", path)
+
     def _is_path_selected(self, path: str) -> bool:
         if path in self.config.custom_paths:
             return True
-        return any(p.startswith(path + ".") for p in self.config.custom_paths)
+        if any(p.startswith(path + ".") for p in self.config.custom_paths):
+            return True
+        normalized = {self._normalize_custom_path(p) for p in self.config.custom_paths}
+        if path in normalized:
+            return True
+        return any(p.startswith(path + ".") for p in normalized)
 
     def _should_include_element(
         self,

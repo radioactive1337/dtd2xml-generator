@@ -149,9 +149,25 @@ function isChoiceChildRequired(parentKind, childQuantifier) {
   return isRequiredQuantifier(childQuantifier || '')
 }
 
-function buildNodeFromModel(name, model, path, depth, required) {
+function resolveChildPaths(parentPath, elementPath, parentKind, child, idx) {
+  const childName = child.kind === 'REF' ? child.ref : `group-${idx}`
+  if (parentKind === 'CHOICE' && child.kind === 'REF') {
+    const childPath = `${elementPath}.${child.ref}`
+    return { childPath, elementPath: childPath }
+  }
+  const childPath = `${parentPath}.${childName}`
+  const nextElementPath = child.kind === 'REF' ? childPath : elementPath
+  return { childPath, elementPath: nextElementPath }
+}
+
+function buildNodeFromModel(name, model, path, depth, required, elementPath = null) {
+  const elPath = elementPath ?? path
   const quantifier = model.quantifier || ''
-  const nodeRequired = required || isRequiredQuantifier(quantifier)
+  const isGroup = model.kind === 'SEQUENCE' || model.kind === 'CHOICE'
+  // REF inside CHOICE has quantifier "" meaning "once if picked", not "mandatory".
+  const nodeRequired = isGroup
+    ? required || isRequiredQuantifier(quantifier)
+    : required
   const node = {
     id: nextId(),
     name,
@@ -193,14 +209,20 @@ function buildNodeFromModel(name, model, path, depth, required) {
   } else if (model.kind === 'SEQUENCE' || model.kind === 'CHOICE') {
     node.hasChildren = (model.children || []).length > 0
     node.children = (model.children || []).map((child, idx) => {
-      const childName = child.kind === 'REF' ? child.ref : `group-${idx}`
-      const childPath = `${path}.${childName}`
+      const { childPath, elementPath: childElementPath } = resolveChildPaths(
+        path,
+        elPath,
+        model.kind,
+        child,
+        idx,
+      )
       return buildNodeFromModel(
-        childName,
+        child.kind === 'REF' ? child.ref : `group-${idx}`,
         child,
         childPath,
         depth + 1,
         isChoiceChildRequired(model.kind, child.quantifier),
+        childElementPath,
       )
     })
     node._loaded = true
@@ -224,14 +246,20 @@ function buildChildrenFromModel(model, parentPath, depth) {
   }
   if (model.kind === 'SEQUENCE' || model.kind === 'CHOICE') {
     return (model.children || []).map((child, idx) => {
-      const childName = child.kind === 'REF' ? child.ref : `group-${idx}`
-      const childPath = `${parentPath}.${childName}`
+      const { childPath, elementPath: childElementPath } = resolveChildPaths(
+        parentPath,
+        parentPath,
+        model.kind,
+        child,
+        idx,
+      )
       return buildNodeFromModel(
-        childName,
+        child.kind === 'REF' ? child.ref : `group-${idx}`,
         child,
         childPath,
         depth,
         isChoiceChildRequired(model.kind, child.quantifier),
+        childElementPath,
       )
     })
   }

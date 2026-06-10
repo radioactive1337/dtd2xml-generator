@@ -124,3 +124,16 @@ def test_custom_optional_choice_includes_selected_branch(aux_auth_schema):
 
     assert aux_auth is not None
     assert [c.tag for c in aux_auth] == ["front-auth-key"]
+
+
+def test_custom_choice_accepts_ui_group_path(aux_auth_schema):
+    config = BuildConfig(
+        root_element="root",
+        mode="custom",
+        custom_paths={"root.aux-auth", "root.aux-auth.group-2.front-auth-key"},
+    )
+    result = build_xml(aux_auth_schema, config)
+    aux_auth = etree.fromstring(result.xml_text.encode("utf-8")).find("aux-auth")
+
+    assert aux_auth is not None
+    assert [c.tag for c in aux_auth] == ["front-auth-key"]
