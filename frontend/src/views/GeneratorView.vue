@@ -139,9 +139,18 @@ const modes = [
   { value: 'custom', label: 'Custom' },
 ]
 
+function elementMatchesSearch(elementName, query) {
+  const name = elementName.toLowerCase()
+  const q = query.toLowerCase().trim().replace(/\s+/g, ' ')
+  if (!q) return true
+  if (name.includes(q)) return true
+  if (name.includes(q.replace(/ /g, '-'))) return true
+  return name.replace(/-/g, ' ').includes(q)
+}
+
 const filteredElements = computed(() => {
-  const q = rootSearch.value.toLowerCase()
-  return elements.value.filter((el) => el.toLowerCase().includes(q))
+  const q = rootSearch.value
+  return elements.value.filter((el) => elementMatchesSearch(el, q))
 })
 
 const canGenerate = computed(() => schemaId.value && rootElement.value)
