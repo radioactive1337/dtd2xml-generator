@@ -32,7 +32,7 @@
             type="checkbox"
             :checked="item.checked"
             :disabled="item.required"
-            @change="toggleCheck(item)"
+            @click.prevent="toggleCheck(item.path)"
           />
           <span class="node-name" :class="{ required: item.required }">{{ item.name }}</span>
           <span v-if="item.quantifier" class="quantifier">{{ item.quantifier }}</span>
@@ -278,10 +278,9 @@ async function toggleExpand(item) {
   refreshFlat()
 }
 
-function toggleCheck(item) {
-  if (item.required) return
-  const node = findNodeByPath(item.path)
-  if (!node) return
+function toggleCheck(path) {
+  const node = findNodeByPath(path)
+  if (!node || node.required) return
   node.checked = !node.checked
   if (node.checked) checkedPaths.value.add(node.path)
   else checkedPaths.value.delete(node.path)
@@ -422,8 +421,12 @@ function applyCheckedToTree(node) {
 
 .tree-checkbox {
   flex-shrink: 0;
-  width: auto !important;
+  width: 16px !important;
+  height: 16px;
+  min-width: 16px;
   margin: 0 6px;
+  padding: 0 !important;
+  cursor: pointer;
 }
 
 .node-name {
