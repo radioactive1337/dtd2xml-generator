@@ -6,7 +6,7 @@
         <input v-model="presetName" placeholder="Preset name" class="preset-input" />
         <button class="btn-secondary" :disabled="!presetName" @click="savePreset">Save</button>
         <select v-model="loadPresetName" class="preset-select" @change="onLoadPreset">
-          <option value="">Load preset...</option>
+          <option value="">Select preset...</option>
           <option v-for="p in presets" :key="p.name" :value="p.name">{{ p.name }}</option>
         </select>
       </div>
@@ -79,12 +79,14 @@ const presetName = ref('')
 const loadPresetName = ref('')
 const presets = ref([])
 const pendingPresetPaths = ref(null)
+const applyingPresetRoot = ref(false)
 let nodeIdCounter = 0
 
 watch(
   () => props.schemaId,
   async (id) => {
     if (!id) return
+    loadPresetName.value = ''
     await refreshPresets()
   },
   { immediate: true },
@@ -92,7 +94,16 @@ watch(
 
 watch(
   () => [props.schemaId, props.rootElement],
-  async () => {
+  async (newVal, oldVal) => {
+    const [, newRoot] = newVal
+    const [, oldRoot] = oldVal || []
+
+    if (applyingPresetRoot.value) {
+      applyingPresetRoot.value = false
+    } else if (oldRoot && newRoot !== oldRoot) {
+      loadPresetName.value = ''
+    }
+
     if (!props.schemaId || !props.rootElement) {
       treeRoot.value = null
       flatNodes.value = []
@@ -484,6 +495,7 @@ async function savePreset() {
     custom_paths: [...checkedPaths.value],
   })
   await refreshPresets()
+  loadPresetName.value = presetName.value
 }
 
 function inferRootFromPaths(paths) {
@@ -499,7 +511,6 @@ async function onLoadPreset() {
   const preset = await apiLoadPreset(loadPresetName.value)
   const paths = preset.custom_paths || []
   const root = inferRootFromPaths(paths)
-  loadPresetName.value = ''
 
   if (!paths.length) return
 
@@ -508,6 +519,7 @@ async function onLoadPreset() {
 
   if (root && root !== props.rootElement) {
     pendingPresetPaths.value = paths
+    applyingPresetRoot.value = true
     emit('update:rootElement', root)
     return
   }
