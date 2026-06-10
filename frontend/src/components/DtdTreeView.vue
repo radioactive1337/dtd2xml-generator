@@ -20,12 +20,14 @@
       key-field="id"
       v-slot="{ item }"
     >
-      <div class="tree-row" :style="{ paddingLeft: `${item.depth * 20 + 8}px` }">
+      <div class="tree-row">
+        <span class="indent" :style="{ width: `${item.depth * 20}px` }" />
         <button v-if="item.hasChildren" class="expand-btn" @click="toggleExpand(item)">
           {{ item.expanded ? '▼' : '▶' }}
         </button>
         <span v-else class="expand-spacer" />
         <input
+          class="tree-checkbox"
           type="checkbox"
           :checked="item.checked"
           :disabled="item.required"
@@ -300,22 +302,56 @@ function applyCheckedToTree(node) {
 .tree-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
   height: 32px;
   font-size: 13px;
   border-bottom: 1px solid var(--border);
+  padding-left: 8px;
+  overflow: hidden;
+}
+
+.indent {
+  flex-shrink: 0;
+  display: inline-block;
 }
 
 .expand-btn {
+  flex-shrink: 0;
   background: none;
   border: none;
   color: var(--text-muted);
   padding: 0;
-  width: 16px;
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
   font-size: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.expand-spacer { width: 16px; }
+.expand-spacer {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 20px;
+  min-width: 20px;
+}
+
+.tree-checkbox {
+  flex-shrink: 0;
+  width: auto !important;
+  margin: 0 6px;
+}
+
+.node-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: 4px;
+}
 
 .node-name.required { font-weight: 600; }
 

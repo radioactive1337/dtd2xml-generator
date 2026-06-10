@@ -121,8 +121,13 @@ const generating = ref(false)
 const populating = ref(false)
 const error = ref('')
 
-const leftWidth = ref(380)
-const dtdHeight = ref(160)
+const LEFT_MIN = 440
+const LEFT_MAX = 700
+const DTD_MIN = 200
+const DTD_MAX = 500
+
+const leftWidth = ref(LEFT_MIN)
+const dtdHeight = ref(DTD_MIN)
 
 const modes = [
   { value: 'minimal', label: 'Minimal' },
@@ -231,10 +236,10 @@ function startVResize(e) {
 function onResizeMove(e) {
   if (activeResize === 'h') {
     const delta = e.clientX - resizeStartX
-    leftWidth.value = Math.max(240, Math.min(700, resizeStartVal + delta))
+    leftWidth.value = Math.max(LEFT_MIN, Math.min(LEFT_MAX, resizeStartVal + delta))
   } else if (activeResize === 'v') {
     const delta = e.clientY - resizeStartY
-    dtdHeight.value = Math.max(80, Math.min(500, resizeStartVal + delta))
+    dtdHeight.value = Math.max(DTD_MIN, Math.min(DTD_MAX, resizeStartVal + delta))
   }
 }
 
@@ -259,6 +264,7 @@ function stopResize() {
   flex-direction: column;
   gap: 0;
   flex-shrink: 0;
+  min-width: 440px;
 }
 
 .dtd-wrapper {
