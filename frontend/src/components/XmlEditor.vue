@@ -11,8 +11,7 @@
         </button>
       </div>
     </div>
-    <div ref="editorContainer" class="editor-container" :style="{ height: editorHeight + 'px' }" />
-    <div class="resize-handle" @mousedown.prevent="startResize" title="Drag to resize" />
+    <div ref="editorContainer" class="editor-container" />
   </div>
 </template>
 
@@ -27,7 +26,6 @@ const props = defineProps({
 
 const editorContainer = ref(null)
 const copied = ref(false)
-const editorHeight = ref(700)
 let editor = null
 let monaco = null
 
@@ -63,7 +61,6 @@ watch(
 
 onBeforeUnmount(() => {
   editor?.dispose()
-  stopResize()
 })
 
 async function copyToClipboard() {
@@ -83,43 +80,22 @@ function downloadXml() {
   a.click()
   URL.revokeObjectURL(url)
 }
-
-// ---- Resize logic ----
-let resizing = false
-let resizeStartY = 0
-let resizeStartHeight = 0
-
-function startResize(e) {
-  resizing = true
-  resizeStartY = e.clientY
-  resizeStartHeight = editorHeight.value
-  document.addEventListener('mousemove', onResizeMove)
-  document.addEventListener('mouseup', stopResize)
-  document.body.style.cursor = 'row-resize'
-  document.body.style.userSelect = 'none'
-}
-
-function onResizeMove(e) {
-  if (!resizing) return
-  const delta = e.clientY - resizeStartY
-  editorHeight.value = Math.max(150, resizeStartHeight + delta)
-}
-
-function stopResize() {
-  resizing = false
-  document.removeEventListener('mousemove', onResizeMove)
-  document.removeEventListener('mouseup', stopResize)
-  document.body.style.cursor = ''
-  document.body.style.userSelect = ''
-}
 </script>
 
 <style scoped>
+.xml-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 .editor-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
+  flex-shrink: 0;
 }
 
 .editor-actions {
@@ -128,33 +104,10 @@ function stopResize() {
 }
 
 .editor-container {
+  flex: 1;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
-  transition: height 0s;
-}
-
-.resize-handle {
-  height: 10px;
-  cursor: row-resize;
-  position: relative;
-  margin-top: 4px;
-}
-
-.resize-handle::after {
-  content: '';
-  position: absolute;
-  left: 30%;
-  right: 30%;
-  top: 50%;
-  height: 3px;
-  transform: translateY(-50%);
-  background: var(--border);
-  border-radius: 2px;
-  transition: background 0.15s;
-}
-
-.resize-handle:hover::after {
-  background: var(--accent);
 }
 </style>

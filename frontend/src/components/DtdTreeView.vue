@@ -12,34 +12,37 @@
       </div>
     </div>
 
-    <RecycleScroller
-      v-if="flatNodes.length"
-      class="scroller"
-      :items="flatNodes"
-      :item-size="32"
-      key-field="id"
-      v-slot="{ item }"
-    >
-      <div class="tree-row">
-        <span class="indent" :style="{ width: `${item.depth * 20}px` }" />
-        <button v-if="item.hasChildren" class="expand-btn" @click="toggleExpand(item)">
-          {{ item.expanded ? '▼' : '▶' }}
-        </button>
-        <span v-else class="expand-spacer" />
-        <input
-          class="tree-checkbox"
-          type="checkbox"
-          :checked="item.checked"
-          :disabled="item.required"
-          @change="toggleCheck(item)"
-        />
-        <span class="node-name" :class="{ required: item.required }">{{ item.name }}</span>
-        <span v-if="item.quantifier" class="quantifier">{{ item.quantifier }}</span>
-      </div>
-    </RecycleScroller>
+    <div class="scroller-wrap">
+      <RecycleScroller
+        v-show="flatNodes.length && !loading"
+        class="scroller"
+        :items="flatNodes"
+        :item-size="32"
+        key-field="id"
+        v-slot="{ item }"
+      >
+        <div class="tree-row">
+          <span class="indent" :style="{ width: `${item.depth * 20}px` }" />
+          <button v-if="item.hasChildren" class="expand-btn" @click="toggleExpand(item)">
+            {{ item.expanded ? '▼' : '▶' }}
+          </button>
+          <span v-else class="expand-spacer" />
+          <input
+            class="tree-checkbox"
+            type="checkbox"
+            :checked="item.checked"
+            :disabled="item.required"
+            @change="toggleCheck(item)"
+          />
+          <span class="node-name" :class="{ required: item.required }">{{ item.name }}</span>
+          <span v-if="item.quantifier" class="quantifier">{{ item.quantifier }}</span>
+        </div>
+      </RecycleScroller>
 
-    <p v-else-if="!loading" class="empty-hint">Select a root element to load the tree.</p>
-    <p v-if="loading" class="empty-hint">Loading tree...</p>
+      <div v-if="loading || !flatNodes.length" class="scroller-hint">
+        {{ loading ? 'Loading tree...' : 'Select a root element to load the tree.' }}
+      </div>
+    </div>
   </div>
 </template>
 
@@ -134,8 +137,25 @@ function buildNodeFromModel(name, model, path, depth, required) {
   if (nodeRequired) checkedPaths.value.add(path)
 
   if (model.kind === 'REF') {
-    node.hasChildren = true
-    node._refName = model.ref
+    if (name === model.ref) {
+      // This node IS the referenced element; lazy-load its children on expand
+      node.hasChildren = true
+      node._refName = model.ref
+    } else {
+      // This node CONTAINS the ref as a direct child (e.g. root element whose
+      // entire content model is a single REF like `saldo (saldo-national?)`)
+      const childPath = `${path}.${model.ref}`
+      const childNode = buildNodeFromModel(
+        model.ref,
+        model,
+        childPath,
+        depth + 1,
+        isRequiredQuantifier(model.quantifier || ''),
+      )
+      node.hasChildren = true
+      node.children = [childNode]
+      node._loaded = true
+    }
   } else if (model.kind === 'SEQUENCE' || model.kind === 'CHOICE') {
     node.hasChildren = (model.children || []).length > 0
     node.children = (model.children || []).map((child, idx) => {
@@ -294,9 +314,24 @@ function applyCheckedToTree(node) {
 .preset-input { width: 140px; }
 .preset-select { width: 150px; }
 
-.scroller {
+.scroller-wrap {
   height: 360px;
+  position: relative;
+}
+
+.scroller {
+  height: 100%;
   overflow: auto;
+}
+
+.scroller-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 .tree-row {
@@ -357,14 +392,10 @@ function applyCheckedToTree(node) {
 
 .quantifier {
   color: var(--accent);
-  font-size: 11px;
+  font-size: 12px;
   font-family: monospace;
+  flex-shrink: 0;
+  margin-right: 12px;
 }
 
-.empty-hint {
-  color: var(--text-muted);
-  font-size: 13px;
-  padding: 16px 0;
-  text-align: center;
-}
 </style>

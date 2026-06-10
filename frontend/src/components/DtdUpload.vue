@@ -1,6 +1,5 @@
 <template>
-  <div class="dtd-upload card">
-    <div class="panel-title">DTD Schema</div>
+  <div class="dtd-upload">
     <div
       class="drop-zone"
       :class="{ dragging: isDragging, loaded: schemaId }"

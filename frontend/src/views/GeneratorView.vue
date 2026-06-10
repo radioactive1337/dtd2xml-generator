@@ -1,14 +1,15 @@
 <template>
   <div class="generator" ref="generatorRef">
     <div class="generator-left" :style="{ width: leftWidth + 'px' }">
-      <div
-        class="dtd-wrapper"
-        :style="schemaId ? { height: dtdHeight + 'px', overflow: 'auto', minHeight: '80px' } : {}"
-      >
-        <DtdUpload @uploaded="onDtdUploaded" />
+      <div class="dtd-wrapper card">
+        <div class="dtd-collapse-header" @click="dtdCollapsed = !dtdCollapsed">
+          <span class="panel-title">DTD Schema</span>
+          <span class="collapse-arrow" :class="{ rotated: dtdCollapsed }">▼</span>
+        </div>
+        <div v-show="!dtdCollapsed">
+          <DtdUpload @uploaded="onDtdUploaded" />
+        </div>
       </div>
-
-      <div v-if="schemaId" class="v-divider" @mousedown.prevent="startVResize" title="Drag to resize" />
 
       <div v-if="schemaId" class="card controls">
         <div class="panel-title">Generation</div>
@@ -96,7 +97,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import DtdUpload from '../components/DtdUpload.vue'
 import DtdTreeView from '../components/DtdTreeView.vue'
 import XmlEditor from '../components/XmlEditor.vue'
@@ -123,11 +124,14 @@ const error = ref('')
 
 const LEFT_MIN = 440
 const LEFT_MAX = 700
-const DTD_MIN = 200
-const DTD_MAX = 500
 
 const leftWidth = ref(LEFT_MIN)
-const dtdHeight = ref(DTD_MIN)
+const dtdCollapsed = ref(false)
+
+watch(mode, (val) => {
+  if (val === 'custom') dtdCollapsed.value = true
+  else dtdCollapsed.value = false
+})
 
 const modes = [
   { value: 'minimal', label: 'Minimal' },
@@ -210,7 +214,6 @@ async function populate() {
 // ---- Resize logic ----
 let activeResize = null
 let resizeStartX = 0
-let resizeStartY = 0
 let resizeStartVal = 0
 
 function startHResize(e) {
@@ -223,23 +226,10 @@ function startHResize(e) {
   document.body.style.userSelect = 'none'
 }
 
-function startVResize(e) {
-  activeResize = 'v'
-  resizeStartY = e.clientY
-  resizeStartVal = dtdHeight.value
-  document.addEventListener('mousemove', onResizeMove)
-  document.addEventListener('mouseup', stopResize)
-  document.body.style.cursor = 'row-resize'
-  document.body.style.userSelect = 'none'
-}
-
 function onResizeMove(e) {
   if (activeResize === 'h') {
     const delta = e.clientX - resizeStartX
     leftWidth.value = Math.max(LEFT_MIN, Math.min(LEFT_MAX, resizeStartVal + delta))
-  } else if (activeResize === 'v') {
-    const delta = e.clientY - resizeStartY
-    dtdHeight.value = Math.max(DTD_MIN, Math.min(DTD_MAX, resizeStartVal + delta))
   }
 }
 
@@ -255,8 +245,11 @@ function stopResize() {
 <style scoped>
 .generator {
   display: flex;
-  align-items: start;
+  align-items: stretch;
   gap: 0;
+  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .generator-left {
@@ -265,36 +258,42 @@ function stopResize() {
   gap: 0;
   flex-shrink: 0;
   min-width: 440px;
+  height: 100%;
+  overflow-y: scroll;
 }
 
 .dtd-wrapper {
   /* height is controlled inline when Generation panel is present */
 }
 
-.v-divider {
-  height: 8px;
-  cursor: row-resize;
-  position: relative;
-  flex-shrink: 0;
-  margin: 4px 0;
+.dtd-collapse-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 2px 0 8px;
+  user-select: none;
 }
 
-.v-divider::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 2px;
-  transform: translateY(-50%);
-  background: var(--border);
-  border-radius: 2px;
-  transition: background 0.15s;
+.dtd-collapse-header:hover .panel-title {
+  color: var(--text);
 }
 
-.v-divider:hover::after {
-  background: var(--accent);
+.dtd-collapse-header .panel-title {
+  margin-bottom: 0;
+  transition: color 0.15s;
 }
+
+.collapse-arrow {
+  font-size: 11px;
+  color: var(--text-muted);
+  transition: transform 0.2s ease, color 0.15s;
+}
+
+.collapse-arrow.rotated {
+  transform: rotate(-90deg);
+}
+
 
 .col-divider {
   width: 8px;
@@ -324,6 +323,9 @@ function stopResize() {
 .generator-right {
   flex: 1;
   min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .controls {

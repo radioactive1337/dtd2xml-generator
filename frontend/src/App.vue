@@ -11,14 +11,17 @@
       </nav>
     </header>
     <main class="app-main">
-      <router-view />
+      <div class="route-wrapper">
+        <router-view />
+      </div>
     </main>
   </div>
 </template>
 
 <style scoped>
 .app {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -74,6 +77,17 @@
 
 .app-main {
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
   padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.route-wrapper {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 </style>
