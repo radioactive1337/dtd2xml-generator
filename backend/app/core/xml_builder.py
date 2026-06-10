@@ -201,6 +201,15 @@ class XMLBuilder:
         else:
             self._build_content(child_el, child_def.content_model, child_path, new_ancestry)
 
+    def _child_path(self, parent_path: str, child: ContentNode, index: int) -> str:
+        child_name = child.ref if child.kind == "REF" else f"group-{index}"
+        return f"{parent_path}.{child_name}" if parent_path else child_name
+
+    def _is_path_selected(self, path: str) -> bool:
+        if path in self.config.custom_paths:
+            return True
+        return any(p.startswith(path + ".") for p in self.config.custom_paths)
+
     def _should_include_element(
         self,
         ref_name: str,
@@ -216,9 +225,7 @@ class XMLBuilder:
         # custom: required children (no ?/*) always; others if path matches
         if node.quantifier not in ("?", "*"):
             return True
-        if child_path in self.config.custom_paths:
-            return True
-        return any(p.startswith(child_path + ".") or p == child_path for p in self.config.custom_paths)
+        return self._is_path_selected(child_path)
 
     def _select_choice_children(self, node: ContentNode, parent_path: str) -> list[ContentNode]:
         if self.config.mode == "maximal":
@@ -232,18 +239,21 @@ class XMLBuilder:
                     return [child]
             return []
 
-        # custom: include selected branches
+        # custom: only explicitly selected branches; optional choice may stay empty
         selected: list[ContentNode] = []
+        for idx, child in enumerate(node.children):
+            if self._is_path_selected(self._child_path(parent_path, child, idx)):
+                selected.append(child)
+        if selected:
+            return selected
+
+        if node.quantifier in ("?", "*"):
+            return []
+
         for child in node.children:
-            ref_name = child.ref if child.kind == "REF" else ""
-            child_path = f"{parent_path}.{ref_name}" if ref_name and parent_path else ref_name
             if child.quantifier not in ("?", "*"):
-                selected.append(child)
-            elif child_path in self.config.custom_paths or any(
-                p.startswith(child_path + ".") for p in self.config.custom_paths if child_path
-            ):
-                selected.append(child)
-        return selected
+                return [child]
+        return [node.children[0]] if node.children else []
 
 
 def build_xml(schema: DTDSchema, config: BuildConfig) -> BuildResult:

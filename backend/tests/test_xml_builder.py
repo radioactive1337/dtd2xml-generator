@@ -8,6 +8,15 @@ from lxml import etree
 from app.core.dtd_parser import DTDParser
 from app.core.xml_builder import BuildConfig, build_xml
 
+AUX_AUTH_DTD = """
+<!ELEMENT root (aux-auth)>
+<!ELEMENT aux-auth (auth-3ds?, mac-info?, (front-auth-key|front-auth-token)?)>
+<!ELEMENT auth-3ds EMPTY>
+<!ELEMENT mac-info EMPTY>
+<!ELEMENT front-auth-key EMPTY>
+<!ELEMENT front-auth-token EMPTY>
+"""
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
@@ -83,3 +92,35 @@ def test_empty_element(schema):
     root = etree.fromstring(result.xml_text.encode("utf-8"))
     assert root.tag == "Footer"
     assert len(root) == 0
+
+
+@pytest.fixture
+def aux_auth_schema():
+    parser = DTDParser()
+    return parser.parse_string(AUX_AUTH_DTD)
+
+
+def test_custom_optional_choice_not_auto_included(aux_auth_schema):
+    config = BuildConfig(
+        root_element="root",
+        mode="custom",
+        custom_paths={"root.aux-auth"},
+    )
+    result = build_xml(aux_auth_schema, config)
+    aux_auth = etree.fromstring(result.xml_text.encode("utf-8")).find("aux-auth")
+
+    assert aux_auth is not None
+    assert [c.tag for c in aux_auth] == []
+
+
+def test_custom_optional_choice_includes_selected_branch(aux_auth_schema):
+    config = BuildConfig(
+        root_element="root",
+        mode="custom",
+        custom_paths={"root.aux-auth", "root.aux-auth.front-auth-key"},
+    )
+    result = build_xml(aux_auth_schema, config)
+    aux_auth = etree.fromstring(result.xml_text.encode("utf-8")).find("aux-auth")
+
+    assert aux_auth is not None
+    assert [c.tag for c in aux_auth] == ["front-auth-key"]

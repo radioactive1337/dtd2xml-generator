@@ -21,18 +21,20 @@
         key-field="id"
         v-slot="{ item }"
       >
-        <div class="tree-row">
+        <div class="tree-row" :key="item.id">
           <span class="indent" :style="{ width: `${item.depth * 20}px` }" />
           <button v-if="item.hasChildren" class="expand-btn" @click="toggleExpand(item)">
             {{ item.expanded ? '▼' : '▶' }}
           </button>
           <span v-else class="expand-spacer" />
-          <input
+          <button
+            type="button"
             class="tree-checkbox"
-            type="checkbox"
-            :checked="item.checked"
+            :class="{ checked: item.checked, disabled: item.required }"
             :disabled="item.required"
-            @click.prevent="toggleCheck(item.path)"
+            :aria-checked="item.checked"
+            role="checkbox"
+            @click="toggleCheck(item.path)"
           />
           <span class="node-name" :class="{ required: item.required }">{{ item.name }}</span>
           <span v-if="item.quantifier" class="quantifier">{{ item.quantifier }}</span>
@@ -141,6 +143,12 @@ async function buildInitialTree() {
   }
 }
 
+function isChoiceChildRequired(parentKind, childQuantifier) {
+  // Alternatives in a choice are never all required — user picks at most one.
+  if (parentKind === 'CHOICE') return false
+  return isRequiredQuantifier(childQuantifier || '')
+}
+
 function buildNodeFromModel(name, model, path, depth, required) {
   const quantifier = model.quantifier || ''
   const nodeRequired = required || isRequiredQuantifier(quantifier)
@@ -157,6 +165,7 @@ function buildNodeFromModel(name, model, path, depth, required) {
     children: [],
     _refName: null,
     _loaded: false,
+    _isChoiceGroup: model.kind === 'CHOICE',
   }
 
   if (nodeRequired) checkedPaths.value.add(path)
@@ -191,7 +200,7 @@ function buildNodeFromModel(name, model, path, depth, required) {
         child,
         childPath,
         depth + 1,
-        isRequiredQuantifier(child.quantifier || ''),
+        isChoiceChildRequired(model.kind, child.quantifier),
       )
     })
     node._loaded = true
@@ -222,7 +231,7 @@ function buildChildrenFromModel(model, parentPath, depth) {
         child,
         childPath,
         depth,
-        isRequiredQuantifier(child.quantifier || ''),
+        isChoiceChildRequired(model.kind, child.quantifier),
       )
     })
   }
@@ -234,6 +243,16 @@ function findNodeByPath(path, node = treeRoot.value) {
   if (node.path === path) return node
   for (const child of node.children || []) {
     const found = findNodeByPath(path, child)
+    if (found) return found
+  }
+  return null
+}
+
+function findParentNode(path, node = treeRoot.value) {
+  if (!node) return null
+  for (const child of node.children || []) {
+    if (child.path === path) return node
+    const found = findParentNode(path, child)
     if (found) return found
   }
   return null
@@ -252,7 +271,61 @@ function flattenVisible(node = treeRoot.value) {
   return result
 }
 
+function walkTree(node, fn) {
+  if (!node) return
+  fn(node)
+  for (const child of node.children || []) walkTree(child, fn)
+}
+
+function collectDescendantPaths(node) {
+  const paths = []
+  for (const child of node.children || []) {
+    paths.push(child.path)
+    paths.push(...collectDescendantPaths(child))
+  }
+  return paths
+}
+
+function pruneOrphanPaths() {
+  if (!treeRoot.value) return
+  for (const path of [...checkedPaths.value]) {
+    const node = findNodeByPath(path)
+    if (!node || node.required) continue
+    let current = node
+    while (true) {
+      const parent = findParentNode(current.path)
+      if (!parent) break
+      if (!parent.required && !checkedPaths.value.has(parent.path)) {
+        checkedPaths.value.delete(path)
+        break
+      }
+      current = parent
+    }
+  }
+}
+
+function enforceChoiceExclusivity(node = treeRoot.value) {
+  if (!node) return
+  if (node._isChoiceGroup) {
+    const selected = (node.children || []).filter((c) => checkedPaths.value.has(c.path))
+    for (let i = 1; i < selected.length; i++) {
+      checkedPaths.value.delete(selected[i].path)
+    }
+  }
+  for (const child of node.children || []) enforceChoiceExclusivity(child)
+}
+
+function syncCheckedFromPaths(node = treeRoot.value) {
+  if (!node) return
+  pruneOrphanPaths()
+  enforceChoiceExclusivity()
+  walkTree(node, (n) => {
+    n.checked = n.required || checkedPaths.value.has(n.path)
+  })
+}
+
 function refreshFlat() {
+  syncCheckedFromPaths()
   flatNodes.value = flattenVisible()
 }
 
@@ -267,6 +340,7 @@ async function toggleExpand(item) {
       node.children = buildChildrenFromModel(data.content_model, node.path, node.depth + 1)
       node._loaded = true
       node.hasChildren = node.children.length > 0
+      syncCheckedFromPaths()
     } catch {
       node.hasChildren = false
     } finally {
@@ -278,12 +352,43 @@ async function toggleExpand(item) {
   refreshFlat()
 }
 
+function ensureAncestorPaths(path) {
+  let current = findNodeByPath(path)
+  while (current) {
+    const parent = findParentNode(current.path)
+    if (!parent) break
+    if (!parent.required) {
+      checkedPaths.value.add(parent.path)
+    }
+    current = parent
+  }
+}
+
 function toggleCheck(path) {
   const node = findNodeByPath(path)
   if (!node || node.required) return
-  node.checked = !node.checked
-  if (node.checked) checkedPaths.value.add(node.path)
-  else checkedPaths.value.delete(node.path)
+
+  if (checkedPaths.value.has(node.path)) {
+    checkedPaths.value.delete(node.path)
+    for (const childPath of collectDescendantPaths(node)) {
+      checkedPaths.value.delete(childPath)
+    }
+  } else {
+    checkedPaths.value.add(node.path)
+    ensureAncestorPaths(path)
+    const parent = findParentNode(path)
+    if (parent?._isChoiceGroup) {
+      for (const sibling of parent.children) {
+        if (sibling.path !== node.path) {
+          checkedPaths.value.delete(sibling.path)
+          for (const childPath of collectDescendantPaths(sibling)) {
+            checkedPaths.value.delete(childPath)
+          }
+        }
+      }
+    }
+  }
+
   refreshFlat()
   emitPaths()
 }
@@ -336,8 +441,7 @@ async function onLoadPreset() {
 
 function applyCheckedToTree(node) {
   if (!node) return
-  node.checked = node.required || checkedPaths.value.has(node.path)
-  for (const child of node.children || []) applyCheckedToTree(child)
+  syncCheckedFromPaths(node)
 }
 </script>
 
@@ -421,12 +525,38 @@ function applyCheckedToTree(node) {
 
 .tree-checkbox {
   flex-shrink: 0;
-  width: 16px !important;
+  width: 16px;
   height: 16px;
   min-width: 16px;
   margin: 0 6px;
-  padding: 0 !important;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
   cursor: pointer;
+  position: relative;
+}
+
+.tree-checkbox.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.tree-checkbox.checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.tree-checkbox.disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .node-name {
