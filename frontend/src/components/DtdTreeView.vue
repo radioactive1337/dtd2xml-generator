@@ -40,7 +40,13 @@
       </RecycleScroller>
 
       <div v-if="loading || !flatNodes.length" class="scroller-hint">
-        {{ loading ? 'Loading tree...' : 'Select a root element to load the tree.' }}
+        {{
+          loading
+            ? 'Loading tree...'
+            : rootElement
+              ? 'Building tree...'
+              : 'Select a root element or load a preset.'
+        }}
       </div>
     </div>
   </div>
@@ -54,10 +60,10 @@ import { listPresets, savePreset as apiSavePreset, loadPreset as apiLoadPreset }
 
 const props = defineProps({
   schemaId: { type: String, required: true },
-  rootElement: { type: String, required: true },
+  rootElement: { type: String, default: '' },
 })
 
-const emit = defineEmits(['update:paths'])
+const emit = defineEmits(['update:paths', 'update:rootElement'])
 
 const treeRoot = ref(null)
 const flatNodes = ref([])
@@ -66,17 +72,36 @@ const loading = ref(false)
 const presetName = ref('')
 const loadPresetName = ref('')
 const presets = ref([])
+const pendingPresetPaths = ref(null)
 let nodeIdCounter = 0
+
+watch(
+  () => props.schemaId,
+  async (id) => {
+    if (!id) return
+    await refreshPresets()
+  },
+  { immediate: true },
+)
 
 watch(
   () => [props.schemaId, props.rootElement],
   async () => {
-    if (!props.schemaId || !props.rootElement) return
+    if (!props.schemaId || !props.rootElement) {
+      treeRoot.value = null
+      flatNodes.value = []
+      return
+    }
     treeRoot.value = null
     flatNodes.value = []
-    checkedPaths.value = new Set()
+    const preserved = pendingPresetPaths.value
+    pendingPresetPaths.value = null
+    checkedPaths.value = preserved ? new Set(preserved) : new Set()
     await buildInitialTree()
-    await refreshPresets()
+    if (preserved) {
+      applyCheckedToTree(treeRoot.value)
+      refreshFlat()
+    }
   },
   { immediate: true },
 )
@@ -278,14 +303,36 @@ async function savePreset() {
   await refreshPresets()
 }
 
+function inferRootFromPaths(paths) {
+  if (!paths?.length) return ''
+  const tops = paths.filter((p) => !p.includes('.'))
+  if (tops.length) return tops[0]
+  const shortest = paths.reduce((a, b) => (a.length <= b.length ? a : b))
+  return shortest.split('.')[0]
+}
+
 async function onLoadPreset() {
   if (!loadPresetName.value) return
   const preset = await apiLoadPreset(loadPresetName.value)
-  checkedPaths.value = new Set(preset.custom_paths)
-  applyCheckedToTree(treeRoot.value)
-  refreshFlat()
-  emitPaths()
+  const paths = preset.custom_paths || []
+  const root = inferRootFromPaths(paths)
   loadPresetName.value = ''
+
+  if (!paths.length) return
+
+  checkedPaths.value = new Set(paths)
+  emitPaths()
+
+  if (root && root !== props.rootElement) {
+    pendingPresetPaths.value = paths
+    emit('update:rootElement', root)
+    return
+  }
+
+  if (treeRoot.value) {
+    applyCheckedToTree(treeRoot.value)
+    refreshFlat()
+  }
 }
 
 function applyCheckedToTree(node) {

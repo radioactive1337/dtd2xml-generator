@@ -42,10 +42,11 @@
         </div>
 
         <DtdTreeView
-          v-if="mode === 'custom' && rootElement"
+          v-if="mode === 'custom'"
           :schema-id="schemaId"
           :root-element="rootElement"
           @update:paths="customPaths = $event"
+          @update:root-element="rootElement = $event"
         />
 
         <div class="field">
