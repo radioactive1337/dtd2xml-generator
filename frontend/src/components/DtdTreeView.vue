@@ -36,7 +36,11 @@
             role="checkbox"
             @click="toggleCheck(item.path)"
           />
-          <span class="node-name" :class="{ required: item.required }">{{ item.name }}</span>
+          <span
+            class="node-name"
+            :class="{ required: item.required, 'group-expr': item.isGroupLabel }"
+            :title="item.displayName"
+          >{{ item.displayName }}</span>
           <span v-if="item.quantifier" class="quantifier">{{ item.quantifier }}</span>
         </div>
       </RecycleScroller>
@@ -149,6 +153,34 @@ function isChoiceChildRequired(parentKind, childQuantifier) {
   return isRequiredQuantifier(childQuantifier || '')
 }
 
+const GROUP_LABEL_MAX = 72
+
+function formatGroupMemberLabel(child) {
+  if (child.kind === 'REF') {
+    const q = child.quantifier || ''
+    return `${child.ref}${q}`
+  }
+  if (child.kind === 'SEQUENCE' || child.kind === 'CHOICE') {
+    return formatGroupLabel(child)
+  }
+  return child.kind.toLowerCase()
+}
+
+function formatGroupLabel(model) {
+  const joiner = model.kind === 'CHOICE' ? ' | ' : ', '
+  const inner = (model.children || []).map(formatGroupMemberLabel).join(joiner)
+  const label = `(${inner})`
+  if (label.length <= GROUP_LABEL_MAX) return label
+  return `${label.slice(0, GROUP_LABEL_MAX - 1)}…`
+}
+
+function nodeDisplayName(name, model) {
+  if (name.startsWith('group-') && (model.kind === 'SEQUENCE' || model.kind === 'CHOICE')) {
+    return formatGroupLabel(model)
+  }
+  return name
+}
+
 function resolveChildPaths(parentPath, elementPath, parentKind, child, idx) {
   const childName = child.kind === 'REF' ? child.ref : `group-${idx}`
   if (parentKind === 'CHOICE' && child.kind === 'REF') {
@@ -171,6 +203,8 @@ function buildNodeFromModel(name, model, path, depth, required, elementPath = nu
   const node = {
     id: nextId(),
     name,
+    displayName: nodeDisplayName(name, model),
+    isGroupLabel: name.startsWith('group-'),
     path,
     depth,
     quantifier,
@@ -392,6 +426,20 @@ function ensureAncestorPaths(path) {
   }
 }
 
+function findFirstSelectableMember(node) {
+  if (!node) return null
+  if (!node.isGroupLabel) return node
+  if (!node.children?.length) return null
+  return findFirstSelectableMember(node.children[0])
+}
+
+function selectFirstGroupMember(groupNode) {
+  const first = findFirstSelectableMember(groupNode)
+  if (!first || first.required) return
+  checkedPaths.value.add(first.path)
+  ensureAncestorPaths(first.path)
+}
+
 function toggleCheck(path) {
   const node = findNodeByPath(path)
   if (!node || node.required) return
@@ -404,6 +452,9 @@ function toggleCheck(path) {
   } else {
     checkedPaths.value.add(node.path)
     ensureAncestorPaths(path)
+    if (node.isGroupLabel) {
+      selectFirstGroupMember(node)
+    }
     const parent = findParentNode(path)
     if (parent?._isChoiceGroup) {
       for (const sibling of parent.children) {
@@ -597,6 +648,12 @@ function applyCheckedToTree(node) {
 }
 
 .node-name.required { font-weight: 600; }
+
+.node-name.group-expr {
+  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 
 .quantifier {
   color: var(--accent);
