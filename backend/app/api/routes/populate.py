@@ -79,15 +79,30 @@ async def populate_xml(request: PopulateRequest) -> PopulateResponse:
                     status_code=400,
                     detail="sql_mappings cannot be empty for hybrid strategies",
                 )
-            xml = await apply_db_overrides(xml, request.sql_mappings, request.db_alias)
+            try:
+                xml = await apply_db_overrides(xml, request.sql_mappings, request.db_alias)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Database stage failed: {exc}",
+                ) from exc
 
         # ── Stage 2: fallback engine for remaining empty fields ───────────────
-        if request.strategy in ("faker", "hybrid_db_faker"):
-            result = populate_with_faker(xml, schema, locale=request.faker_locale)
-        elif request.strategy in ("ai", "hybrid_db_ai"):
-            result = await populate_with_llm(xml, schema, alias=request.llm_alias)
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown strategy: {request.strategy!r}")
+        try:
+            if request.strategy in ("faker", "hybrid_db_faker"):
+                result = populate_with_faker(xml, schema, locale=request.faker_locale)
+            elif request.strategy in ("ai", "hybrid_db_ai"):
+                result = await populate_with_llm(xml, schema, alias=request.llm_alias)
+            else:
+                raise HTTPException(status_code=400, detail=f"Unknown strategy: {request.strategy!r}")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            stage = "LLM" if request.strategy in ("ai", "hybrid_db_ai") else "Faker"
+            raise HTTPException(
+                status_code=422,
+                detail=f"{stage} stage failed: {exc}",
+            ) from exc
 
     except HTTPException:
         raise

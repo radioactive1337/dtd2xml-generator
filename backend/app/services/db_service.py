@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from app.config import DatabaseConfig, get_db_password, load_connections
 from app.core.dtd_models import DTDSchema
-from app.services.oracle_client import ensure_oracle_thick_mode, oracle_thick_mode_error
+from app.services.oracle_client import ensure_oracle_thick_mode, map_oracle_client_error
 from lxml import etree
 
 
@@ -96,21 +96,21 @@ class DBService:
                 password=password,
                 dsn=_oracle_dsn(cfg),
             )
+            try:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(sql)
+                    if cursor.description is None:
+                        return []
+                    columns = [col[0] for col in cursor.description]
+                    rows = await cursor.fetchall()
+                    return _rows_to_dicts(columns, rows)
+            finally:
+                await conn.close()
         except oracledb.Error as exc:
-            mapped = oracle_thick_mode_error(exc)
+            mapped = map_oracle_client_error(exc)
             if mapped is not None:
                 raise mapped from exc
             raise
-        try:
-            async with conn.cursor() as cursor:
-                await cursor.execute(sql)
-                if cursor.description is None:
-                    return []
-                columns = [col[0] for col in cursor.description]
-                rows = await cursor.fetchall()
-                return _rows_to_dicts(columns, rows)
-        finally:
-            await conn.close()
 
     async def populate_xml(
         self,
