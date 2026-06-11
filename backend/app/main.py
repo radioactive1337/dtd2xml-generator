@@ -3,12 +3,13 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import oracledb
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import dtd, export, generate, populate, presets, validate
-from app.config import PROJECT_ROOT, get_app_settings, get_connection_aliases
+from app.config import PROJECT_ROOT, get_app_settings, get_connection_aliases, get_oracle_env_diagnostics
 from app.services.oracle_client import bootstrap_oracle_client
 
 
@@ -44,6 +45,15 @@ app.include_router(validate.router, prefix="/api")
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/health/oracle")
+async def health_oracle() -> dict:
+    """Local diagnostics for Oracle thick mode configuration."""
+    return {
+        "thin_mode": oracledb.is_thin_mode(),
+        **get_oracle_env_diagnostics(),
+    }
 
 
 @app.get("/api/config/aliases")

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from pathlib import Path
 
 import oracledb
 
-from app.config import get_oracle_thick_mode_settings, has_oracle_databases
+from app.config import get_oracle_client_lib_dir, get_oracle_env_diagnostics, has_oracle_databases
+
+logger = logging.getLogger(__name__)
 
 _init_lock = threading.Lock()
 _client_initialized = False
@@ -80,11 +83,17 @@ def resolve_ora_tzfile(oracle_home: Path, ora_tzfile: str | None) -> str | None:
     )
 
 
-def _apply_oracle_environment(lib_dir: str | None) -> str | None:
-    """Set ORACLE_HOME and ORA_TZFILE before loading the client libraries."""
-    if not lib_dir:
-        return None
+def _missing_client_config_error() -> ValueError:
+    diagnostics = get_oracle_env_diagnostics()
+    return ValueError(
+        "Oracle thick mode is required for Oracle 11g, but the client path is not configured. "
+        "Set ORACLE_CLIENT_LIB_DIR in xml-generator/.env or oracle_client_lib_dir in connections.json. "
+        f"Diagnostics: {diagnostics}"
+    )
 
+
+def _apply_oracle_environment(lib_dir: str) -> str:
+    """Set ORACLE_HOME and ORA_TZFILE before loading the client libraries."""
     resolved_lib_dir = resolve_client_lib_dir(lib_dir)
     oracle_home = derive_oracle_home(resolved_lib_dir)
     os.environ["ORACLE_HOME"] = oracle_home
@@ -103,7 +112,7 @@ def _apply_oracle_environment(lib_dir: str | None) -> str | None:
     return resolved_lib_dir
 
 
-def ensure_oracle_thick_mode() -> None:
+def ensure_oracle_thick_mode(*, required: bool = False) -> None:
     """Enable python-oracledb thick mode when configured.
 
     Required for Oracle Database 11.2 and earlier (thin mode supports 12.1+).
@@ -113,23 +122,27 @@ def ensure_oracle_thick_mode() -> None:
     if not oracledb.is_thin_mode():
         return
 
-    use_thick, lib_dir = get_oracle_thick_mode_settings()
-    if not use_thick:
+    lib_dir = get_oracle_client_lib_dir()
+    if required and not lib_dir:
+        raise _missing_client_config_error()
+    if not lib_dir:
         return
 
     with _init_lock:
         if _client_initialized or not oracledb.is_thin_mode():
             return
 
-        if not lib_dir:
-            raise ValueError(
-                "Oracle thick mode is required but ORACLE_CLIENT_LIB_DIR is not set. "
-                "Add it to .env in the project root (xml-generator/.env) and restart backend."
-            )
-
         resolved_lib_dir = _apply_oracle_environment(lib_dir)
+        logger.info("Initializing Oracle thick mode with lib_dir=%s", resolved_lib_dir)
         oracledb.init_oracle_client(lib_dir=resolved_lib_dir)
         _client_initialized = True
+
+    if oracledb.is_thin_mode():
+        diagnostics = get_oracle_env_diagnostics()
+        raise RuntimeError(
+            "Oracle thick mode failed to initialize and driver is still in thin mode. "
+            f"Diagnostics: {diagnostics}"
+        )
 
 
 def bootstrap_oracle_client() -> None:
@@ -137,41 +150,25 @@ def bootstrap_oracle_client() -> None:
     if not has_oracle_databases():
         return
 
-    use_thick, lib_dir = get_oracle_thick_mode_settings()
-    if not use_thick:
-        raise RuntimeError(
-            "connections.json contains an Oracle database, but thick mode is not configured. "
-            "Set ORACLE_CLIENT_LIB_DIR in xml-generator/.env and restart backend."
-        )
+    lib_dir = get_oracle_client_lib_dir()
+    if not lib_dir:
+        raise RuntimeError(str(_missing_client_config_error()))
 
-    ensure_oracle_thick_mode()
-    if oracledb.is_thin_mode():
-        raise RuntimeError(
-            "Oracle thick mode failed to initialize. "
-            f"ORACLE_CLIENT_LIB_DIR={lib_dir or '(not set)'}. "
-            "Verify the path to oci.dll and fully restart backend (stop uvicorn, start again)."
-        )
+    ensure_oracle_thick_mode(required=True)
+    logger.info("Oracle thick mode ready (thin_mode=%s)", oracledb.is_thin_mode())
 
 
 def map_oracle_client_error(exc: Exception) -> ValueError | None:
     """Return a clearer error for common Oracle client configuration issues."""
     message = str(exc)
+    diagnostics = get_oracle_env_diagnostics()
 
     if "DPY-3010" in message and oracledb.is_thin_mode():
-        use_thick, lib_dir = get_oracle_thick_mode_settings()
-        if use_thick:
-            return ValueError(
-                "Oracle is still running in thin mode even though thick mode is configured. "
-                f"ORACLE_CLIENT_LIB_DIR={lib_dir or '(not set)'}. "
-                "Put .env in the project root (xml-generator/.env), verify the path to oci.dll, "
-                "and fully restart backend (stop uvicorn completely, then start again). "
-                f"Original error: {message}"
-            )
         return ValueError(
-            "Oracle Database 11.2 or earlier requires thick mode. "
-            "Install Oracle Client 19+ and set ORACLE_CLIENT_LIB_DIR in xml-generator/.env, "
-            "then restart backend. "
-            f"Original error: {message}"
+            "Oracle is still running in thin mode, so Oracle 11g cannot be used. "
+            "Configure ORACLE_CLIENT_LIB_DIR in xml-generator/.env or oracle_client_lib_dir "
+            "in connections.json, verify oci.dll exists, and fully restart backend. "
+            f"Diagnostics: {diagnostics}. Original error: {message}"
         )
 
     if "ORA-01804" in message:
@@ -186,7 +183,6 @@ def map_oracle_client_error(exc: Exception) -> ValueError | None:
         return ValueError(
             "Oracle Client cannot load timezone files (ORA-01804). "
             f"ORACLE_HOME={oracle_home or '(not set)'}, ORA_TZFILE={ora_tzfile or '(not set)'}. "
-            "The filename from v$timezone_file must exist on the client machine, not only on the DB server. "
             "Try removing ORA_TZFILE from .env first."
             f"{available_hint} "
             f"Original error: {message}"

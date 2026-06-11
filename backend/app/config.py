@@ -14,8 +14,24 @@ from pydantic import BaseModel, Field
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
-load_dotenv(PROJECT_ROOT / ".env")
-load_dotenv(BACKEND_ROOT / ".env", override=True)
+
+def _load_env_files() -> None:
+    """Load .env from cwd and known project locations."""
+    candidates = [
+        Path.cwd() / ".env",
+        PROJECT_ROOT / ".env",
+        BACKEND_ROOT / ".env",
+    ]
+    loaded: set[Path] = set()
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved in loaded or not path.exists():
+            continue
+        load_dotenv(path, override=True)
+        loaded.add(resolved)
+
+
+_load_env_files()
 
 
 class AppSettings(BaseModel):
@@ -105,16 +121,59 @@ def has_oracle_databases() -> bool:
     )
 
 
+def get_oracle_client_lib_dir() -> str | None:
+    """Return Oracle client library directory from .env, connections.json, or ORACLE_HOME."""
+    lib_dir = os.getenv("ORACLE_CLIENT_LIB_DIR", "").strip()
+    if lib_dir:
+        return lib_dir
+
+    path = _find_connections_file()
+    if path is not None:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        lib_dir = raw.get("oracle_client_lib_dir", "").strip()
+        if lib_dir:
+            return lib_dir
+
+    oracle_home = os.getenv("ORACLE_HOME", "").strip()
+    if oracle_home:
+        bin_dir = Path(oracle_home) / "bin"
+        if (bin_dir / "oci.dll").is_file():
+            return str(bin_dir)
+
+    return None
+
+
+def get_oracle_env_diagnostics() -> dict[str, Any]:
+    """Return Oracle config diagnostics safe to expose locally."""
+    connections_path = _find_connections_file()
+    lib_dir = get_oracle_client_lib_dir()
+    oci_dll = Path(lib_dir) / "oci.dll" if lib_dir else None
+    return {
+        "project_root": str(PROJECT_ROOT),
+        "cwd": str(Path.cwd()),
+        "env_files_checked": [
+            str((Path.cwd() / ".env").resolve()),
+            str((PROJECT_ROOT / ".env").resolve()),
+            str((BACKEND_ROOT / ".env").resolve()),
+        ],
+        "connections_file": str(connections_path) if connections_path else None,
+        "has_oracle_database": has_oracle_databases(),
+        "oracle_use_thick_mode": os.getenv("ORACLE_USE_THICK_MODE", ""),
+        "oracle_client_lib_dir": lib_dir,
+        "oracle_home": os.getenv("ORACLE_HOME", ""),
+        "ora_tzfile": os.getenv("ORA_TZFILE", ""),
+        "oci_dll_exists": oci_dll.is_file() if oci_dll else False,
+    }
+
+
 def get_oracle_thick_mode_settings() -> tuple[bool, str | None]:
     """Return whether to use Oracle thick mode and the Instant Client library path."""
-    lib_dir = os.getenv("ORACLE_CLIENT_LIB_DIR", "").strip() or None
+    lib_dir = get_oracle_client_lib_dir()
     use_thick = os.getenv("ORACLE_USE_THICK_MODE", "").lower() in {"1", "true", "yes"}
 
     path = _find_connections_file()
     if path is not None:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        if not lib_dir:
-            lib_dir = raw.get("oracle_client_lib_dir", "").strip() or None
         use_thick = use_thick or bool(raw.get("oracle_thick_mode", False))
 
     if lib_dir:

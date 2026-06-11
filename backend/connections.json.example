@@ -1,6 +1,6 @@
 {
   "oracle_thick_mode": true,
-  "oracle_client_lib_dir": "C:\\oracle\\instantclient_19_22",
+  "oracle_client_lib_dir": "C:\\Oracle\\client19_64\\bin",
   "databases": {
     "PGSQL_DB": {
       "driver": "postgresql",

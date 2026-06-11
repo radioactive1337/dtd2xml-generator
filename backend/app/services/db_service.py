@@ -89,7 +89,7 @@ class DBService:
         password: str,
         sql: str,
     ) -> list[dict[str, Any]]:
-        ensure_oracle_thick_mode()
+        ensure_oracle_thick_mode(required=True)
         try:
             conn = await oracledb.connect_async(
                 user=cfg.user,
