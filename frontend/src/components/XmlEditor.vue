@@ -22,6 +22,7 @@ import loader from '@monaco-editor/loader'
 const props = defineProps({
   modelValue: { type: String, default: '' },
   filename: { type: String, default: 'generated.xml' },
+  validationErrors: { type: Array, default: () => [] },
 })
 
 const editorContainer = ref(null)
@@ -57,6 +58,29 @@ watch(
       editor.setValue(val || '')
     }
   },
+)
+
+watch(
+  () => props.validationErrors,
+  (errors) => {
+    if (!editor || !monaco) return
+    const model = editor.getModel()
+    if (!model) return
+
+    const markers = errors
+      .filter((err) => err.line > 0)
+      .map((err) => ({
+        severity: monaco.MarkerSeverity.Error,
+        startLineNumber: err.line,
+        startColumn: err.column || 1,
+        endLineNumber: err.line,
+        endColumn: (err.column || 1) + 1,
+        message: err.message,
+      }))
+
+    monaco.editor.setModelMarkers(model, 'dtd-validation', markers)
+  },
+  { deep: true },
 )
 
 onBeforeUnmount(() => {

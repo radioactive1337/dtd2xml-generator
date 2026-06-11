@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import dtd, export, generate, populate, presets
+from app.api.routes import dtd, export, generate, populate, presets, validate
 from app.config import PROJECT_ROOT, get_app_settings, get_connection_aliases
 
 app = FastAPI(
@@ -28,6 +28,7 @@ app.include_router(generate.router, prefix="/api")
 app.include_router(populate.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 app.include_router(presets.router, prefix="/api")
+app.include_router(validate.router, prefix="/api")
 
 
 @app.get("/api/health")

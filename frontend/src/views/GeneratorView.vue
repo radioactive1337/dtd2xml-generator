@@ -79,9 +79,18 @@
           <button class="btn-secondary" :disabled="!xmlText || populating" @click="populate">
             {{ populating ? 'Populating...' : 'Populate Data' }}
           </button>
+          <button class="btn-secondary" :disabled="!canValidate || validating" @click="validate">
+            {{ validating ? 'Validating...' : 'Validate DTD' }}
+          </button>
         </div>
 
         <p v-if="error" class="error-msg">{{ error }}</p>
+        <p v-if="validationResult?.valid" class="validation-msg valid">XML is valid against DTD</p>
+        <ul v-else-if="validationResult?.errors?.length" class="validation-errors">
+          <li v-for="(err, i) in validationResult.errors" :key="i">
+            <span v-if="err.line">Line {{ err.line }}, col {{ err.column }}: </span>{{ err.message }}
+          </li>
+        </ul>
         <p v-if="buildInfo" class="build-info">
           {{ buildInfo.node_count }} nodes
           <span v-if="buildInfo.warnings?.length"> · {{ buildInfo.warnings.length }} warnings</span>
@@ -92,7 +101,11 @@
     <div class="col-divider" @mousedown.prevent="startHResize" title="Drag to resize" />
 
     <div class="generator-right">
-      <XmlEditor v-model="xmlText" :filename="`${rootElement || 'generated'}.xml`" />
+      <XmlEditor
+        v-model="xmlText"
+        :filename="`${rootElement || 'generated'}.xml`"
+        :validation-errors="validationResult?.valid === false ? validationResult.errors : []"
+      />
     </div>
   </div>
 </template>
@@ -104,6 +117,7 @@ import DtdTreeView from '../components/DtdTreeView.vue'
 import XmlEditor from '../components/XmlEditor.vue'
 import { generateXml } from '../api/generate'
 import { populateXml } from '../api/populate'
+import { validateXml } from '../api/validate'
 import { getConfigAliases } from '../api/dtd'
 
 const schemaId = ref('')
@@ -121,6 +135,8 @@ const xmlText = ref('')
 const buildInfo = ref(null)
 const generating = ref(false)
 const populating = ref(false)
+const validating = ref(false)
+const validationResult = ref(null)
 const error = ref('')
 
 const LEFT_MIN = 440
@@ -155,6 +171,7 @@ const filteredElements = computed(() => {
 })
 
 const canGenerate = computed(() => schemaId.value && rootElement.value)
+const canValidate = computed(() => schemaId.value && xmlText.value)
 
 onMounted(async () => {
   try {
@@ -175,6 +192,7 @@ function onDtdUploaded(result) {
   rootElement.value = result.elements[0] || ''
   xmlText.value = ''
   buildInfo.value = null
+  validationResult.value = null
   error.value = ''
 }
 
@@ -192,6 +210,7 @@ async function generate() {
     const result = await generateXml(config)
     xmlText.value = result.xml_text
     buildInfo.value = result
+    validationResult.value = null
   } catch (e) {
     error.value = e.message
   } finally {
@@ -214,10 +233,24 @@ async function populate() {
     }
     const result = await populateXml(request)
     xmlText.value = result.xml_text
+    validationResult.value = null
   } catch (e) {
     error.value = e.message
   } finally {
     populating.value = false
+  }
+}
+
+async function validate() {
+  validating.value = true
+  error.value = ''
+  try {
+    validationResult.value = await validateXml(schemaId.value, xmlText.value)
+  } catch (e) {
+    error.value = e.message
+    validationResult.value = null
+  } finally {
+    validating.value = false
   }
 }
 
@@ -381,6 +414,22 @@ function stopResize() {
 .build-info {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.validation-msg.valid {
+  font-size: 13px;
+  color: var(--success);
+}
+
+.validation-errors {
+  font-size: 12px;
+  color: var(--danger);
+  margin-top: 4px;
+  padding-left: 18px;
+}
+
+.validation-errors li {
+  margin-bottom: 4px;
 }
 
 @media (max-width: 900px) {
