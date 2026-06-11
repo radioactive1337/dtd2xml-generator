@@ -10,6 +10,7 @@ from faker import Faker
 from lxml import etree
 
 from app.core.dtd_models import AttributeDef, DTDSchema, ElementDef
+from app.core.xml_tree import ProtectedAttrs, element_path
 
 _DEFAULT_LOCALE = "ru_RU"
 
@@ -26,9 +27,15 @@ class FakerService:
         schema: DTDSchema,
         *,
         fill_empty_only: bool = False,
+        protected_attrs: ProtectedAttrs = frozenset(),
     ) -> str:
         root = etree.fromstring(xml_text.encode("utf-8"))
-        self._populate_element(root, schema, fill_empty_only=fill_empty_only)
+        self._populate_element(
+            root,
+            schema,
+            fill_empty_only=fill_empty_only,
+            protected_attrs=protected_attrs,
+        )
         return etree.tostring(
             root,
             pretty_print=True,
@@ -42,15 +49,29 @@ class FakerService:
         schema: DTDSchema,
         *,
         fill_empty_only: bool = False,
+        protected_attrs: ProtectedAttrs = frozenset(),
     ) -> None:
         elem_def = schema.elements.get(el.tag)
         if elem_def is None:
             for child in el:
-                self._populate_element(child, schema, fill_empty_only=fill_empty_only)
+                self._populate_element(
+                    child,
+                    schema,
+                    fill_empty_only=fill_empty_only,
+                    protected_attrs=protected_attrs,
+                )
             return
 
+        path = element_path(el)
         for attr_name, attr_value in list(el.attrib.items()):
-            if fill_empty_only and attr_value.strip():
+            if (path, attr_name) in protected_attrs:
+                continue
+            should_fill = (
+                not fill_empty_only
+                or not attr_value.strip()
+                or bool(protected_attrs)
+            )
+            if not should_fill:
                 continue
             attr_def = elem_def.attributes.get(attr_name)
             el.set(attr_name, self.generate_attribute_value(attr_name, attr_def))
@@ -59,7 +80,12 @@ class FakerService:
             el.text = self.generate_text_value(el.tag, elem_def)
 
         for child in el:
-            self._populate_element(child, schema, fill_empty_only=fill_empty_only)
+            self._populate_element(
+                child,
+                schema,
+                fill_empty_only=fill_empty_only,
+                protected_attrs=protected_attrs,
+            )
 
     def generate_attribute_value(
         self,
@@ -114,10 +140,12 @@ def populate_with_faker(
     locale: str = _DEFAULT_LOCALE,
     *,
     fill_empty_only: bool = False,
+    protected_attrs: ProtectedAttrs = frozenset(),
 ) -> str:
     """Populate an XML document using Smart Faker."""
     return FakerService(locale=locale).populate_xml(
         xml_text,
         schema,
         fill_empty_only=fill_empty_only,
+        protected_attrs=protected_attrs,
     )

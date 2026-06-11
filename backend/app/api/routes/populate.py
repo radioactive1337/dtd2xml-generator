@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.routes.dtd import get_schema_registry
+from app.core.xml_tree import ProtectedAttrs
 from app.services.db_service import SqlMapping, apply_db_overrides
 from app.services.faker_service import populate_with_faker
 from app.services.llm_service import populate_with_llm
@@ -66,6 +67,7 @@ async def populate_xml(request: PopulateRequest) -> PopulateResponse:
 
     try:
         xml = request.xml_text
+        protected_attrs: ProtectedAttrs = frozenset()
 
         # ── Stage 1: DB overrides (hybrid strategies only) ───────────────────
         if request.strategy in _HYBRID:
@@ -80,7 +82,11 @@ async def populate_xml(request: PopulateRequest) -> PopulateResponse:
                     detail="sql_mappings cannot be empty for hybrid strategies",
                 )
             try:
-                xml = await apply_db_overrides(xml, request.sql_mappings, request.db_alias)
+                xml, protected_attrs = await apply_db_overrides(
+                    xml,
+                    request.sql_mappings,
+                    request.db_alias,
+                )
             except Exception as exc:
                 raise HTTPException(
                     status_code=422,
@@ -96,6 +102,7 @@ async def populate_xml(request: PopulateRequest) -> PopulateResponse:
                     schema,
                     locale=request.faker_locale,
                     fill_empty_only=fill_empty_only,
+                    protected_attrs=protected_attrs,
                 )
             elif request.strategy in ("ai", "hybrid_db_ai"):
                 result = await populate_with_llm(
@@ -103,6 +110,14 @@ async def populate_xml(request: PopulateRequest) -> PopulateResponse:
                     schema,
                     alias=request.llm_alias,
                     fill_empty_only=fill_empty_only,
+                    protected_attrs=protected_attrs,
+                )
+                result = populate_with_faker(
+                    result,
+                    schema,
+                    locale=request.faker_locale,
+                    fill_empty_only=True,
+                    protected_attrs=protected_attrs,
                 )
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown strategy: {request.strategy!r}")

@@ -10,6 +10,7 @@ from lxml import etree
 
 from app.config import get_llm_api_key, load_connections
 from app.core.dtd_models import DTDSchema
+from app.core.xml_tree import ProtectedAttrs, element_path
 
 _SYSTEM_PROMPT = (
     "You are a test data generator for QA automation. "
@@ -20,9 +21,10 @@ _SYSTEM_PROMPT = (
 
 _HYBRID_SYSTEM_PROMPT = (
     "You are a test data generator for QA automation. "
-    "Fill ONLY empty attribute values and empty text nodes in the provided XML. "
+    "Fill attribute values and text nodes that are empty or contain placeholder values "
+    "(e.g. id-1, empty strings). "
+    "Do NOT change attributes that already contain real database values. "
     "Do NOT add, remove, or rename any elements or attributes. "
-    "Do NOT change attributes or text that already contain values. "
     "Preserve the exact XML structure, element order, and nesting. "
     "Return only valid XML without markdown fences or explanations."
 )
@@ -53,6 +55,7 @@ class LLMService:
         schema: DTDSchema,
         *,
         fill_empty_only: bool = False,
+        protected_attrs: ProtectedAttrs = frozenset(),
     ) -> str:
         if not self.base_url:
             raise ValueError("LLM base URL is not configured in connections.json or .env")
@@ -60,8 +63,9 @@ class LLMService:
         metadata = self._extract_metadata(schema, xml_text)
         if fill_empty_only:
             user_message = (
-                "Fill ONLY the empty attribute values and empty text nodes. "
-                "Leave every existing non-empty value unchanged. "
+                "Fill attribute values and text nodes that are empty or still contain "
+                "builder placeholders (e.g. id-1). "
+                "Leave database-filled values unchanged. "
                 "Do not add or remove any elements.\n\n"
                 f"Schema metadata (JavaDoc-style comments):\n{metadata}\n\n"
                 f"XML skeleton:\n{xml_text}"
@@ -97,7 +101,7 @@ class LLMService:
         content = data["choices"][0]["message"]["content"]
         llm_xml = self._extract_xml(content)
         if fill_empty_only:
-            return merge_fill_empty_only(xml_text, llm_xml)
+            return merge_fill_empty_only(xml_text, llm_xml, protected_attrs=protected_attrs)
         return llm_xml
 
     def _extract_metadata(self, schema: DTDSchema, xml_text: str) -> str:
@@ -125,36 +129,32 @@ class LLMService:
         raise ValueError("LLM response did not contain valid XML")
 
 
-def _element_path(el: etree._Element) -> tuple[tuple[str, int], ...]:
-    """Indexed path from root to *el* (tag, sibling-index among same-tag children)."""
-    parts: list[tuple[str, int]] = []
-    current: etree._Element | None = el
-    while current is not None and current.getparent() is not None:
-        parent = current.getparent()
-        assert parent is not None
-        siblings = [child for child in parent if child.tag == current.tag]
-        parts.append((current.tag, siblings.index(current)))
-        current = parent
-    parts.reverse()
-    return tuple(parts)
-
-
 def _build_path_map(root: etree._Element) -> dict[tuple[tuple[str, int], ...], etree._Element]:
-    return {_element_path(el): el for el in root.iter()}
+    return {element_path(el): el for el in root.iter()}
 
 
-def merge_fill_empty_only(original_xml: str, filled_xml: str) -> str:
-    """Keep the original tree; copy values from *filled_xml* only into empty slots."""
+def merge_fill_empty_only(
+    original_xml: str,
+    filled_xml: str,
+    *,
+    protected_attrs: ProtectedAttrs = frozenset(),
+) -> str:
+    """Keep the original tree; copy values from *filled_xml* for non-DB attributes."""
     original_root = etree.fromstring(original_xml.encode("utf-8"))
     filled_root = etree.fromstring(filled_xml.encode("utf-8"))
     filled_by_path = _build_path_map(filled_root)
 
     for el in original_root.iter():
-        filled_el = filled_by_path.get(_element_path(el))
+        path = element_path(el)
+        filled_el = filled_by_path.get(path)
         if filled_el is None:
             continue
-        for attr_name, attr_value in list(el.attrib.items()):
-            if attr_value.strip():
+        for attr_name in set(el.attrib) | set(filled_el.attrib):
+            if (path, attr_name) in protected_attrs:
+                continue
+            original_value = el.attrib.get(attr_name, "")
+            should_fill = not original_value.strip() or bool(protected_attrs)
+            if not should_fill:
                 continue
             filled_value = filled_el.attrib.get(attr_name)
             if filled_value is not None and filled_value.strip():
@@ -176,10 +176,12 @@ async def populate_with_llm(
     alias: str = "default",
     *,
     fill_empty_only: bool = False,
+    protected_attrs: ProtectedAttrs = frozenset(),
 ) -> str:
     """Populate XML using the configured LLM service."""
     return await LLMService(alias=alias).populate_xml(
         xml_text,
         schema,
         fill_empty_only=fill_empty_only,
+        protected_attrs=protected_attrs,
     )

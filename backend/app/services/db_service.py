@@ -14,6 +14,8 @@ from app.core.dtd_models import DTDSchema
 from app.services.oracle_client import ensure_oracle_thick_mode, map_oracle_client_error
 from lxml import etree
 
+from app.core.xml_tree import ProtectedAttrs, element_path
+
 
 class SqlMapping(BaseModel):
     """Declarative mapping from a SQL query result to XML element attributes."""
@@ -198,15 +200,16 @@ class DBService:
         xml_text: str,
         sql_mappings: list[SqlMapping],
         db_alias: str,
-    ) -> str:
+    ) -> tuple[str, ProtectedAttrs]:
         """Stage-1 pipeline: inject DB values into specific elements by tag name.
 
         For every mapping, the first row of the SQL result is fetched once and its
         columns are written to the declared XML attributes of every matching element
-        in the tree.  Values already set by this stage are intentionally left alone
-        by the Stage-2 faker/LLM fallback.
+        in the tree.  Returns the updated XML and the set of DB-filled attribute
+        slots that Stage 2 must preserve.
         """
         root = etree.fromstring(xml_text.encode("utf-8"))
+        protected: set[tuple[tuple[str, int], ...], str] = set()
 
         for mapping in sql_mappings:
             if not mapping.query.strip() or not mapping.target_element:
@@ -230,13 +233,15 @@ class DBService:
                     attr_name = xml_attr.lstrip("@")
                     if attr_name:
                         el.set(attr_name, value)
+                        protected.add((element_path(el), attr_name))
 
-        return etree.tostring(
+        xml_out = etree.tostring(
             root,
             pretty_print=True,
             encoding="UTF-8",
             xml_declaration=False,
         ).decode("UTF-8")
+        return xml_out, frozenset(protected)
 
 
 async def populate_with_db(
@@ -253,6 +258,6 @@ async def apply_db_overrides(
     xml_text: str,
     sql_mappings: list[SqlMapping],
     db_alias: str,
-) -> str:
+) -> tuple[str, ProtectedAttrs]:
     """Stage-1 of the hybrid pipeline: targeted DB injections before faker/LLM fallback."""
     return await DBService().apply_overrides(xml_text, sql_mappings, db_alias)
