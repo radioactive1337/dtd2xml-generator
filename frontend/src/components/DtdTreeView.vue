@@ -367,6 +367,14 @@ function collectDescendantPaths(node) {
   return paths
 }
 
+function skipGroupLabelParent(node) {
+  let parent = findParentNode(node.path)
+  while (parent?.isGroupLabel) {
+    parent = findParentNode(parent.path)
+  }
+  return parent
+}
+
 function pruneOrphanPaths() {
   if (!treeRoot.value) return
   for (const path of [...checkedPaths.value]) {
@@ -374,7 +382,7 @@ function pruneOrphanPaths() {
     if (!node || node.required) continue
     let current = node
     while (true) {
-      const parent = findParentNode(current.path)
+      const parent = skipGroupLabelParent(current)
       if (!parent) break
       if (!parent.required && !checkedPaths.value.has(parent.path)) {
         checkedPaths.value.delete(path)
@@ -595,12 +603,15 @@ async function applyElementPathsToTree(elementPaths) {
   })
 
   walkTree(treeRoot.value, (node) => {
+    if (node.isGroupLabel) return
+
     const elPath = normalizeTreePath(node.path)
     if (!elPathSet.has(elPath)) return
     nextChecked.add(node.path)
+
     let current = node
     while (current) {
-      const parent = findParentNode(current.path)
+      const parent = skipGroupLabelParent(current)
       if (!parent) break
       if (!parent.required) nextChecked.add(parent.path)
       current = parent
