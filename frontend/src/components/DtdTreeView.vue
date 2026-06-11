@@ -63,6 +63,7 @@ import { ref, watch } from 'vue'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { getElementTree } from '../api/dtd'
 import { listPresets, savePreset as apiSavePreset, loadPreset as apiLoadPreset } from '../api/presets'
+import { inferRootFromElementPaths, normalizeTreePath } from '../utils/xmlPaths'
 
 const props = defineProps({
   schemaId: { type: String, required: true },
@@ -79,6 +80,7 @@ const presetName = ref('')
 const loadPresetName = ref('')
 const presets = ref([])
 const pendingPresetPaths = ref(null)
+const pendingXmlPaths = ref(null)
 const applyingPresetRoot = ref(false)
 let nodeIdCounter = 0
 
@@ -111,11 +113,17 @@ watch(
     }
     treeRoot.value = null
     flatNodes.value = []
-    const preserved = pendingPresetPaths.value
+    const preservedPreset = pendingPresetPaths.value
+    const preservedXml = pendingXmlPaths.value
     pendingPresetPaths.value = null
-    checkedPaths.value = preserved ? new Set(preserved) : new Set()
+    pendingXmlPaths.value = null
+    checkedPaths.value = preservedPreset ? new Set(preservedPreset) : new Set()
     await buildInitialTree()
-    if (preserved) {
+    const xmlPaths = preservedXml ?? pendingXmlPaths.value
+    pendingXmlPaths.value = null
+    if (xmlPaths) {
+      await applyElementPathsToTree(xmlPaths)
+    } else if (preservedPreset) {
       applyCheckedToTree(treeRoot.value)
       refreshFlat()
     }
@@ -534,6 +542,98 @@ function applyCheckedToTree(node) {
   if (!node) return
   syncCheckedFromPaths(node)
 }
+
+function expandAncestorsOfChecked() {
+  for (const path of checkedPaths.value) {
+    let node = findNodeByPath(path)
+    while (node) {
+      node.expanded = true
+      node = findParentNode(node.path)
+    }
+  }
+}
+
+async function ensureTreeLoadedForElementPaths(elementPaths) {
+  if (!treeRoot.value) return
+  const pathSet = new Set(elementPaths)
+
+  function subtreeNeeded(node) {
+    const elPath = normalizeTreePath(node.path)
+    return [...pathSet].some((p) => p === elPath || p.startsWith(`${elPath}.`))
+  }
+
+  async function walkLoad(node) {
+    if (subtreeNeeded(node) && node._refName && !node._loaded) {
+      loading.value = true
+      try {
+        const data = await getElementTree(props.schemaId, node._refName)
+        node.children = buildChildrenFromModel(data.content_model, node.path, node.depth + 1)
+        node._loaded = true
+        node.hasChildren = node.children.length > 0
+        node.expanded = true
+      } finally {
+        loading.value = false
+      }
+    }
+    for (const child of node.children || []) {
+      await walkLoad(child)
+    }
+  }
+
+  await walkLoad(treeRoot.value)
+}
+
+async function applyElementPathsToTree(elementPaths) {
+  if (!treeRoot.value || !elementPaths?.length) return
+
+  const elPathSet = new Set(elementPaths)
+  await ensureTreeLoadedForElementPaths(elementPaths)
+
+  const nextChecked = new Set()
+  walkTree(treeRoot.value, (node) => {
+    if (node.required) nextChecked.add(node.path)
+  })
+
+  walkTree(treeRoot.value, (node) => {
+    const elPath = normalizeTreePath(node.path)
+    if (!elPathSet.has(elPath)) return
+    nextChecked.add(node.path)
+    let current = node
+    while (current) {
+      const parent = findParentNode(current.path)
+      if (!parent) break
+      if (!parent.required) nextChecked.add(parent.path)
+      current = parent
+    }
+  })
+
+  checkedPaths.value = nextChecked
+  enforceChoiceExclusivity()
+  pruneOrphanPaths()
+  expandAncestorsOfChecked()
+  refreshFlat()
+  emitPaths()
+}
+
+async function applyXmlElementPaths(elementPaths) {
+  if (!props.schemaId || !elementPaths?.length) return
+
+  const root = inferRootFromElementPaths(elementPaths)
+  if (root && root !== props.rootElement) {
+    pendingXmlPaths.value = elementPaths
+    applyingPresetRoot.value = true
+    emit('update:rootElement', root)
+    return
+  }
+
+  pendingXmlPaths.value = elementPaths
+  if (!treeRoot.value) return
+
+  await applyElementPathsToTree(elementPaths)
+  pendingXmlPaths.value = null
+}
+
+defineExpose({ applyXmlElementPaths })
 </script>
 
 <style scoped>

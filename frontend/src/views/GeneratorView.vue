@@ -43,6 +43,7 @@
 
         <DtdTreeView
           v-if="mode === 'custom'"
+          ref="dtdTreeRef"
           :schema-id="schemaId"
           :root-element="rootElement"
           @update:paths="customPaths = $event"
@@ -84,6 +85,7 @@
           </button>
         </div>
 
+        <p v-if="xmlSyncHint" class="error-msg">{{ xmlSyncHint }}</p>
         <p v-if="error" class="error-msg">{{ error }}</p>
         <p v-if="validationResult?.valid" class="validation-msg valid">XML is valid against DTD</p>
         <ul v-else-if="validationResult?.errors?.length" class="validation-errors">
@@ -111,7 +113,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import DtdUpload from '../components/DtdUpload.vue'
 import DtdTreeView from '../components/DtdTreeView.vue'
 import XmlEditor from '../components/XmlEditor.vue'
@@ -119,6 +121,7 @@ import { generateXml } from '../api/generate'
 import { populateXml } from '../api/populate'
 import { validateXml } from '../api/validate'
 import { getConfigAliases } from '../api/dtd'
+import { extractXmlElementPaths } from '../utils/xmlPaths'
 
 const schemaId = ref('')
 const elements = ref([])
@@ -138,6 +141,11 @@ const populating = ref(false)
 const validating = ref(false)
 const validationResult = ref(null)
 const error = ref('')
+const xmlSyncHint = ref('')
+const dtdTreeRef = ref(null)
+
+let skipXmlSync = false
+let xmlSyncTimer = null
 
 const LEFT_MIN = 440
 const LEFT_MAX = 700
@@ -148,6 +156,19 @@ const dtdCollapsed = ref(false)
 watch(mode, (val) => {
   if (val === 'custom') dtdCollapsed.value = true
   else dtdCollapsed.value = false
+})
+
+watch(xmlText, (text) => {
+  if (skipXmlSync) {
+    skipXmlSync = false
+    return
+  }
+  if (!schemaId.value) return
+
+  clearTimeout(xmlSyncTimer)
+  xmlSyncTimer = setTimeout(() => {
+    syncFromPastedXml(text)
+  }, 400)
 })
 
 const modes = [
@@ -183,6 +204,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  clearTimeout(xmlSyncTimer)
   stopResize()
 })
 
@@ -190,10 +212,40 @@ function onDtdUploaded(result) {
   schemaId.value = result.schema_id
   elements.value = result.elements
   rootElement.value = result.elements[0] || ''
+  skipXmlSync = true
   xmlText.value = ''
   buildInfo.value = null
   validationResult.value = null
   error.value = ''
+  xmlSyncHint.value = ''
+}
+
+async function syncFromPastedXml(text) {
+  const trimmed = text?.trim()
+  if (!trimmed) {
+    xmlSyncHint.value = ''
+    return
+  }
+
+  const parsed = extractXmlElementPaths(trimmed)
+  if (!parsed) return
+
+  const { rootTag, elementPaths } = parsed
+
+  if (!rootTag) {
+    xmlSyncHint.value = 'XML has no root element — select a root element manually.'
+    return
+  }
+
+  if (!elements.value.includes(rootTag)) {
+    xmlSyncHint.value = `Root element "${rootTag}" is not defined in the DTD schema.`
+    return
+  }
+
+  xmlSyncHint.value = ''
+  mode.value = 'custom'
+  await nextTick()
+  dtdTreeRef.value?.applyXmlElementPaths(elementPaths)
 }
 
 async function generate() {
@@ -208,6 +260,7 @@ async function generate() {
       custom_paths: mode.value === 'custom' ? customPaths.value : [],
     }
     const result = await generateXml(config)
+    skipXmlSync = true
     xmlText.value = result.xml_text
     buildInfo.value = result
     validationResult.value = null
@@ -232,6 +285,7 @@ async function populate() {
       request.sql = sqlQuery.value
     }
     const result = await populateXml(request)
+    skipXmlSync = true
     xmlText.value = result.xml_text
     validationResult.value = null
   } catch (e) {
