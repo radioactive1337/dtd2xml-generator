@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -8,11 +9,20 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import dtd, export, generate, populate, presets, validate
 from app.config import PROJECT_ROOT, get_app_settings, get_connection_aliases
+from app.services.oracle_client import bootstrap_oracle_client
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    bootstrap_oracle_client()
+    yield
+
 
 app = FastAPI(
     title="QA XML Generator",
     description="Local QA tool for generating XML from DTD schemas",
     version="0.2.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

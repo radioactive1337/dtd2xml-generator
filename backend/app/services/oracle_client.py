@@ -8,7 +8,7 @@ from pathlib import Path
 
 import oracledb
 
-from app.config import get_oracle_thick_mode_settings
+from app.config import get_oracle_thick_mode_settings, has_oracle_databases
 
 _init_lock = threading.Lock()
 _client_initialized = False
@@ -20,6 +20,19 @@ def derive_oracle_home(lib_dir: str) -> str:
     if path.name.lower() == "bin":
         return str(path.parent)
     return str(path)
+
+
+def resolve_client_lib_dir(lib_dir: str) -> str:
+    """Return the directory that actually contains oci.dll."""
+    path = Path(lib_dir)
+    if (path / "oci.dll").is_file():
+        return str(path)
+    if path.name.lower() != "bin" and (path / "bin" / "oci.dll").is_file():
+        return str(path / "bin")
+    raise ValueError(
+        f"oci.dll was not found under ORACLE_CLIENT_LIB_DIR: {lib_dir}. "
+        "Point it to the folder that contains oci.dll, usually ...\\client_1\\bin."
+    )
 
 
 def zoneinfo_dir(oracle_home: Path) -> Path:
@@ -67,22 +80,14 @@ def resolve_ora_tzfile(oracle_home: Path, ora_tzfile: str | None) -> str | None:
     )
 
 
-def _apply_oracle_environment(lib_dir: str | None) -> None:
+def _apply_oracle_environment(lib_dir: str | None) -> str | None:
     """Set ORACLE_HOME and ORA_TZFILE before loading the client libraries."""
-    if lib_dir:
-        lib_path = Path(lib_dir)
-        if not lib_path.is_dir():
-            raise ValueError(f"ORACLE_CLIENT_LIB_DIR does not exist: {lib_dir}")
-        if not (lib_path / "oci.dll").is_file() and lib_path.name.lower() == "bin":
-            raise ValueError(f"oci.dll was not found in ORACLE_CLIENT_LIB_DIR: {lib_dir}")
+    if not lib_dir:
+        return None
 
-        oracle_home = derive_oracle_home(lib_dir)
-        os.environ["ORACLE_HOME"] = oracle_home
-    else:
-        oracle_home = os.getenv("ORACLE_HOME", "").strip()
-
-    if not oracle_home:
-        return
+    resolved_lib_dir = resolve_client_lib_dir(lib_dir)
+    oracle_home = derive_oracle_home(resolved_lib_dir)
+    os.environ["ORACLE_HOME"] = oracle_home
 
     oracle_home_path = Path(oracle_home)
     if not oracle_home_path.is_dir():
@@ -94,6 +99,8 @@ def _apply_oracle_environment(lib_dir: str | None) -> None:
         os.environ["ORA_TZFILE"] = resolved_tzfile
     else:
         os.environ.pop("ORA_TZFILE", None)
+
+    return resolved_lib_dir
 
 
 def ensure_oracle_thick_mode() -> None:
@@ -113,12 +120,37 @@ def ensure_oracle_thick_mode() -> None:
     with _init_lock:
         if _client_initialized or not oracledb.is_thin_mode():
             return
-        _apply_oracle_environment(lib_dir)
-        if lib_dir:
-            oracledb.init_oracle_client(lib_dir=lib_dir)
-        else:
-            oracledb.init_oracle_client()
+
+        if not lib_dir:
+            raise ValueError(
+                "Oracle thick mode is required but ORACLE_CLIENT_LIB_DIR is not set. "
+                "Add it to .env in the project root (xml-generator/.env) and restart backend."
+            )
+
+        resolved_lib_dir = _apply_oracle_environment(lib_dir)
+        oracledb.init_oracle_client(lib_dir=resolved_lib_dir)
         _client_initialized = True
+
+
+def bootstrap_oracle_client() -> None:
+    """Initialize Oracle thick mode at application startup when needed."""
+    if not has_oracle_databases():
+        return
+
+    use_thick, lib_dir = get_oracle_thick_mode_settings()
+    if not use_thick:
+        raise RuntimeError(
+            "connections.json contains an Oracle database, but thick mode is not configured. "
+            "Set ORACLE_CLIENT_LIB_DIR in xml-generator/.env and restart backend."
+        )
+
+    ensure_oracle_thick_mode()
+    if oracledb.is_thin_mode():
+        raise RuntimeError(
+            "Oracle thick mode failed to initialize. "
+            f"ORACLE_CLIENT_LIB_DIR={lib_dir or '(not set)'}. "
+            "Verify the path to oci.dll and fully restart backend (stop uvicorn, start again)."
+        )
 
 
 def map_oracle_client_error(exc: Exception) -> ValueError | None:
@@ -126,10 +158,19 @@ def map_oracle_client_error(exc: Exception) -> ValueError | None:
     message = str(exc)
 
     if "DPY-3010" in message and oracledb.is_thin_mode():
+        use_thick, lib_dir = get_oracle_thick_mode_settings()
+        if use_thick:
+            return ValueError(
+                "Oracle is still running in thin mode even though thick mode is configured. "
+                f"ORACLE_CLIENT_LIB_DIR={lib_dir or '(not set)'}. "
+                "Put .env in the project root (xml-generator/.env), verify the path to oci.dll, "
+                "and fully restart backend (stop uvicorn completely, then start again). "
+                f"Original error: {message}"
+            )
         return ValueError(
             "Oracle Database 11.2 or earlier requires thick mode. "
-            "Install Oracle Client 19+ and configure ORACLE_CLIENT_LIB_DIR in .env, "
-            "then restart the backend. "
+            "Install Oracle Client 19+ and set ORACLE_CLIENT_LIB_DIR in xml-generator/.env, "
+            "then restart backend. "
             f"Original error: {message}"
         )
 

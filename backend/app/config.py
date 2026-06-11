@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(BACKEND_ROOT / ".env", override=True)
 
 
 class AppSettings(BaseModel):
@@ -95,6 +96,15 @@ def get_db_password(alias: str) -> str:
     return raw.get("databases", {}).get(alias, {}).get("password", "")
 
 
+def has_oracle_databases() -> bool:
+    """Return True when connections.json contains at least one Oracle alias."""
+    connections = load_connections()
+    return any(
+        cfg.driver.lower() in {"oracle", "oracledb"}
+        for cfg in connections.databases.values()
+    )
+
+
 def get_oracle_thick_mode_settings() -> tuple[bool, str | None]:
     """Return whether to use Oracle thick mode and the Instant Client library path."""
     lib_dir = os.getenv("ORACLE_CLIENT_LIB_DIR", "").strip() or None
@@ -108,6 +118,8 @@ def get_oracle_thick_mode_settings() -> tuple[bool, str | None]:
         use_thick = use_thick or bool(raw.get("oracle_thick_mode", False))
 
     if lib_dir:
+        use_thick = True
+    if has_oracle_databases():
         use_thick = True
 
     return use_thick, lib_dir
