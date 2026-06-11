@@ -3,11 +3,12 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import dtd, export, generate, populate, presets, validate
+from app.services.db_service import DBService
 from app.config import (
     PROJECT_ROOT,
     get_app_settings,
@@ -61,6 +62,20 @@ async def health_oracle() -> dict:
     return {
         **get_oracle_runtime_status(),
         **get_oracle_env_diagnostics(),
+    }
+
+
+@app.get("/api/health/oracle/test")
+async def health_oracle_test(alias: str = Query(..., min_length=1)) -> dict:
+    """Run a simple Oracle query through the same path used by Populate."""
+    try:
+        rows = await DBService().run_query(alias, "SELECT 1 AS ok FROM dual")
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        **get_oracle_runtime_status(),
+        "alias": alias,
+        "rows": rows,
     }
 
 

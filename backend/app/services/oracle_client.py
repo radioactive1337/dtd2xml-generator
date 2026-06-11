@@ -206,11 +206,18 @@ def map_oracle_client_error(exc: Exception) -> ValueError | None:
     message = str(exc)
     diagnostics = {**get_oracle_env_diagnostics(), **get_oracle_runtime_status()}
 
-    if "DPY-3010" in message and oracledb.is_thin_mode():
+    if "DPY-3010" in message:
+        if oracledb.is_thin_mode():
+            return ValueError(
+                "Oracle is still running in thin mode, so Oracle 11g cannot be used. "
+                "Open /api/health/oracle and verify thin_mode=false. "
+                "If thin_mode=true, fully stop all python/uvicorn processes and restart backend. "
+                f"Diagnostics: {diagnostics}. Original error: {message}"
+            )
         return ValueError(
-            "Oracle is still running in thin mode, so Oracle 11g cannot be used. "
-            "Open /api/health/oracle and verify thin_mode=false. "
-            "If thin_mode=true, fully stop all python/uvicorn processes and restart backend. "
+            "Oracle reported DPY-3010 even though thick mode appears active. "
+            "This usually means an old backend process is still running or connect_async "
+            "was used instead of the sync thick-mode driver. "
             f"Diagnostics: {diagnostics}. Original error: {message}"
         )
 

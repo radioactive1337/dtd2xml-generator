@@ -37,33 +37,28 @@ async def test_run_query_rejects_unknown_driver():
 async def test_run_query_oracle_returns_normalized_rows():
     cfg = _oracle_cfg()
     connections = ConnectionsConfig(databases={"ORACLE_DB": cfg})
+    expected = [{"inn": "7701234567", "name": "Acme"}]
 
-    cursor = AsyncMock()
-    cursor.description = [("INN",), ("NAME",)]
-    cursor.fetchall = AsyncMock(return_value=[("7701234567", "Acme")])
-
-    cursor_ctx = AsyncMock()
-    cursor_ctx.__aenter__ = AsyncMock(return_value=cursor)
-    cursor_ctx.__aexit__ = AsyncMock(return_value=False)
-
-    conn = AsyncMock()
-    conn.cursor = MagicMock(return_value=cursor_ctx)
-    conn.close = AsyncMock()
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
 
     with patch("app.services.db_service.load_connections", return_value=connections):
         with patch("app.services.db_service.get_db_password", return_value="secret"):
-            with patch("app.services.db_service.ensure_oracle_thick_mode"):
+            with patch(
+                "app.services.db_service._oracle_query_sync",
+                return_value=expected,
+            ) as oracle_query:
                 with patch(
-                    "app.services.db_service.oracledb.connect_async",
-                    new=AsyncMock(return_value=conn),
-                ) as connect_async:
+                    "app.services.db_service.asyncio.to_thread",
+                    new=fake_to_thread,
+                ):
                     rows = await DBService().run_query(
                         "ORACLE_DB",
                         "SELECT inn, name FROM company WHERE rownum = 1",
                     )
 
-    connect_async.assert_awaited_once()
-    assert rows == [{"inn": "7701234567", "name": "Acme"}]
+    oracle_query.assert_called_once()
+    assert rows == expected
 
 
 def test_oracle_dsn_uses_service_name_by_default():

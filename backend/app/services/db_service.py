@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import asyncpg
@@ -10,7 +11,11 @@ from pydantic import BaseModel
 
 from app.config import DatabaseConfig, get_db_password, load_connections
 from app.core.dtd_models import DTDSchema
-from app.services.oracle_client import ensure_oracle_thick_mode, map_oracle_client_error
+from app.services.oracle_client import (
+    ensure_oracle_thick_mode,
+    get_oracle_runtime_status,
+    map_oracle_client_error,
+)
 from lxml import etree
 
 
@@ -43,6 +48,38 @@ def _oracle_dsn(cfg: DatabaseConfig) -> str:
     if cfg.sid:
         return oracledb.makedsn(cfg.host, cfg.port, sid=cfg.sid)
     return oracledb.makedsn(cfg.host, cfg.port, service_name=cfg.database)
+
+
+def _oracle_query_sync(
+    user: str,
+    password: str,
+    dsn: str,
+    sql: str,
+) -> list[dict[str, Any]]:
+    """Run Oracle SQL via synchronous thick-mode connection.
+
+    ``connect_async`` can still attempt thin mode on some Windows setups even after
+    ``init_oracle_client()``, so thick mode queries use the sync driver in a worker
+    thread instead.
+    """
+    ensure_oracle_thick_mode(required=True)
+    if oracledb.is_thin_mode():
+        raise RuntimeError(
+            "Oracle thick mode is required but the driver is still in thin mode before connect. "
+            f"Status: {get_oracle_runtime_status()}"
+        )
+
+    conn = oracledb.connect(user=user, password=password, dsn=dsn)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql)
+            if cursor.description is None:
+                return []
+            columns = [col[0] for col in cursor.description]
+            rows = cursor.fetchall()
+            return _rows_to_dicts(columns, rows)
+    finally:
+        conn.close()
 
 
 class DBService:
@@ -89,23 +126,14 @@ class DBService:
         password: str,
         sql: str,
     ) -> list[dict[str, Any]]:
-        ensure_oracle_thick_mode(required=True)
         try:
-            conn = await oracledb.connect_async(
-                user=cfg.user,
-                password=password,
-                dsn=_oracle_dsn(cfg),
+            return await asyncio.to_thread(
+                _oracle_query_sync,
+                cfg.user,
+                password,
+                _oracle_dsn(cfg),
+                sql,
             )
-            try:
-                async with conn.cursor() as cursor:
-                    await cursor.execute(sql)
-                    if cursor.description is None:
-                        return []
-                    columns = [col[0] for col in cursor.description]
-                    rows = await cursor.fetchall()
-                    return _rows_to_dicts(columns, rows)
-            finally:
-                await conn.close()
         except oracledb.Error as exc:
             mapped = map_oracle_client_error(exc)
             if mapped is not None:
