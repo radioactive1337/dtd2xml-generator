@@ -14,7 +14,24 @@ from pydantic import BaseModel, Field
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
-load_dotenv(PROJECT_ROOT / ".env")
+
+def _load_env_files() -> None:
+    """Load .env from cwd and known project locations."""
+    candidates = [
+        Path.cwd() / ".env",
+        PROJECT_ROOT / ".env",
+        BACKEND_ROOT / ".env",
+    ]
+    loaded: set[Path] = set()
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved in loaded or not path.exists():
+            continue
+        load_dotenv(path, override=True)
+        loaded.add(resolved)
+
+
+_load_env_files()
 
 
 class AppSettings(BaseModel):
@@ -36,6 +53,7 @@ class DatabaseConfig(BaseModel):
     port: int
     database: str
     user: str
+    sid: str | None = None  # Oracle SID; if set, used instead of database (service name)
     # password is never exposed to the frontend
 
 
@@ -92,6 +110,37 @@ def get_db_password(alias: str) -> str:
         return ""
     raw = json.loads(path.read_text(encoding="utf-8"))
     return raw.get("databases", {}).get(alias, {}).get("password", "")
+
+
+def has_oracle_databases() -> bool:
+    """Return True when connections.json contains at least one Oracle alias."""
+    connections = load_connections()
+    return any(
+        cfg.driver.lower() in {"oracle", "oracledb"}
+        for cfg in connections.databases.values()
+    )
+
+
+def get_oracle_client_lib_dir() -> str | None:
+    """Return Oracle client library directory from .env, connections.json, or ORACLE_HOME."""
+    lib_dir = os.getenv("ORACLE_CLIENT_LIB_DIR", "").strip()
+    if lib_dir:
+        return lib_dir
+
+    path = _find_connections_file()
+    if path is not None:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        lib_dir = raw.get("oracle_client_lib_dir", "").strip()
+        if lib_dir:
+            return lib_dir
+
+    oracle_home = os.getenv("ORACLE_HOME", "").strip()
+    if oracle_home:
+        bin_dir = Path(oracle_home) / "bin"
+        if (bin_dir / "oci.dll").is_file():
+            return str(bin_dir)
+
+    return None
 
 
 def get_app_settings() -> AppSettings:

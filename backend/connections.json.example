@@ -1,11 +1,21 @@
 {
+  "oracle_thick_mode": true,
+  "oracle_client_lib_dir": "C:\\Oracle\\client19_64\\bin",
   "databases": {
-    "QA_AUTO_DB": {
+    "PGSQL_DB": {
       "driver": "postgresql",
       "host": "localhost",
       "port": 5432,
       "database": "qa_auto",
       "user": "qa_user",
+      "password": "change-me"
+    },
+    "ORACLE_DB": {
+      "driver": "oracle",
+      "host": "localhost",
+      "port": 1521,
+      "database": "ORCLPDB1",
+      "user": "app_user",
       "password": "change-me"
     }
   },

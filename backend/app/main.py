@@ -8,6 +8,9 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import dtd, export, generate, populate, presets, validate
 from app.config import PROJECT_ROOT, get_app_settings, get_connection_aliases
+from app.services.oracle_client import bootstrap_oracle_client
+
+bootstrap_oracle_client()
 
 app = FastAPI(
     title="QA XML Generator",

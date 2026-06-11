@@ -93,7 +93,7 @@
               <textarea
                 v-model="mapping.query"
                 rows="2"
-                placeholder="SELECT inn, kpp FROM clients LIMIT 1"
+                placeholder="SELECT col1, col2 FROM schema.view WHERE col = N'value' AND ROWNUM = 1"
               />
             </div>
 
