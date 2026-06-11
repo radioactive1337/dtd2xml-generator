@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.config import DatabaseConfig, get_db_password, load_connections
 from app.core.dtd_models import DTDSchema
+from app.services.oracle_client import ensure_oracle_thick_mode, oracle_thick_mode_error
 from lxml import etree
 
 
@@ -88,11 +89,18 @@ class DBService:
         password: str,
         sql: str,
     ) -> list[dict[str, Any]]:
-        conn = await oracledb.connect_async(
-            user=cfg.user,
-            password=password,
-            dsn=_oracle_dsn(cfg),
-        )
+        ensure_oracle_thick_mode()
+        try:
+            conn = await oracledb.connect_async(
+                user=cfg.user,
+                password=password,
+                dsn=_oracle_dsn(cfg),
+            )
+        except oracledb.Error as exc:
+            mapped = oracle_thick_mode_error(exc)
+            if mapped is not None:
+                raise mapped from exc
+            raise
         try:
             async with conn.cursor() as cursor:
                 await cursor.execute(sql)

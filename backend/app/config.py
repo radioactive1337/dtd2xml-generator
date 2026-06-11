@@ -95,6 +95,24 @@ def get_db_password(alias: str) -> str:
     return raw.get("databases", {}).get(alias, {}).get("password", "")
 
 
+def get_oracle_thick_mode_settings() -> tuple[bool, str | None]:
+    """Return whether to use Oracle thick mode and the Instant Client library path."""
+    lib_dir = os.getenv("ORACLE_CLIENT_LIB_DIR", "").strip() or None
+    use_thick = os.getenv("ORACLE_USE_THICK_MODE", "").lower() in {"1", "true", "yes"}
+
+    path = _find_connections_file()
+    if path is not None:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not lib_dir:
+            lib_dir = raw.get("oracle_client_lib_dir", "").strip() or None
+        use_thick = use_thick or bool(raw.get("oracle_thick_mode", False))
+
+    if lib_dir:
+        use_thick = True
+
+    return use_thick, lib_dir
+
+
 def get_app_settings() -> AppSettings:
     return AppSettings(
         host=os.getenv("APP_HOST", "0.0.0.0"),

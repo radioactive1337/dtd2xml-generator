@@ -52,14 +52,15 @@ async def test_run_query_oracle_returns_normalized_rows():
 
     with patch("app.services.db_service.load_connections", return_value=connections):
         with patch("app.services.db_service.get_db_password", return_value="secret"):
-            with patch(
-                "app.services.db_service.oracledb.connect_async",
-                new=AsyncMock(return_value=conn),
-            ) as connect_async:
-                rows = await DBService().run_query(
-                    "ORACLE_DB",
-                    "SELECT inn, name FROM company WHERE rownum = 1",
-                )
+            with patch("app.services.db_service.ensure_oracle_thick_mode"):
+                with patch(
+                    "app.services.db_service.oracledb.connect_async",
+                    new=AsyncMock(return_value=conn),
+                ) as connect_async:
+                    rows = await DBService().run_query(
+                        "ORACLE_DB",
+                        "SELECT inn, name FROM company WHERE rownum = 1",
+                    )
 
     connect_async.assert_awaited_once()
     assert rows == [{"inn": "7701234567", "name": "Acme"}]
