@@ -36,6 +36,7 @@ class DatabaseConfig(BaseModel):
     port: int
     database: str
     user: str
+    sid: str | None = None  # Oracle SID; if set, used instead of database (service name)
     # password is never exposed to the frontend
 
 

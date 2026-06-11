@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 import asyncpg
+import oracledb
 from pydantic import BaseModel
 
-from app.config import get_db_password, load_connections
+from app.config import DatabaseConfig, get_db_password, load_connections
 from app.core.dtd_models import DTDSchema
 from lxml import etree
 
@@ -20,6 +21,29 @@ class SqlMapping(BaseModel):
     fields: dict[str, str]  # db_column -> xml_attribute (optionally prefixed with @)
 
 
+def _normalize_value(value: Any) -> Any:
+    if hasattr(value, "read"):
+        return value.read()
+    return value
+
+
+def _rows_to_dicts(columns: list[str], rows: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
+    normalized_columns = [col.lower() for col in columns]
+    return [
+        {
+            col: _normalize_value(val)
+            for col, val in zip(normalized_columns, row, strict=True)
+        }
+        for row in rows
+    ]
+
+
+def _oracle_dsn(cfg: DatabaseConfig) -> str:
+    if cfg.sid:
+        return oracledb.makedsn(cfg.host, cfg.port, sid=cfg.sid)
+    return oracledb.makedsn(cfg.host, cfg.port, service_name=cfg.database)
+
+
 class DBService:
     """Execute SQL queries against configured database aliases."""
 
@@ -29,10 +53,22 @@ class DBService:
             raise ValueError(f"Database alias '{alias}' not found in connections.json")
 
         cfg = connections.databases[alias]
-        if cfg.driver != "postgresql":
-            raise ValueError(f"Unsupported database driver: {cfg.driver}")
-
         password = get_db_password(alias)
+        driver = cfg.driver.lower()
+
+        if driver == "postgresql":
+            return await self._query_postgresql(cfg, password, sql)
+        if driver in {"oracle", "oracledb"}:
+            return await self._query_oracle(cfg, password, sql)
+
+        raise ValueError(f"Unsupported database driver: {cfg.driver}")
+
+    async def _query_postgresql(
+        self,
+        cfg: DatabaseConfig,
+        password: str,
+        sql: str,
+    ) -> list[dict[str, Any]]:
         conn = await asyncpg.connect(
             host=cfg.host,
             port=cfg.port,
@@ -42,7 +78,29 @@ class DBService:
         )
         try:
             rows = await conn.fetch(sql)
-            return [dict(row) for row in rows]
+            return [{k.lower(): v for k, v in dict(row).items()} for row in rows]
+        finally:
+            await conn.close()
+
+    async def _query_oracle(
+        self,
+        cfg: DatabaseConfig,
+        password: str,
+        sql: str,
+    ) -> list[dict[str, Any]]:
+        conn = await oracledb.connect_async(
+            user=cfg.user,
+            password=password,
+            dsn=_oracle_dsn(cfg),
+        )
+        try:
+            async with conn.cursor() as cursor:
+                await cursor.execute(sql)
+                if cursor.description is None:
+                    return []
+                columns = [col[0] for col in cursor.description]
+                rows = await cursor.fetchall()
+                return _rows_to_dicts(columns, rows)
         finally:
             await conn.close()
 

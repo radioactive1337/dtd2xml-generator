@@ -1,11 +1,19 @@
 {
   "databases": {
-    "QA_AUTO_DB": {
+    "PGSQL_DB": {
       "driver": "postgresql",
       "host": "localhost",
       "port": 5432,
       "database": "qa_auto",
       "user": "qa_user",
+      "password": "change-me"
+    },
+    "ORACLE_DB": {
+      "driver": "oracle",
+      "host": "localhost",
+      "port": 1521,
+      "database": "ORCLPDB1",
+      "user": "app_user",
       "password": "change-me"
     }
   },
