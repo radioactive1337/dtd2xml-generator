@@ -10,13 +10,12 @@ from pathlib import Path
 
 import oracledb
 
-from app.config import get_oracle_client_lib_dir, get_oracle_env_diagnostics, has_oracle_databases
+from app.config import get_oracle_client_lib_dir, has_oracle_databases
 
 logger = logging.getLogger(__name__)
 
 _init_lock = threading.Lock()
 _client_initialized = False
-_init_lib_dir: str | None = None
 
 
 def derive_oracle_home(lib_dir: str) -> str:
@@ -85,24 +84,10 @@ def resolve_ora_tzfile(oracle_home: Path, ora_tzfile: str | None) -> str | None:
     )
 
 
-def is_thick_mode_active() -> bool:
-    return not oracledb.is_thin_mode()
-
-
-def get_oracle_runtime_status() -> dict[str, object]:
-    return {
-        "thin_mode": oracledb.is_thin_mode(),
-        "client_initialized": _client_initialized,
-        "init_lib_dir": _init_lib_dir,
-    }
-
-
 def _missing_client_config_error() -> ValueError:
-    diagnostics = get_oracle_env_diagnostics()
     return ValueError(
-        "Oracle thick mode is required for Oracle 11g, but the client path is not configured. "
-        "Set ORACLE_CLIENT_LIB_DIR in xml-generator/.env or oracle_client_lib_dir in connections.json. "
-        f"Diagnostics: {diagnostics}"
+        "Oracle thick mode is required for Oracle 11g. "
+        "Set ORACLE_CLIENT_LIB_DIR in .env or oracle_client_lib_dir in connections.json."
     )
 
 
@@ -145,7 +130,7 @@ def _init_oracle_client_library(resolved_lib_dir: str) -> None:
         message = str(exc).lower()
         if "already been initialized" not in message:
             raise
-        logger.info("Oracle client already initialized: %s", exc)
+        logger.debug("Oracle client already initialized: %s", exc)
 
 
 def ensure_oracle_thick_mode(*, required: bool = False) -> None:
@@ -153,9 +138,9 @@ def ensure_oracle_thick_mode(*, required: bool = False) -> None:
 
     Required for Oracle Database 11.2 and earlier (thin mode supports 12.1+).
     """
-    global _client_initialized, _init_lib_dir
+    global _client_initialized
 
-    if is_thick_mode_active():
+    if not oracledb.is_thin_mode():
         _client_initialized = True
         return
 
@@ -166,7 +151,7 @@ def ensure_oracle_thick_mode(*, required: bool = False) -> None:
         return
 
     with _init_lock:
-        if is_thick_mode_active():
+        if _client_initialized or not oracledb.is_thin_mode():
             _client_initialized = True
             return
 
@@ -174,13 +159,11 @@ def ensure_oracle_thick_mode(*, required: bool = False) -> None:
         logger.info("Initializing Oracle thick mode with lib_dir=%s", resolved_lib_dir)
         _init_oracle_client_library(resolved_lib_dir)
         _client_initialized = True
-        _init_lib_dir = resolved_lib_dir
 
     if oracledb.is_thin_mode():
-        diagnostics = {**get_oracle_env_diagnostics(), **get_oracle_runtime_status()}
         raise RuntimeError(
-            "Oracle thick mode failed to initialize and driver is still in thin mode. "
-            f"Diagnostics: {diagnostics}"
+            "Oracle thick mode failed to initialize. "
+            f"Check ORACLE_CLIENT_LIB_DIR={lib_dir!r} and restart backend."
         )
 
 
@@ -189,37 +172,25 @@ def bootstrap_oracle_client() -> None:
     if not has_oracle_databases():
         return
 
-    lib_dir = get_oracle_client_lib_dir()
-    if not lib_dir:
+    if not get_oracle_client_lib_dir():
         raise RuntimeError(str(_missing_client_config_error()))
 
     ensure_oracle_thick_mode(required=True)
-    logger.info(
-        "Oracle thick mode ready (thin_mode=%s, lib_dir=%s)",
-        oracledb.is_thin_mode(),
-        _init_lib_dir,
-    )
 
 
 def map_oracle_client_error(exc: Exception) -> ValueError | None:
     """Return a clearer error for common Oracle client configuration issues."""
     message = str(exc)
-    diagnostics = {**get_oracle_env_diagnostics(), **get_oracle_runtime_status()}
 
     if "DPY-3010" in message:
         if oracledb.is_thin_mode():
             return ValueError(
-                "Oracle is still running in thin mode, so Oracle 11g cannot be used. "
-                "Open /api/health/oracle and verify thin_mode=false. "
-                "If thin_mode=true, fully stop all python/uvicorn processes and restart backend. "
-                f"Diagnostics: {diagnostics}. Original error: {message}"
+                "Oracle 11g requires thick mode. "
+                "Set ORACLE_CLIENT_LIB_DIR in .env or oracle_client_lib_dir in connections.json "
+                "and restart backend. "
+                f"Original error: {message}"
             )
-        return ValueError(
-            "Oracle reported DPY-3010 even though thick mode appears active. "
-            "This usually means an old backend process is still running or connect_async "
-            "was used instead of the sync thick-mode driver. "
-            f"Diagnostics: {diagnostics}. Original error: {message}"
-        )
+        return ValueError(f"Oracle connection failed: {message}")
 
     if "ORA-01804" in message:
         oracle_home = os.getenv("ORACLE_HOME", "")

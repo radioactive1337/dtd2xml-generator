@@ -143,55 +143,6 @@ def get_oracle_client_lib_dir() -> str | None:
     return None
 
 
-def get_oracle_env_diagnostics() -> dict[str, Any]:
-    """Return Oracle config diagnostics safe to expose locally."""
-    connections_path = _find_connections_file()
-    lib_dir = get_oracle_client_lib_dir()
-    oci_dll = Path(lib_dir) / "oci.dll" if lib_dir else None
-    runtime: dict[str, Any] = {}
-    try:
-        from app.services.oracle_client import get_oracle_runtime_status
-
-        runtime = get_oracle_runtime_status()
-    except Exception:
-        runtime = {}
-    return {
-        **runtime,
-        "project_root": str(PROJECT_ROOT),
-        "cwd": str(Path.cwd()),
-        "env_files_checked": [
-            str((Path.cwd() / ".env").resolve()),
-            str((PROJECT_ROOT / ".env").resolve()),
-            str((BACKEND_ROOT / ".env").resolve()),
-        ],
-        "connections_file": str(connections_path) if connections_path else None,
-        "has_oracle_database": has_oracle_databases(),
-        "oracle_use_thick_mode": os.getenv("ORACLE_USE_THICK_MODE", ""),
-        "oracle_client_lib_dir": lib_dir,
-        "oracle_home": os.getenv("ORACLE_HOME", ""),
-        "ora_tzfile": os.getenv("ORA_TZFILE", ""),
-        "oci_dll_exists": oci_dll.is_file() if oci_dll else False,
-    }
-
-
-def get_oracle_thick_mode_settings() -> tuple[bool, str | None]:
-    """Return whether to use Oracle thick mode and the Instant Client library path."""
-    lib_dir = get_oracle_client_lib_dir()
-    use_thick = os.getenv("ORACLE_USE_THICK_MODE", "").lower() in {"1", "true", "yes"}
-
-    path = _find_connections_file()
-    if path is not None:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        use_thick = use_thick or bool(raw.get("oracle_thick_mode", False))
-
-    if lib_dir:
-        use_thick = True
-    if has_oracle_databases():
-        use_thick = True
-
-    return use_thick, lib_dir
-
-
 def get_app_settings() -> AppSettings:
     return AppSettings(
         host=os.getenv("APP_HOST", "0.0.0.0"),

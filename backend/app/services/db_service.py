@@ -11,11 +11,7 @@ from pydantic import BaseModel
 
 from app.config import DatabaseConfig, get_db_password, load_connections
 from app.core.dtd_models import DTDSchema
-from app.services.oracle_client import (
-    ensure_oracle_thick_mode,
-    get_oracle_runtime_status,
-    map_oracle_client_error,
-)
+from app.services.oracle_client import ensure_oracle_thick_mode, map_oracle_client_error
 from lxml import etree
 
 
@@ -65,8 +61,7 @@ def _oracle_query_sync(
     ensure_oracle_thick_mode(required=True)
     if oracledb.is_thin_mode():
         raise RuntimeError(
-            "Oracle thick mode is required but the driver is still in thin mode before connect. "
-            f"Status: {get_oracle_runtime_status()}"
+            "Oracle thick mode is required but the driver is still in thin mode."
         )
 
     conn = oracledb.connect(user=user, password=password, dsn=dsn)

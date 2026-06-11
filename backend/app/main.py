@@ -1,38 +1,21 @@
 """FastAPI application entry point."""
 
-from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import dtd, export, generate, populate, presets, validate
-from app.services.db_service import DBService
-from app.config import (
-    PROJECT_ROOT,
-    get_app_settings,
-    get_connection_aliases,
-    get_oracle_env_diagnostics,
-)
-from app.services.oracle_client import bootstrap_oracle_client, get_oracle_runtime_status
+from app.config import PROJECT_ROOT, get_app_settings, get_connection_aliases
+from app.services.oracle_client import bootstrap_oracle_client
 
-# Initialize Oracle thick mode synchronously at import time so uvicorn reload
-# workers and request handlers always see thick mode before the first query.
 bootstrap_oracle_client()
-
-
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    bootstrap_oracle_client()
-    yield
-
 
 app = FastAPI(
     title="QA XML Generator",
     description="Local QA tool for generating XML from DTD schemas",
     version="0.2.0",
-    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -54,29 +37,6 @@ app.include_router(validate.router, prefix="/api")
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-@app.get("/api/health/oracle")
-async def health_oracle() -> dict:
-    """Local diagnostics for Oracle thick mode configuration."""
-    return {
-        **get_oracle_runtime_status(),
-        **get_oracle_env_diagnostics(),
-    }
-
-
-@app.get("/api/health/oracle/test")
-async def health_oracle_test(alias: str = Query(..., min_length=1)) -> dict:
-    """Run a simple Oracle query through the same path used by Populate."""
-    try:
-        rows = await DBService().run_query(alias, "SELECT 1 AS ok FROM dual")
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {
-        **get_oracle_runtime_status(),
-        "alias": alias,
-        "rows": rows,
-    }
 
 
 @app.get("/api/config/aliases")
