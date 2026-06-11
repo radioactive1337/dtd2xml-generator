@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 from pathlib import Path
 
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _init_lock = threading.Lock()
 _client_initialized = False
+_init_lib_dir: str | None = None
 
 
 def derive_oracle_home(lib_dir: str) -> str:
@@ -83,6 +85,18 @@ def resolve_ora_tzfile(oracle_home: Path, ora_tzfile: str | None) -> str | None:
     )
 
 
+def is_thick_mode_active() -> bool:
+    return not oracledb.is_thin_mode()
+
+
+def get_oracle_runtime_status() -> dict[str, object]:
+    return {
+        "thin_mode": oracledb.is_thin_mode(),
+        "client_initialized": _client_initialized,
+        "init_lib_dir": _init_lib_dir,
+    }
+
+
 def _missing_client_config_error() -> ValueError:
     diagnostics = get_oracle_env_diagnostics()
     return ValueError(
@@ -90,6 +104,17 @@ def _missing_client_config_error() -> ValueError:
         "Set ORACLE_CLIENT_LIB_DIR in xml-generator/.env or oracle_client_lib_dir in connections.json. "
         f"Diagnostics: {diagnostics}"
     )
+
+
+def _prepare_windows_dll_path(lib_dir: str) -> None:
+    """Ensure dependent Oracle DLLs can be resolved on Windows."""
+    if sys.platform != "win32":
+        return
+
+    os.add_dll_directory(lib_dir)
+    path = os.environ.get("PATH", "")
+    if lib_dir.lower() not in path.lower():
+        os.environ["PATH"] = lib_dir + os.pathsep + path
 
 
 def _apply_oracle_environment(lib_dir: str) -> str:
@@ -109,7 +134,18 @@ def _apply_oracle_environment(lib_dir: str) -> str:
     else:
         os.environ.pop("ORA_TZFILE", None)
 
+    _prepare_windows_dll_path(resolved_lib_dir)
     return resolved_lib_dir
+
+
+def _init_oracle_client_library(resolved_lib_dir: str) -> None:
+    try:
+        oracledb.init_oracle_client(lib_dir=resolved_lib_dir)
+    except oracledb.ProgrammingError as exc:
+        message = str(exc).lower()
+        if "already been initialized" not in message:
+            raise
+        logger.info("Oracle client already initialized: %s", exc)
 
 
 def ensure_oracle_thick_mode(*, required: bool = False) -> None:
@@ -117,9 +153,10 @@ def ensure_oracle_thick_mode(*, required: bool = False) -> None:
 
     Required for Oracle Database 11.2 and earlier (thin mode supports 12.1+).
     """
-    global _client_initialized
+    global _client_initialized, _init_lib_dir
 
-    if not oracledb.is_thin_mode():
+    if is_thick_mode_active():
+        _client_initialized = True
         return
 
     lib_dir = get_oracle_client_lib_dir()
@@ -129,16 +166,18 @@ def ensure_oracle_thick_mode(*, required: bool = False) -> None:
         return
 
     with _init_lock:
-        if _client_initialized or not oracledb.is_thin_mode():
+        if is_thick_mode_active():
+            _client_initialized = True
             return
 
         resolved_lib_dir = _apply_oracle_environment(lib_dir)
         logger.info("Initializing Oracle thick mode with lib_dir=%s", resolved_lib_dir)
-        oracledb.init_oracle_client(lib_dir=resolved_lib_dir)
+        _init_oracle_client_library(resolved_lib_dir)
         _client_initialized = True
+        _init_lib_dir = resolved_lib_dir
 
     if oracledb.is_thin_mode():
-        diagnostics = get_oracle_env_diagnostics()
+        diagnostics = {**get_oracle_env_diagnostics(), **get_oracle_runtime_status()}
         raise RuntimeError(
             "Oracle thick mode failed to initialize and driver is still in thin mode. "
             f"Diagnostics: {diagnostics}"
@@ -155,19 +194,23 @@ def bootstrap_oracle_client() -> None:
         raise RuntimeError(str(_missing_client_config_error()))
 
     ensure_oracle_thick_mode(required=True)
-    logger.info("Oracle thick mode ready (thin_mode=%s)", oracledb.is_thin_mode())
+    logger.info(
+        "Oracle thick mode ready (thin_mode=%s, lib_dir=%s)",
+        oracledb.is_thin_mode(),
+        _init_lib_dir,
+    )
 
 
 def map_oracle_client_error(exc: Exception) -> ValueError | None:
     """Return a clearer error for common Oracle client configuration issues."""
     message = str(exc)
-    diagnostics = get_oracle_env_diagnostics()
+    diagnostics = {**get_oracle_env_diagnostics(), **get_oracle_runtime_status()}
 
     if "DPY-3010" in message and oracledb.is_thin_mode():
         return ValueError(
             "Oracle is still running in thin mode, so Oracle 11g cannot be used. "
-            "Configure ORACLE_CLIENT_LIB_DIR in xml-generator/.env or oracle_client_lib_dir "
-            "in connections.json, verify oci.dll exists, and fully restart backend. "
+            "Open /api/health/oracle and verify thin_mode=false. "
+            "If thin_mode=true, fully stop all python/uvicorn processes and restart backend. "
             f"Diagnostics: {diagnostics}. Original error: {message}"
         )
 

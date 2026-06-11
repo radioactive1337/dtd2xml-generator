@@ -148,7 +148,15 @@ def get_oracle_env_diagnostics() -> dict[str, Any]:
     connections_path = _find_connections_file()
     lib_dir = get_oracle_client_lib_dir()
     oci_dll = Path(lib_dir) / "oci.dll" if lib_dir else None
+    runtime: dict[str, Any] = {}
+    try:
+        from app.services.oracle_client import get_oracle_runtime_status
+
+        runtime = get_oracle_runtime_status()
+    except Exception:
+        runtime = {}
     return {
+        **runtime,
         "project_root": str(PROJECT_ROOT),
         "cwd": str(Path.cwd()),
         "env_files_checked": [

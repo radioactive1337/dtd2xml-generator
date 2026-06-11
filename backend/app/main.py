@@ -3,14 +3,22 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import oracledb
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import dtd, export, generate, populate, presets, validate
-from app.config import PROJECT_ROOT, get_app_settings, get_connection_aliases, get_oracle_env_diagnostics
-from app.services.oracle_client import bootstrap_oracle_client
+from app.config import (
+    PROJECT_ROOT,
+    get_app_settings,
+    get_connection_aliases,
+    get_oracle_env_diagnostics,
+)
+from app.services.oracle_client import bootstrap_oracle_client, get_oracle_runtime_status
+
+# Initialize Oracle thick mode synchronously at import time so uvicorn reload
+# workers and request handlers always see thick mode before the first query.
+bootstrap_oracle_client()
 
 
 @asynccontextmanager
@@ -51,7 +59,7 @@ async def health() -> dict[str, str]:
 async def health_oracle() -> dict:
     """Local diagnostics for Oracle thick mode configuration."""
     return {
-        "thin_mode": oracledb.is_thin_mode(),
+        **get_oracle_runtime_status(),
         **get_oracle_env_diagnostics(),
     }
 
