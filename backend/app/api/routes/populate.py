@@ -1,4 +1,4 @@
-"""XML data population endpoints."""
+"""XML data population endpoints — two-stage hybrid pipeline."""
 
 from __future__ import annotations
 
@@ -8,59 +8,87 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.routes.dtd import get_schema_registry
-from app.services.db_service import populate_with_db
+from app.services.db_service import SqlMapping, apply_db_overrides
 from app.services.faker_service import populate_with_faker
 from app.services.llm_service import populate_with_llm
 
 router = APIRouter(prefix="/populate", tags=["populate"])
 
-Strategy = Literal["faker", "llm", "db"]
+# fmt: off
+Strategy = Literal[
+    "faker",           # Smart Faker only
+    "ai",              # LLM only
+    "hybrid_db_faker", # Stage-1: DB overrides  →  Stage-2: Smart Faker fallback
+    "hybrid_db_ai",    # Stage-1: DB overrides  →  Stage-2: LLM fallback
+]
+# fmt: on
+
+_HYBRID = frozenset({"hybrid_db_faker", "hybrid_db_ai"})
 
 
 class PopulateRequest(BaseModel):
     schema_id: str
     xml_text: str
     strategy: Strategy = "faker"
+
+    # Hybrid pipeline: DB overrides (Stage 1)
+    sql_mappings: list[SqlMapping] = Field(default_factory=list)
     db_alias: str | None = None
-    sql: str | None = None
+
+    # Fallback engine options (Stage 2)
     llm_alias: str = "default"
     faker_locale: str = "ru_RU"
 
 
 class PopulateResponse(BaseModel):
     xml_text: str
-    strategy: Strategy
+    strategy: str
 
 
 @router.post("", response_model=PopulateResponse)
 async def populate_xml(request: PopulateRequest) -> PopulateResponse:
-    """Populate XML with test data using faker, LLM, or database."""
+    """Populate XML with test data using a two-stage hybrid pipeline.
+
+    Stage 1 (DB overrides) runs only for hybrid strategies and fills the
+    attributes declared in *sql_mappings* with real database values.
+
+    Stage 2 (fallback engine) fills every remaining empty attribute using
+    either Smart Faker or LLM, depending on the chosen strategy.
+    """
     registry = get_schema_registry()
     if request.schema_id not in registry:
-        raise HTTPException(status_code=404, detail=f"Schema '{request.schema_id}' not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Schema '{request.schema_id}' not found",
+        )
 
     schema = registry[request.schema_id]
 
     try:
-        if request.strategy == "faker":
-            result = populate_with_faker(
-                request.xml_text, schema, locale=request.faker_locale
-            )
-        elif request.strategy == "llm":
-            result = await populate_with_llm(
-                request.xml_text, schema, alias=request.llm_alias
-            )
-        elif request.strategy == "db":
-            if not request.db_alias or not request.sql:
+        xml = request.xml_text
+
+        # ── Stage 1: DB overrides (hybrid strategies only) ───────────────────
+        if request.strategy in _HYBRID:
+            if not request.db_alias:
                 raise HTTPException(
                     status_code=400,
-                    detail="db_alias and sql are required for db strategy",
+                    detail="db_alias is required for hybrid strategies",
                 )
-            result = await populate_with_db(
-                request.xml_text, schema, request.db_alias, request.sql
-            )
+            if not request.sql_mappings:
+                raise HTTPException(
+                    status_code=400,
+                    detail="sql_mappings cannot be empty for hybrid strategies",
+                )
+            xml = await apply_db_overrides(xml, request.sql_mappings, request.db_alias)
+
+        # ── Stage 2: fallback engine for remaining empty fields ───────────────
+        if request.strategy in ("faker", "hybrid_db_faker"):
+            result = populate_with_faker(xml, schema, locale=request.faker_locale)
+        elif request.strategy in ("ai", "hybrid_db_ai"):
+            result = await populate_with_llm(xml, schema, alias=request.llm_alias)
         else:
-            raise HTTPException(status_code=400, detail="Unknown strategy")
+            raise HTTPException(status_code=400, detail=f"Unknown strategy: {request.strategy!r}")
+
     except HTTPException:
         raise
     except Exception as exc:

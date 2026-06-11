@@ -5,10 +5,19 @@ from __future__ import annotations
 from typing import Any
 
 import asyncpg
+from pydantic import BaseModel
 
 from app.config import get_db_password, load_connections
 from app.core.dtd_models import DTDSchema
 from lxml import etree
+
+
+class SqlMapping(BaseModel):
+    """Declarative mapping from a SQL query result to XML element attributes."""
+
+    query: str
+    target_element: str
+    fields: dict[str, str]  # db_column -> xml_attribute (optionally prefixed with @)
 
 
 class DBService:
@@ -95,6 +104,51 @@ class DBService:
                 return value
         return None
 
+    async def apply_overrides(
+        self,
+        xml_text: str,
+        sql_mappings: list[SqlMapping],
+        db_alias: str,
+    ) -> str:
+        """Stage-1 pipeline: inject DB values into specific elements by tag name.
+
+        For every mapping, the first row of the SQL result is fetched once and its
+        columns are written to the declared XML attributes of every matching element
+        in the tree.  Values already set by this stage are intentionally left alone
+        by the Stage-2 faker/LLM fallback.
+        """
+        root = etree.fromstring(xml_text.encode("utf-8"))
+
+        for mapping in sql_mappings:
+            if not mapping.query.strip() or not mapping.target_element:
+                continue
+
+            rows = await self.run_query(db_alias, mapping.query)
+            if not rows:
+                continue
+
+            row = rows[0]
+            lower_row: dict[str, str] = {
+                k.lower(): str(v) for k, v in row.items() if v is not None
+            }
+
+            for el in root.iter(mapping.target_element):
+                for db_col, xml_attr in mapping.fields.items():
+                    value = lower_row.get(db_col.lower())
+                    if value is None:
+                        continue
+                    # Accept both "inn" and "@inn" as XML attribute name notation.
+                    attr_name = xml_attr.lstrip("@")
+                    if attr_name:
+                        el.set(attr_name, value)
+
+        return etree.tostring(
+            root,
+            pretty_print=True,
+            encoding="UTF-8",
+            xml_declaration=False,
+        ).decode("UTF-8")
+
 
 async def populate_with_db(
     xml_text: str,
@@ -104,3 +158,12 @@ async def populate_with_db(
 ) -> str:
     """Populate XML by mapping the first SQL result row onto matching nodes."""
     return await DBService().populate_xml(xml_text, schema, alias, sql)
+
+
+async def apply_db_overrides(
+    xml_text: str,
+    sql_mappings: list[SqlMapping],
+    db_alias: str,
+) -> str:
+    """Stage-1 of the hybrid pipeline: targeted DB injections before faker/LLM fallback."""
+    return await DBService().apply_overrides(xml_text, sql_mappings, db_alias)

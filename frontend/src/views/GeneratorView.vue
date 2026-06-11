@@ -53,24 +53,78 @@
         <div class="field">
           <label>Populate Strategy</label>
           <select v-model="populateStrategy">
-            <option value="faker">Smart Faker</option>
-            <option value="llm">AI (LLM)</option>
-            <option value="db">Database</option>
+            <option value="faker">Smart Faker (Fast &amp; Local)</option>
+            <option value="ai">AI / LLM (Smart Context)</option>
+            <option value="hybrid_db_faker">Hybrid: Database + Smart Faker</option>
+            <option value="hybrid_db_ai">Hybrid: Database + AI</option>
           </select>
         </div>
 
-        <div v-if="populateStrategy === 'db'" class="field">
-          <label>DB Alias</label>
-          <select v-model="dbAlias">
-            <option value="">Select alias...</option>
-            <option v-for="a in dbAliases" :key="a" :value="a">{{ a }}</option>
-          </select>
-          <label style="margin-top: 8px">SQL Query</label>
-          <textarea
-            v-model="sqlQuery"
-            rows="3"
-            placeholder="SELECT inn, passport FROM clients LIMIT 1"
-          />
+        <div v-if="isHybridStrategy" class="db-overrides-panel">
+          <div class="overrides-header">
+            <span class="overrides-title">Database Overrides</span>
+            <span class="overrides-hint">Stage 1 — DB values fill first, Faker/AI fills the rest</span>
+          </div>
+
+          <div class="field">
+            <label>DB Alias</label>
+            <select v-model="dbAlias">
+              <option value="">Select alias...</option>
+              <option v-for="a in dbAliases" :key="a" :value="a">{{ a }}</option>
+            </select>
+          </div>
+
+          <div v-for="(mapping, mi) in sqlMappings" :key="mi" class="mapping-card">
+            <div class="mapping-header">
+              <span class="mapping-title">Mapping {{ mi + 1 }}</span>
+              <button class="btn-icon-remove" @click="removeMapping(mi)" title="Remove mapping">×</button>
+            </div>
+
+            <div class="field">
+              <label>Target Element</label>
+              <select v-model="mapping.target_element">
+                <option value="">Select element...</option>
+                <option v-for="el in elements" :key="el" :value="el">{{ el }}</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>SQL Query</label>
+              <textarea
+                v-model="mapping.query"
+                rows="2"
+                placeholder="SELECT inn, kpp FROM clients LIMIT 1"
+              />
+            </div>
+
+            <div class="field">
+              <label>
+                Field Mappings
+                <span class="label-hint">DB column → XML attribute</span>
+              </label>
+              <div v-for="(field, fi) in mapping.fields" :key="fi" class="field-row">
+                <input
+                  v-model="field.db_col"
+                  class="field-input"
+                  placeholder="DB column (e.g. inn)"
+                />
+                <span class="field-arrow">→</span>
+                <input
+                  v-model="field.xml_attr"
+                  class="field-input"
+                  placeholder="XML attr (e.g. inn)"
+                />
+                <button
+                  class="btn-icon-remove"
+                  @click="removeField(mi, fi)"
+                  title="Remove field"
+                >×</button>
+              </div>
+              <button class="btn-add-field" @click="addField(mi)">+ Add field</button>
+            </div>
+          </div>
+
+          <button class="btn-add-mapping" @click="addMapping">+ Add mapping</button>
         </div>
 
         <div class="action-row">
@@ -132,8 +186,35 @@ const repeatCount = ref(1)
 const customPaths = ref([])
 const populateStrategy = ref('faker')
 const dbAlias = ref('')
-const sqlQuery = ref('')
 const dbAliases = ref([])
+
+function createEmptyMapping() {
+  return { target_element: '', query: '', fields: [{ db_col: '', xml_attr: '' }] }
+}
+const sqlMappings = ref([createEmptyMapping()])
+
+const isHybridStrategy = computed(
+  () => populateStrategy.value === 'hybrid_db_faker' || populateStrategy.value === 'hybrid_db_ai',
+)
+
+function addMapping() {
+  sqlMappings.value.push(createEmptyMapping())
+}
+
+function removeMapping(idx) {
+  sqlMappings.value.splice(idx, 1)
+  if (sqlMappings.value.length === 0) sqlMappings.value.push(createEmptyMapping())
+}
+
+function addField(mi) {
+  sqlMappings.value[mi].fields.push({ db_col: '', xml_attr: '' })
+}
+
+function removeField(mi, fi) {
+  sqlMappings.value[mi].fields.splice(fi, 1)
+  if (sqlMappings.value[mi].fields.length === 0)
+    sqlMappings.value[mi].fields.push({ db_col: '', xml_attr: '' })
+}
 const xmlText = ref('')
 const buildInfo = ref(null)
 const generating = ref(false)
@@ -280,9 +361,15 @@ async function populate() {
       xml_text: xmlText.value,
       strategy: populateStrategy.value,
     }
-    if (populateStrategy.value === 'db') {
+    if (isHybridStrategy.value) {
       request.db_alias = dbAlias.value
-      request.sql = sqlQuery.value
+      request.sql_mappings = sqlMappings.value.map((m) => ({
+        query: m.query,
+        target_element: m.target_element,
+        fields: Object.fromEntries(
+          m.fields.filter((f) => f.db_col && f.xml_attr).map((f) => [f.db_col, f.xml_attr]),
+        ),
+      }))
     }
     const result = await populateXml(request)
     skipXmlSync = true
@@ -496,5 +583,136 @@ function stopResize() {
   .col-divider {
     display: none;
   }
+}
+
+/* ── Database Overrides panel ─────────────────────────────────────── */
+.db-overrides-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--border) 20%, transparent);
+}
+
+.overrides-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+
+.overrides-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.overrides-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.mapping-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--border) 10%, transparent);
+}
+
+.mapping-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mapping-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.field-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-arrow {
+  font-size: 13px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.label-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.btn-icon-remove {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 1px 5px;
+  transition: color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.btn-icon-remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.btn-add-field {
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 3px 8px;
+  margin-top: 2px;
+  transition: color 0.15s, border-color 0.15s;
+  align-self: flex-start;
+}
+
+.btn-add-field:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn-add-mapping {
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 5px 10px;
+  transition: color 0.15s, border-color 0.15s;
+  align-self: flex-start;
+}
+
+.btn-add-mapping:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 </style>
