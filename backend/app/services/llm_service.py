@@ -43,7 +43,7 @@ class LLMService:
         if not self.base_url:
             raise ValueError("LLM base URL is not configured in connections.json or .env")
 
-        metadata = self._extract_metadata(schema)
+        metadata = self._extract_metadata(schema, xml_text)
         user_message = (
             "Fill the following XML skeleton with realistic test data.\n\n"
             f"Schema metadata (JavaDoc-style comments):\n{metadata}\n\n"
@@ -72,18 +72,19 @@ class LLMService:
         content = data["choices"][0]["message"]["content"]
         return self._extract_xml(content)
 
-    def _extract_metadata(self, schema: DTDSchema) -> str:
+    def _extract_metadata(self, schema: DTDSchema, xml_text: str) -> str:
         lines: list[str] = []
         for elem in schema.elements.values():
-            if elem.doc:
-                lines.append(f"@doc {elem.name}: {elem.doc}")
-            for attr_name, attr in elem.attributes.items():
-                if attr.doc:
-                    lines.append(f"@att {elem.name}.{attr_name}: {attr.doc}")
-                if attr.allowed_values:
-                    lines.append(
-                        f"@enum {elem.name}.{attr_name}: {', '.join(attr.allowed_values)}"
-                    )
+            if f"<{elem.name}" in xml_text or f"</{elem.name}>" in xml_text:
+                if elem.doc:
+                    lines.append(f"@doc {elem.name}: {elem.doc}")
+                for attr_name, attr in elem.attributes.items():
+                    if attr.doc:
+                        lines.append(f"@att {elem.name}.{attr_name}: {attr.doc}")
+                    if attr.allowed_values:
+                        lines.append(
+                            f"@enum {elem.name}.{attr_name}: {', '.join(attr.allowed_values)}"
+                        )
         return "\n".join(lines) if lines else "(no metadata)"
 
     def _extract_xml(self, content: str) -> str:
