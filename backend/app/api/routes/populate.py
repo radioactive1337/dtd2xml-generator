@@ -88,11 +88,22 @@ async def populate_xml(request: PopulateRequest) -> PopulateResponse:
                 ) from exc
 
         # ── Stage 2: fallback engine for remaining empty fields ───────────────
+        fill_empty_only = request.strategy in _HYBRID
         try:
             if request.strategy in ("faker", "hybrid_db_faker"):
-                result = populate_with_faker(xml, schema, locale=request.faker_locale)
+                result = populate_with_faker(
+                    xml,
+                    schema,
+                    locale=request.faker_locale,
+                    fill_empty_only=fill_empty_only,
+                )
             elif request.strategy in ("ai", "hybrid_db_ai"):
-                result = await populate_with_llm(xml, schema, alias=request.llm_alias)
+                result = await populate_with_llm(
+                    xml,
+                    schema,
+                    alias=request.llm_alias,
+                    fill_empty_only=fill_empty_only,
+                )
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown strategy: {request.strategy!r}")
         except HTTPException:
