@@ -226,6 +226,7 @@ const xmlSyncHint = ref('')
 const dtdTreeRef = ref(null)
 
 let skipXmlSync = false
+let skipModeSync = false
 let xmlSyncTimer = null
 
 const LEFT_MIN = 440
@@ -234,9 +235,16 @@ const LEFT_MAX = 700
 const leftWidth = ref(LEFT_MIN)
 const dtdCollapsed = ref(false)
 
-watch(mode, (val) => {
-  if (val === 'custom') dtdCollapsed.value = true
-  else dtdCollapsed.value = false
+watch(mode, async (val, oldVal) => {
+  if (val === 'custom') {
+    dtdCollapsed.value = true
+    if (!skipModeSync && oldVal !== 'custom' && xmlText.value?.trim()) {
+      await nextTick()
+      await applyXmlPathsFromEditor(xmlText.value)
+    }
+  } else {
+    dtdCollapsed.value = false
+  }
 })
 
 watch(xmlText, (text) => {
@@ -301,7 +309,7 @@ function onDtdUploaded(result) {
   xmlSyncHint.value = ''
 }
 
-async function syncFromPastedXml(text) {
+async function applyXmlPathsFromEditor(text) {
   const trimmed = text?.trim()
   if (!trimmed) {
     xmlSyncHint.value = ''
@@ -324,9 +332,37 @@ async function syncFromPastedXml(text) {
   }
 
   xmlSyncHint.value = ''
+  await dtdTreeRef.value?.applyXmlElementPaths(elementPaths)
+}
+
+async function syncFromPastedXml(text) {
+  const trimmed = text?.trim()
+  if (!trimmed) {
+    xmlSyncHint.value = ''
+    return
+  }
+
+  const parsed = extractXmlElementPaths(trimmed)
+  if (!parsed) return
+
+  const { rootTag } = parsed
+
+  if (!rootTag) {
+    xmlSyncHint.value = 'XML has no root element — select a root element manually.'
+    return
+  }
+
+  if (!elements.value.includes(rootTag)) {
+    xmlSyncHint.value = `Root element "${rootTag}" is not defined in the DTD schema.`
+    return
+  }
+
+  xmlSyncHint.value = ''
+  skipModeSync = true
   mode.value = 'custom'
   await nextTick()
-  dtdTreeRef.value?.applyXmlElementPaths(elementPaths)
+  skipModeSync = false
+  await applyXmlPathsFromEditor(text)
 }
 
 async function generate() {

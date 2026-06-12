@@ -46,20 +46,24 @@
       </RecycleScroller>
 
       <div v-if="loading || !flatNodes.length" class="scroller-hint">
-        {{
-          loading
-            ? 'Loading tree...'
-            : rootElement
+        <template v-if="loading">
+          <span class="tree-spinner" aria-hidden="true" />
+          <span>{{ loadingMessage }}</span>
+        </template>
+        <template v-else>
+          {{
+            rootElement
               ? 'Building tree...'
               : 'Select a root element or load a preset.'
-        }}
+          }}
+        </template>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, onBeforeUnmount } from 'vue'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { getElementTree } from '../api/dtd'
 import { listPresets, savePreset as apiSavePreset, loadPreset as apiLoadPreset } from '../api/presets'
@@ -76,6 +80,7 @@ const treeRoot = ref(null)
 const flatNodes = ref([])
 const checkedPaths = ref(new Set())
 const loading = ref(false)
+const loadingMessage = ref('Loading tree...')
 const presetName = ref('')
 const loadPresetName = ref('')
 const presets = ref([])
@@ -83,6 +88,29 @@ const pendingPresetPaths = ref(null)
 const pendingXmlPaths = ref(null)
 const applyingPresetRoot = ref(false)
 let nodeIdCounter = 0
+let loadSeq = 0
+
+function isStale(seq) {
+  return seq !== loadSeq
+}
+
+function cancelPendingLoads() {
+  loadSeq += 1
+  loading.value = false
+}
+
+function beginLoad(message = 'Loading tree...') {
+  loadingMessage.value = message
+  loading.value = true
+}
+
+function endLoad(seq) {
+  if (!isStale(seq)) loading.value = false
+}
+
+onBeforeUnmount(() => {
+  cancelPendingLoads()
+})
 
 watch(
   () => props.schemaId,
@@ -97,6 +125,7 @@ watch(
 watch(
   () => [props.schemaId, props.rootElement],
   async (newVal, oldVal) => {
+    const seq = ++loadSeq
     const [, newRoot] = newVal
     const [, oldRoot] = oldVal || []
 
@@ -109,6 +138,7 @@ watch(
     if (!props.schemaId || !props.rootElement) {
       treeRoot.value = null
       flatNodes.value = []
+      endLoad(seq)
       return
     }
     treeRoot.value = null
@@ -118,14 +148,16 @@ watch(
     pendingPresetPaths.value = null
     pendingXmlPaths.value = null
     checkedPaths.value = preservedPreset ? new Set(preservedPreset) : new Set()
-    await buildInitialTree()
+    const built = await buildInitialTree(seq)
+    if (!built || isStale(seq)) return
     const xmlPaths = preservedXml ?? pendingXmlPaths.value
     pendingXmlPaths.value = null
     if (xmlPaths) {
-      await applyElementPathsToTree(xmlPaths)
+      await applyElementPathsToTree(xmlPaths, seq)
     } else if (preservedPreset) {
       applyCheckedToTree(treeRoot.value)
       refreshFlat()
+      endLoad(seq)
     }
   },
   { immediate: true },
@@ -147,10 +179,11 @@ async function refreshPresets() {
   }
 }
 
-async function buildInitialTree() {
-  loading.value = true
+async function buildInitialTree(seq) {
+  beginLoad('Loading tree...')
   try {
     const data = await getElementTree(props.schemaId, props.rootElement)
+    if (isStale(seq)) return false
     treeRoot.value = buildNodeFromModel(
       props.rootElement,
       data.content_model,
@@ -161,8 +194,15 @@ async function buildInitialTree() {
     treeRoot.value.expanded = true
     refreshFlat()
     emitPaths()
+    return true
+  } catch {
+    if (!isStale(seq)) {
+      treeRoot.value = null
+      flatNodes.value = []
+    }
+    return false
   } finally {
-    loading.value = false
+    endLoad(seq)
   }
 }
 
@@ -422,21 +462,24 @@ async function toggleExpand(item) {
   const node = findNodeByPath(item.path)
   if (!node) return
 
+  const seq = loadSeq
   if (!node._loaded && node._refName) {
-    loading.value = true
+    beginLoad('Loading branch...')
     try {
       const data = await getElementTree(props.schemaId, node._refName)
+      if (seq !== loadSeq) return
       node.children = buildChildrenFromModel(data.content_model, node.path, node.depth + 1)
       node._loaded = true
       node.hasChildren = node.children.length > 0
       syncCheckedFromPaths()
     } catch {
-      node.hasChildren = false
+      if (seq === loadSeq) node.hasChildren = false
     } finally {
-      loading.value = false
+      endLoad(seq)
     }
   }
 
+  if (seq !== loadSeq) return
   node.expanded = !node.expanded
   refreshFlat()
 }
@@ -561,8 +604,8 @@ function expandAncestorsOfChecked() {
   }
 }
 
-async function ensureTreeLoadedForElementPaths(elementPaths) {
-  if (!treeRoot.value) return
+async function ensureTreeLoadedForElementPaths(elementPaths, seq) {
+  if (!treeRoot.value || isStale(seq)) return
   const pathSet = new Set(elementPaths)
 
   function subtreeNeeded(node) {
@@ -571,17 +614,14 @@ async function ensureTreeLoadedForElementPaths(elementPaths) {
   }
 
   async function walkLoad(node) {
+    if (isStale(seq)) return
     if (subtreeNeeded(node) && node._refName && !node._loaded) {
-      loading.value = true
-      try {
-        const data = await getElementTree(props.schemaId, node._refName)
-        node.children = buildChildrenFromModel(data.content_model, node.path, node.depth + 1)
-        node._loaded = true
-        node.hasChildren = node.children.length > 0
-        node.expanded = true
-      } finally {
-        loading.value = false
-      }
+      const data = await getElementTree(props.schemaId, node._refName)
+      if (isStale(seq)) return
+      node.children = buildChildrenFromModel(data.content_model, node.path, node.depth + 1)
+      node._loaded = true
+      node.hasChildren = node.children.length > 0
+      node.expanded = true
     }
     for (const child of node.children || []) {
       await walkLoad(child)
@@ -591,44 +631,51 @@ async function ensureTreeLoadedForElementPaths(elementPaths) {
   await walkLoad(treeRoot.value)
 }
 
-async function applyElementPathsToTree(elementPaths) {
-  if (!treeRoot.value || !elementPaths?.length) return
+async function applyElementPathsToTree(elementPaths, seq = loadSeq) {
+  if (!treeRoot.value || !elementPaths?.length || isStale(seq)) return
 
-  const elPathSet = new Set(elementPaths)
-  await ensureTreeLoadedForElementPaths(elementPaths)
+  beginLoad('Syncing selection from XML...')
+  try {
+    const elPathSet = new Set(elementPaths)
+    await ensureTreeLoadedForElementPaths(elementPaths, seq)
+    if (isStale(seq)) return
 
-  const nextChecked = new Set()
-  walkTree(treeRoot.value, (node) => {
-    if (node.required) nextChecked.add(node.path)
-  })
+    const nextChecked = new Set()
+    walkTree(treeRoot.value, (node) => {
+      if (node.required) nextChecked.add(node.path)
+    })
 
-  walkTree(treeRoot.value, (node) => {
-    if (node.isGroupLabel) return
+    walkTree(treeRoot.value, (node) => {
+      if (node.isGroupLabel) return
 
-    const elPath = normalizeTreePath(node.path)
-    if (!elPathSet.has(elPath)) return
-    nextChecked.add(node.path)
+      const elPath = normalizeTreePath(node.path)
+      if (!elPathSet.has(elPath)) return
+      nextChecked.add(node.path)
 
-    let current = node
-    while (current) {
-      const parent = skipGroupLabelParent(current)
-      if (!parent) break
-      if (!parent.required) nextChecked.add(parent.path)
-      current = parent
-    }
-  })
+      let current = node
+      while (current) {
+        const parent = skipGroupLabelParent(current)
+        if (!parent) break
+        if (!parent.required) nextChecked.add(parent.path)
+        current = parent
+      }
+    })
 
-  checkedPaths.value = nextChecked
-  enforceChoiceExclusivity()
-  pruneOrphanPaths()
-  expandAncestorsOfChecked()
-  refreshFlat()
-  emitPaths()
+    checkedPaths.value = nextChecked
+    enforceChoiceExclusivity()
+    pruneOrphanPaths()
+    expandAncestorsOfChecked()
+    refreshFlat()
+    emitPaths()
+  } finally {
+    endLoad(seq)
+  }
 }
 
 async function applyXmlElementPaths(elementPaths) {
   if (!props.schemaId || !elementPaths?.length) return
 
+  const seq = loadSeq
   const root = inferRootFromElementPaths(elementPaths)
   if (root && root !== props.rootElement) {
     pendingXmlPaths.value = elementPaths
@@ -640,8 +687,8 @@ async function applyXmlElementPaths(elementPaths) {
   pendingXmlPaths.value = elementPaths
   if (!treeRoot.value) return
 
-  await applyElementPathsToTree(elementPaths)
-  pendingXmlPaths.value = null
+  await applyElementPathsToTree(elementPaths, seq)
+  if (!isStale(seq)) pendingXmlPaths.value = null
 }
 
 defineExpose({ applyXmlElementPaths })
@@ -680,10 +727,25 @@ defineExpose({ applyXmlElementPaths })
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 10px;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.tree-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: tree-spin 0.75s linear infinite;
+}
+
+@keyframes tree-spin {
+  to { transform: rotate(360deg); }
 }
 
 .tree-row {
