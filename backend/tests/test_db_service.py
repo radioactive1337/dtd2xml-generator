@@ -58,7 +58,20 @@ async def test_run_query_oracle_returns_normalized_rows():
                     )
 
     oracle_query.assert_called_once()
+    called_sql = oracle_query.call_args.args[3]
+    assert "ROWNUM <= 1" in called_sql
+    assert "SELECT inn, name FROM company WHERE rownum = 1" in called_sql
     assert rows == expected
+
+
+@pytest.mark.asyncio
+async def test_run_query_rejects_non_select():
+    cfg = _oracle_cfg()
+    connections = ConnectionsConfig(databases={"ORACLE_DB": cfg})
+
+    with patch("app.services.db_service.load_connections", return_value=connections):
+        with pytest.raises(ValueError, match="Only SELECT queries are allowed"):
+            await DBService().run_query("ORACLE_DB", "DROP TABLE company")
 
 
 @pytest.mark.asyncio

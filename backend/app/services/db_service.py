@@ -14,6 +14,7 @@ from app.config import DatabaseConfig, get_db_password, load_connections
 from app.core.dtd_models import DTDSchema
 from app.core.logging_config import truncate
 from app.services.oracle_client import ensure_oracle_thick_mode, map_oracle_client_error
+from app.services.sql_safety import prepare_safe_query
 from lxml import etree
 
 from app.core.xml_tree import ProtectedAttrs, element_path
@@ -68,6 +69,7 @@ def _oracle_columns_sync(
     conn = oracledb.connect(user=user, password=password, dsn=dsn)
     try:
         with conn.cursor() as cursor:
+            cursor.execute("SET TRANSACTION READ ONLY")
             cursor.execute(sql)
             if cursor.description is None:
                 return []
@@ -97,6 +99,7 @@ def _oracle_query_sync(
     conn = oracledb.connect(user=user, password=password, dsn=dsn)
     try:
         with conn.cursor() as cursor:
+            cursor.execute("SET TRANSACTION READ ONLY")
             cursor.execute(sql)
             if cursor.description is None:
                 return []
@@ -119,12 +122,13 @@ class DBService:
         cfg = connections.databases[alias]
         password = get_db_password(alias)
         driver = cfg.driver.lower()
+        safe_sql = prepare_safe_query(sql, driver, limit_rows=True)
 
         try:
             if driver == "postgresql":
-                return await self._query_postgresql(cfg, password, sql)
+                return await self._query_postgresql(cfg, password, safe_sql)
             if driver in {"oracle", "oracledb"}:
-                return await self._query_oracle(cfg, password, sql)
+                return await self._query_oracle(cfg, password, safe_sql)
         except Exception:
             logger.exception(
                 "SQL query failed [alias=%s driver=%s host=%s:%s db=%s query=%s]",
@@ -149,12 +153,13 @@ class DBService:
         cfg = connections.databases[alias]
         password = get_db_password(alias)
         driver = cfg.driver.lower()
+        safe_sql = prepare_safe_query(sql, driver, limit_rows=False)
 
         try:
             if driver == "postgresql":
-                return await self._query_columns_postgresql(cfg, password, sql)
+                return await self._query_columns_postgresql(cfg, password, safe_sql)
             if driver in {"oracle", "oracledb"}:
-                return await self._query_columns_oracle(cfg, password, sql)
+                return await self._query_columns_oracle(cfg, password, safe_sql)
         except Exception:
             logger.exception(
                 "SQL column introspection failed [alias=%s driver=%s host=%s:%s query=%s]",
@@ -183,6 +188,9 @@ class DBService:
             database=cfg.database,
         )
         try:
+            await conn.execute(
+                "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
+            )
             prepared = await conn.prepare(sql)
             return [attr.name.lower() for attr in prepared.get_attributes()]
         finally:
@@ -222,6 +230,9 @@ class DBService:
             database=cfg.database,
         )
         try:
+            await conn.execute(
+                "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
+            )
             rows = await conn.fetch(sql)
             return [{k.lower(): v for k, v in dict(row).items()} for row in rows]
         finally:
