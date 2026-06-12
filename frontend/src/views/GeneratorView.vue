@@ -110,7 +110,7 @@
                 </button>
               </label>
             </div>
-            <p v-else-if="schemaId" class="preset-empty-hint">No saved presets for this schema</p>
+            <p v-else-if="schemaId" class="preset-empty-hint">No saved mapping presets</p>
             <span class="overrides-hint">Stage 1 — DB values fill first, Faker/AI fills the rest</span>
           </div>
 
@@ -324,7 +324,7 @@ function removeField(mi, fi) {
     sqlMappings.value[mi].fields.push({ db_col: '', xml_attr: '' })
 }
 
-function normalizeMappings(mappings, presetSource = null, presetDbAlias = '') {
+function normalizeMappings(mappings, presetSource = null) {
   if (!mappings?.length) return []
   return mappings.map((m) => ({
     target_element: m.target_element || '',
@@ -332,7 +332,7 @@ function normalizeMappings(mappings, presetSource = null, presetDbAlias = '') {
     fields: m.fields?.length
       ? m.fields.map((f) => ({ db_col: f.db_col || '', xml_attr: f.xml_attr || '' }))
       : [{ db_col: '', xml_attr: '' }],
-    db_alias: m.db_alias || presetDbAlias || '',
+    db_alias: m.db_alias || '',
     _presetSource: presetSource,
   }))
 }
@@ -343,7 +343,7 @@ function mappingDbAlias(mapping) {
 
 async function refreshMappingPresets() {
   try {
-    mappingPresets.value = await listMappingPresets(schemaId.value || undefined)
+    mappingPresets.value = await listMappingPresets()
   } catch {
     mappingPresets.value = []
   }
@@ -362,7 +362,7 @@ async function saveMappingPreset() {
 
 async function addMappingsFromPreset(name) {
   const preset = await apiLoadMappingPreset(name)
-  const newMappings = normalizeMappings(preset.mappings, name, preset.db_alias || '')
+  const newMappings = normalizeMappings(preset.mappings, name)
   sqlMappings.value.push(...newMappings)
   mappingDbColumns.value = {}
 }

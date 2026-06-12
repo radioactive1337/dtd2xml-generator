@@ -1,8 +1,7 @@
 import client from './client'
 
-export async function listMappingPresets(schemaId) {
-  const params = schemaId ? { schema_id: schemaId } : {}
-  const { data } = await client.get('/mapping-presets', { params })
+export async function listMappingPresets() {
+  const { data } = await client.get('/mapping-presets')
   return data
 }
 

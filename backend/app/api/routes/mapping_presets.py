@@ -31,14 +31,12 @@ class SqlMappingEntry(BaseModel):
 class MappingPresetSummary(BaseModel):
     name: str
     schema_id: str = ""
-    db_alias: str = ""
     mapping_count: int
 
 
 class MappingPresetData(BaseModel):
     name: str
     schema_id: str = ""
-    db_alias: str = ""
     mappings: list[SqlMappingEntry] = Field(default_factory=list)
 
 
@@ -78,7 +76,6 @@ async def list_mapping_presets(
             MappingPresetSummary(
                 name=data.get("name", path.stem),
                 schema_id=preset_schema,
-                db_alias=data.get("db_alias", ""),
                 mapping_count=len(data.get("mappings", [])),
             )
         )
@@ -103,19 +100,19 @@ async def load_mapping_preset(name: str) -> MappingPresetData:
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Mapping preset '{name}' not found")
     data = json.loads(path.read_text(encoding="utf-8"))
+    legacy_alias = data.get("db_alias", "")
     mappings = [
         SqlMappingEntry(
             target_element=m.get("target_element", ""),
             query=m.get("query", ""),
             fields=_normalize_fields(m.get("fields", [])),
-            db_alias=m.get("db_alias", ""),
+            db_alias=m.get("db_alias") or legacy_alias,
         )
         for m in data.get("mappings", [])
     ]
     return MappingPresetData(
         name=data.get("name", name),
         schema_id=data.get("schema_id", ""),
-        db_alias=data.get("db_alias", ""),
         mappings=mappings,
     )
 

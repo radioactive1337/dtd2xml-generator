@@ -25,11 +25,11 @@ def client() -> TestClient:
 SAMPLE_PRESET = {
     "name": "Customer mapping",
     "schema_id": "schema-1",
-    "db_alias": "oracle_dev",
     "mappings": [
         {
             "target_element": "Customer",
             "query": "SELECT id, name FROM customers WHERE ROWNUM = 1",
+            "db_alias": "oracle_dev",
             "fields": [
                 {"db_col": "id", "xml_attr": "customerId"},
                 {"db_col": "name", "xml_attr": "customerName"},
@@ -43,12 +43,12 @@ def test_save_and_load_mapping_preset(client: TestClient):
     response = client.post("/api/mapping-presets", json=SAMPLE_PRESET)
     assert response.status_code == 200
     assert response.json()["name"] == "Customer mapping"
+    assert "db_alias" not in response.json()
 
     response = client.get("/api/mapping-presets/Customer%20mapping")
     assert response.status_code == 200
     data = response.json()
-    assert data["db_alias"] == "oracle_dev"
-    assert len(data["mappings"]) == 1
+    assert data["mappings"][0]["db_alias"] == "oracle_dev"
     assert data["mappings"][0]["fields"][0]["db_col"] == "id"
 
 
@@ -58,6 +58,10 @@ def test_list_mapping_presets_filters_by_schema(client: TestClient):
         "/api/mapping-presets",
         json={**SAMPLE_PRESET, "name": "Other schema", "schema_id": "schema-2"},
     )
+
+    response = client.get("/api/mapping-presets")
+    assert response.status_code == 200
+    assert len(response.json()) == 2
 
     response = client.get("/api/mapping-presets", params={"schema_id": "schema-1"})
     assert response.status_code == 200
@@ -94,5 +98,7 @@ def test_load_legacy_dict_fields(client: TestClient, tmp_path: Path):
 
     response = client.get("/api/mapping-presets/Legacy")
     assert response.status_code == 200
-    fields = response.json()["mappings"][0]["fields"]
-    assert fields == [{"db_col": "a", "xml_attr": "attrA"}]
+    data = response.json()
+    assert data["mappings"][0]["fields"] == [{"db_col": "a", "xml_attr": "attrA"}]
+    assert data["mappings"][0]["db_alias"] == "pg"
+    assert "db_alias" not in data
