@@ -82,31 +82,40 @@
                 >
                   Save
                 </button>
-                <select
-                  v-model="loadMappingPresetName"
-                  class="preset-select"
-                  @change="onLoadMappingPreset"
-                >
-                  <option value="">Load preset...</option>
-                  <option v-for="p in mappingPresets" :key="p.name" :value="p.name">
-                    {{ p.name }} ({{ p.mapping_count }})
-                  </option>
-                </select>
+              </div>
+            </div>
+            <div v-if="mappingPresets.length" class="mapping-preset-list">
+              <label
+                v-for="p in mappingPresets"
+                :key="p.name"
+                class="preset-checkbox"
+              >
+                <input
+                  v-model="selectedMappingPresetNames"
+                  type="checkbox"
+                  :value="p.name"
+                />
+                <span class="preset-checkbox-label">
+                  {{ p.name }}
+                  <span class="preset-meta">
+                    {{ p.db_alias || 'no alias' }} · {{ p.mapping_count }} mapping{{ p.mapping_count === 1 ? '' : 's' }}
+                  </span>
+                </span>
                 <button
                   class="btn-icon-remove"
-                  :disabled="!loadMappingPresetName"
                   title="Delete preset"
-                  @click="deleteMappingPreset"
+                  @click.prevent="deleteMappingPreset(p.name)"
                 >
                   ×
                 </button>
-              </div>
+              </label>
             </div>
+            <p v-else-if="schemaId" class="preset-empty-hint">No saved presets for this schema</p>
             <span class="overrides-hint">Stage 1 — DB values fill first, Faker/AI fills the rest</span>
           </div>
 
           <div class="field">
-            <label>DB Alias</label>
+            <label>Default DB Alias</label>
             <select v-model="dbAlias">
               <option value="">Select alias...</option>
               <option v-for="a in dbAliases" :key="a" :value="a">{{ a }}</option>
@@ -115,8 +124,17 @@
 
           <div v-for="(mapping, mi) in sqlMappings" :key="mi" class="mapping-card">
             <div class="mapping-header">
-              <span class="mapping-title">Mapping {{ mi + 1 }}</span>
-              <button class="btn-icon-remove" @click="removeMapping(mi)" title="Remove mapping">×</button>
+              <div class="mapping-header-left">
+                <span class="mapping-title">Mapping {{ mi + 1 }}</span>
+                <span v-if="mapping._presetSource" class="mapping-preset-badge">{{ mapping._presetSource }}</span>
+              </div>
+              <div class="mapping-header-right">
+                <select v-model="mapping.db_alias" class="mapping-db-alias" title="DB alias for this mapping">
+                  <option value="">Default</option>
+                  <option v-for="a in dbAliases" :key="a" :value="a">{{ a }}</option>
+                </select>
+                <button class="btn-icon-remove" @click="removeMapping(mi)" title="Remove mapping">×</button>
+              </div>
             </div>
 
             <div class="field">
@@ -278,11 +296,17 @@ const dbAliases = ref([])
 const mappingDbColumns = ref({})
 const mappingColumnsCache = ref({})
 const mappingPresetName = ref('')
-const loadMappingPresetName = ref('')
+const selectedMappingPresetNames = ref([])
 const mappingPresets = ref([])
 
 function createEmptyMapping() {
-  return { target_element: '', query: '', fields: [{ db_col: '', xml_attr: '' }] }
+  return {
+    target_element: '',
+    query: '',
+    fields: [{ db_col: '', xml_attr: '' }],
+    db_alias: '',
+    _presetSource: null,
+  }
 }
 const sqlMappings = ref([createEmptyMapping()])
 
@@ -309,15 +333,21 @@ function removeField(mi, fi) {
     sqlMappings.value[mi].fields.push({ db_col: '', xml_attr: '' })
 }
 
-function normalizeMappings(mappings) {
-  if (!mappings?.length) return [createEmptyMapping()]
+function normalizeMappings(mappings, presetSource = null, presetDbAlias = '') {
+  if (!mappings?.length) return []
   return mappings.map((m) => ({
     target_element: m.target_element || '',
     query: m.query || '',
     fields: m.fields?.length
       ? m.fields.map((f) => ({ db_col: f.db_col || '', xml_attr: f.xml_attr || '' }))
       : [{ db_col: '', xml_attr: '' }],
+    db_alias: m.db_alias || presetDbAlias || '',
+    _presetSource: presetSource,
   }))
+}
+
+function mappingDbAlias(mapping) {
+  return mapping.db_alias || dbAlias.value
 }
 
 async function refreshMappingPresets() {
@@ -330,28 +360,28 @@ async function refreshMappingPresets() {
 
 async function saveMappingPreset() {
   if (!mappingPresetName.value) return
+  const mappings = sqlMappings.value.map(({ _presetSource, ...m }) => m)
   await apiSaveMappingPreset({
     name: mappingPresetName.value,
     schema_id: schemaId.value,
     db_alias: dbAlias.value,
-    mappings: sqlMappings.value,
+    mappings,
   })
   await refreshMappingPresets()
-  loadMappingPresetName.value = mappingPresetName.value
 }
 
-async function onLoadMappingPreset() {
-  if (!loadMappingPresetName.value) return
-  const preset = await apiLoadMappingPreset(loadMappingPresetName.value)
-  dbAlias.value = preset.db_alias || ''
-  sqlMappings.value = normalizeMappings(preset.mappings)
+async function addMappingsFromPreset(name) {
+  const preset = await apiLoadMappingPreset(name)
+  const newMappings = normalizeMappings(preset.mappings, name, preset.db_alias || '')
+  sqlMappings.value.push(...newMappings)
   mappingDbColumns.value = {}
 }
 
-async function deleteMappingPreset() {
-  if (!loadMappingPresetName.value) return
-  await apiDeleteMappingPreset(loadMappingPresetName.value)
-  loadMappingPresetName.value = ''
+async function deleteMappingPreset(name) {
+  await apiDeleteMappingPreset(name)
+  selectedMappingPresetNames.value = selectedMappingPresetNames.value.filter((n) => n !== name)
+  sqlMappings.value = sqlMappings.value.filter((m) => m._presetSource !== name)
+  if (sqlMappings.value.length === 0) sqlMappings.value.push(createEmptyMapping())
   await refreshMappingPresets()
 }
 
@@ -418,7 +448,7 @@ function isDatalistValueSelected(input) {
 
 async function refreshMappingColumns(mi) {
   const mapping = sqlMappings.value[mi]
-  const alias = dbAlias.value
+  const alias = mappingDbAlias(mapping)
   const query = mapping?.query?.trim()
   if (!alias || !query) {
     mappingDbColumns.value = { ...mappingDbColumns.value, [mi]: [] }
@@ -541,6 +571,25 @@ watch(
   { deep: true },
 )
 
+watch(selectedMappingPresetNames, async (newNames, oldNames) => {
+  const prev = oldNames || []
+  const added = newNames.filter((n) => !prev.includes(n))
+  const removed = prev.filter((n) => !newNames.includes(n))
+
+  if (removed.length) {
+    sqlMappings.value = sqlMappings.value.filter((m) => !removed.includes(m._presetSource))
+    mappingDbColumns.value = {}
+  }
+
+  for (const name of added) {
+    await addMappingsFromPreset(name)
+  }
+
+  if (sqlMappings.value.length === 0) {
+    sqlMappings.value.push(createEmptyMapping())
+  }
+})
+
 const modes = [
   { value: 'minimal', label: 'Minimal' },
   { value: 'maximal', label: 'Maximal' },
@@ -570,7 +619,8 @@ async function onDtdUploaded(result) {
   schemaId.value = result.schema_id
   elements.value = result.elements
   rootElement.value = ''
-  loadMappingPresetName.value = ''
+  selectedMappingPresetNames.value = []
+  sqlMappings.value = [createEmptyMapping()]
   await refreshMappingPresets()
   try {
     const summaries = await listElements(result.schema_id)
@@ -675,14 +725,17 @@ async function populate() {
       strategy: populateStrategy.value,
     }
     if (isHybridStrategy.value) {
-      request.db_alias = dbAlias.value
-      request.sql_mappings = sqlMappings.value.map((m) => ({
-        query: m.query,
-        target_element: m.target_element,
-        fields: Object.fromEntries(
-          m.fields.filter((f) => f.db_col && f.xml_attr).map((f) => [f.db_col, f.xml_attr]),
-        ),
-      }))
+      request.db_alias = dbAlias.value || null
+      request.sql_mappings = sqlMappings.value
+        .filter((m) => m.query?.trim() && m.target_element?.trim())
+        .map((m) => ({
+          query: m.query,
+          target_element: m.target_element,
+          fields: Object.fromEntries(
+            m.fields.filter((f) => f.db_col && f.xml_attr).map((f) => [f.db_col, f.xml_attr]),
+          ),
+          db_alias: m.db_alias || null,
+        }))
     }
     const result = await populateXml(request)
     skipXmlSync = true
@@ -927,8 +980,73 @@ function stopResize() {
   width: 130px;
 }
 
-.preset-select {
-  width: 160px;
+.mapping-preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.preset-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.preset-checkbox input {
+  flex-shrink: 0;
+}
+
+.preset-checkbox-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.preset-meta {
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+
+.preset-empty-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 4px 0 0;
+}
+
+.mapping-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mapping-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mapping-preset-badge {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--border) 40%, transparent);
+  border-radius: 3px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.mapping-db-alias {
+  width: 100px;
+  font-size: 11px;
+  padding: 2px 4px;
 }
 
 .overrides-title {

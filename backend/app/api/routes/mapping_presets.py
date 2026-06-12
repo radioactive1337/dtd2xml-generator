@@ -25,6 +25,7 @@ class SqlMappingEntry(BaseModel):
     target_element: str = ""
     query: str = ""
     fields: list[MappingField] = Field(default_factory=list)
+    db_alias: str = ""
 
 
 class MappingPresetSummary(BaseModel):
@@ -107,6 +108,7 @@ async def load_mapping_preset(name: str) -> MappingPresetData:
             target_element=m.get("target_element", ""),
             query=m.get("query", ""),
             fields=_normalize_fields(m.get("fields", [])),
+            db_alias=m.get("db_alias", ""),
         )
         for m in data.get("mappings", [])
     ]

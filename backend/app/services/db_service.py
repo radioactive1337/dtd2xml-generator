@@ -23,6 +23,7 @@ class SqlMapping(BaseModel):
     query: str
     target_element: str
     fields: dict[str, str]  # db_column -> xml_attribute (optionally prefixed with @)
+    db_alias: str | None = None  # per-mapping alias; falls back to request-level db_alias
 
 
 def _normalize_value(value: Any) -> Any:
@@ -293,7 +294,11 @@ class DBService:
             if not mapping.query.strip() or not mapping.target_element:
                 continue
 
-            rows = await self.run_query(db_alias, mapping.query)
+            alias = mapping.db_alias or db_alias
+            if not alias:
+                continue
+
+            rows = await self.run_query(alias, mapping.query)
             if not rows:
                 continue
 

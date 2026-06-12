@@ -71,15 +71,18 @@ async def populate_xml(request: PopulateRequest) -> PopulateResponse:
 
         # ── Stage 1: DB overrides (hybrid strategies only) ───────────────────
         if request.strategy in _HYBRID:
-            if not request.db_alias:
-                raise HTTPException(
-                    status_code=400,
-                    detail="db_alias is required for hybrid strategies",
-                )
             if not request.sql_mappings:
                 raise HTTPException(
                     status_code=400,
                     detail="sql_mappings cannot be empty for hybrid strategies",
+                )
+            has_alias = bool(request.db_alias) or any(
+                m.db_alias for m in request.sql_mappings
+            )
+            if not has_alias:
+                raise HTTPException(
+                    status_code=400,
+                    detail="db_alias is required for hybrid strategies (global or per mapping)",
                 )
             try:
                 xml, protected_attrs = await apply_db_overrides(
