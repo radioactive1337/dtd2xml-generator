@@ -395,6 +395,7 @@ async function saveMappingPreset() {
     mappings,
   })
   await refreshMappingPresets()
+  mappingPresetName.value = ''
 }
 
 async function addMappingsFromPreset(name) {
@@ -616,6 +617,12 @@ watch(selectedMappingPresetNames, async (newNames, oldNames) => {
   const prev = oldNames || []
   const added = newNames.filter((n) => !prev.includes(n))
   const removed = prev.filter((n) => !newNames.includes(n))
+
+  if (!newNames.length && removed.length) {
+    sqlMappings.value = []
+    mappingDbColumns.value = {}
+    return
+  }
 
   if (removed.length) {
     sqlMappings.value = sqlMappings.value.filter((m) => !removed.includes(m._presetSource))
