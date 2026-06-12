@@ -131,13 +131,14 @@ class DBService:
                 return await self._query_oracle(cfg, password, safe_sql)
         except Exception:
             logger.exception(
-                "SQL query failed [alias=%s driver=%s host=%s:%s db=%s query=%s]",
+                "SQL query failed [alias=%s driver=%s host=%s:%s db=%s query=%s safe_query=%s]",
                 alias,
                 driver,
                 cfg.host,
                 cfg.port,
                 cfg.database or cfg.sid,
                 truncate(sql),
+                truncate(safe_sql),
             )
             raise
 

@@ -51,7 +51,30 @@ def test_apply_row_limit_postgresql():
 
 def test_apply_row_limit_oracle():
     wrapped = apply_row_limit("SELECT id FROM big_table", "oracle")
-    assert wrapped == "SELECT * FROM (SELECT id FROM big_table) _safe_q WHERE ROWNUM <= 1"
+    assert wrapped == "SELECT id FROM big_table FETCH FIRST 1 ROW ONLY"
+
+
+def test_apply_row_limit_oracle_skips_when_rownum_present():
+    sql = "SELECT id FROM big_table WHERE ROWNUM = 1"
+    assert apply_row_limit(sql, "oracle") == sql
+
+
+def test_normalize_strips_fullwidth_semicolon():
+    from app.services.sql_safety import normalize_sql_text
+
+    assert (
+        normalize_sql_text("SELECT 1\uFF1B")
+        == "SELECT 1"
+    )
+
+
+def test_normalize_replaces_smart_quotes():
+    from app.services.sql_safety import normalize_sql_text
+
+    assert (
+        normalize_sql_text("SELECT 1 WHERE x = \u2018abc\u2019")
+        == "SELECT 1 WHERE x = 'abc'"
+    )
 
 
 def test_prepare_safe_query_wraps_select():
