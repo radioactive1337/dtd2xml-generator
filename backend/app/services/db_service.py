@@ -69,7 +69,6 @@ def _oracle_columns_sync(
     conn = oracledb.connect(user=user, password=password, dsn=dsn)
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SET TRANSACTION READ ONLY")
             cursor.execute(sql)
             if cursor.description is None:
                 return []
@@ -99,13 +98,16 @@ def _oracle_query_sync(
     conn = oracledb.connect(user=user, password=password, dsn=dsn)
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SET TRANSACTION READ ONLY")
+            cursor.arraysize = 1
+            cursor.prefetchrows = 1
             cursor.execute(sql)
             if cursor.description is None:
                 return []
             columns = [col[0] for col in cursor.description]
-            rows = cursor.fetchall()
-            return _rows_to_dicts(columns, rows)
+            row = cursor.fetchone()
+            if row is None:
+                return []
+            return _rows_to_dicts(columns, [row])
     finally:
         conn.close()
 
@@ -234,8 +236,10 @@ class DBService:
             await conn.execute(
                 "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
             )
-            rows = await conn.fetch(sql)
-            return [{k.lower(): v for k, v in dict(row).items()} for row in rows]
+            row = await conn.fetchrow(sql)
+            if row is None:
+                return []
+            return [{k.lower(): v for k, v in dict(row).items()}]
         finally:
             await conn.close()
 

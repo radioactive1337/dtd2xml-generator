@@ -7,18 +7,7 @@ import re
 _SELECT_START = re.compile(r"^(?:WITH\b|SELECT\b)", re.IGNORECASE | re.DOTALL)
 _STATEMENT_TERMINATORS = frozenset({";", "\uff1b"})
 _INVISIBLE_CHARS = re.compile(r"[\x00\u200b\u200c\u200d\ufeff]")
-_SMART_QUOTES = str.maketrans(
-    {
-        "\u2018": "'",
-        "\u2019": "'",
-        "\u201c": '"',
-        "\u201d": '"',
-    }
-)
-_ORACLE_ROW_LIMIT = re.compile(
-    r"\b(?:ROWNUM\b|FETCH\s+(?:FIRST|NEXT)\s+\d+\s+ROWS?\s+ONLY)\b",
-    re.IGNORECASE,
-)
+_NON_ASCII_QUOTES = re.compile(r"[\u2018\u2019\u201a\u201b\u2032\u2035\u02bc\u02b9\u0060\u00b4]")
 
 
 def strip_sql_comments(sql: str) -> str:
@@ -48,7 +37,8 @@ def strip_sql_comments(sql: str) -> str:
 
 def normalize_sql_text(sql: str) -> str:
     """Remove invisible characters and trailing statement terminators."""
-    normalized = _INVISIBLE_CHARS.sub("", sql).translate(_SMART_QUOTES).strip()
+    normalized = _INVISIBLE_CHARS.sub("", sql)
+    normalized = _NON_ASCII_QUOTES.sub("'", normalized).strip()
     while normalized and normalized[-1] in _STATEMENT_TERMINATORS:
         normalized = normalized[:-1].rstrip()
     return normalized
@@ -73,21 +63,7 @@ def validate_readonly_select(sql: str) -> str:
     return normalized
 
 
-def apply_row_limit(sql: str, driver: str) -> str:
-    """Wrap a validated SELECT so the database returns at most one row."""
-    driver_key = driver.lower()
-    if driver_key == "postgresql":
-        return f"SELECT * FROM ({sql}) AS _safe_q LIMIT 1"
-    if driver_key in {"oracle", "oracledb"}:
-        if _ORACLE_ROW_LIMIT.search(sql):
-            return sql
-        return f"SELECT * FROM ({sql}) _safe_q WHERE ROWNUM <= 1"
-    return sql
-
-
 def prepare_safe_query(sql: str, driver: str, *, limit_rows: bool = True) -> str:
-    """Validate user SQL and optionally enforce a single-row cap."""
-    safe_sql = validate_readonly_select(sql)
-    if limit_rows:
-        return apply_row_limit(safe_sql, driver)
-    return safe_sql
+    """Validate user SQL. Row limits are enforced by the DB driver, not SQL rewriting."""
+    del driver, limit_rows
+    return validate_readonly_select(sql)

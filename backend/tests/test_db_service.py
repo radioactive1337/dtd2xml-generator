@@ -59,9 +59,7 @@ async def test_run_query_oracle_returns_normalized_rows():
 
     oracle_query.assert_called_once()
     called_sql = oracle_query.call_args.args[3]
-    assert called_sql == (
-        "SELECT inn, name FROM company WHERE rownum = 1"
-    )
+    assert called_sql == "SELECT inn, name FROM company WHERE rownum = 1"
     assert rows == expected
 
 
