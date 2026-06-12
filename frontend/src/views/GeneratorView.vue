@@ -56,8 +56,8 @@
         />
 
         <div class="field">
-          <label>Populate Strategy</label>
-          <select v-model="populateStrategy">
+          <label>Fill Strategy</label>
+          <select v-model="fillStrategy">
             <option value="faker">Smart Faker (Fast &amp; Local)</option>
             <option value="ai">AI / LLM (Smart Context)</option>
             <option value="hybrid_db_faker">Hybrid: Database + Smart Faker</option>
@@ -250,8 +250,8 @@
           <button class="btn-primary" :disabled="!canGenerate || generating" @click="generate">
             {{ generating ? 'Generating...' : 'Generate XML' }}
           </button>
-          <button class="btn-secondary" :disabled="!xmlText || populating" @click="populate">
-            {{ populating ? 'Populating...' : 'Populate Data' }}
+          <button class="btn-secondary" :disabled="!xmlText || filling" @click="fill">
+            {{ filling ? 'Filling...' : 'Fill Data' }}
           </button>
           <button class="btn-secondary" :disabled="!canValidate || validating" @click="validate">
             {{ validating ? 'Validating...' : 'Validate DTD' }}
@@ -291,7 +291,7 @@ import DtdUpload from '../components/DtdUpload.vue'
 import DtdTreeView from '../components/DtdTreeView.vue'
 import XmlEditor from '../components/XmlEditor.vue'
 import { generateXml } from '../api/generate'
-import { populateXml } from '../api/populate'
+import { fillXml } from '../api/fill'
 import { validateXml } from '../api/validate'
 import { fetchQueryColumns } from '../api/db'
 import { getConfigAliases, listElements } from '../api/dtd'
@@ -310,7 +310,7 @@ const rootElement = ref('')
 const mode = ref('minimal')
 const repeatCount = ref(1)
 const customPaths = ref([])
-const populateStrategy = ref('faker')
+const fillStrategy = ref('faker')
 const dbAliases = ref([])
 const mappingDbColumns = ref({})
 const mappingColumnsCache = ref({})
@@ -332,7 +332,7 @@ function createEmptyMapping() {
 const sqlMappings = ref([])
 
 const isHybridStrategy = computed(
-  () => populateStrategy.value === 'hybrid_db_faker' || populateStrategy.value === 'hybrid_db_ai',
+  () => fillStrategy.value === 'hybrid_db_faker' || fillStrategy.value === 'hybrid_db_ai',
 )
 
 const presetDropdownLabel = computed(() => {
@@ -555,7 +555,7 @@ function blurAfterDatalistPick(event) {
 const xmlText = ref('')
 const buildInfo = ref(null)
 const generating = ref(false)
-const populating = ref(false)
+const filling = ref(false)
 const validating = ref(false)
 const validationResult = ref(null)
 const error = ref('')
@@ -761,14 +761,14 @@ async function generate() {
   }
 }
 
-async function populate() {
-  populating.value = true
+async function fill() {
+  filling.value = true
   error.value = ''
   try {
     const request = {
       schema_id: schemaId.value,
       xml_text: xmlText.value,
-      strategy: populateStrategy.value,
+      strategy: fillStrategy.value,
     }
     if (isHybridStrategy.value) {
       request.sql_mappings = sqlMappings.value
@@ -782,14 +782,14 @@ async function populate() {
           db_alias: m.db_alias || null,
         }))
     }
-    const result = await populateXml(request)
+    const result = await fillXml(request)
     skipXmlSync = true
     xmlText.value = result.xml_text
     validationResult.value = null
   } catch (e) {
     error.value = e.message
   } finally {
-    populating.value = false
+    filling.value = false
   }
 }
 

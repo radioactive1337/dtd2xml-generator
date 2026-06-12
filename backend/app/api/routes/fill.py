@@ -1,4 +1,4 @@
-"""XML data population endpoints — two-stage hybrid pipeline."""
+"""XML data fill endpoints — two-stage hybrid pipeline."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from app.services.db_service import SqlMapping, apply_db_overrides
 from app.services.faker_service import populate_with_faker
 from app.services.llm_service import populate_with_llm
 
-router = APIRouter(prefix="/populate", tags=["populate"])
+router = APIRouter(prefix="/fill", tags=["fill"])
 
 # fmt: off
 Strategy = Literal[
@@ -27,7 +27,7 @@ Strategy = Literal[
 _HYBRID = frozenset({"hybrid_db_faker", "hybrid_db_ai"})
 
 
-class PopulateRequest(BaseModel):
+class FillRequest(BaseModel):
     schema_id: str
     xml_text: str
     strategy: Strategy = "faker"
@@ -40,14 +40,14 @@ class PopulateRequest(BaseModel):
     faker_locale: str = "ru_RU"
 
 
-class PopulateResponse(BaseModel):
+class FillResponse(BaseModel):
     xml_text: str
     strategy: str
 
 
-@router.post("", response_model=PopulateResponse)
-async def populate_xml(request: PopulateRequest) -> PopulateResponse:
-    """Populate XML with test data using a two-stage hybrid pipeline.
+@router.post("", response_model=FillResponse)
+async def fill_xml(request: FillRequest) -> FillResponse:
+    """Fill XML with test data using a two-stage hybrid pipeline.
 
     Stage 1 (DB overrides) runs only for hybrid strategies and fills the
     attributes declared in *sql_mappings* with real database values.
@@ -143,4 +143,4 @@ async def populate_xml(request: PopulateRequest) -> PopulateResponse:
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    return PopulateResponse(xml_text=result, strategy=request.strategy)
+    return FillResponse(xml_text=result, strategy=request.strategy)
