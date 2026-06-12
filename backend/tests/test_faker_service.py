@@ -99,3 +99,17 @@ def test_hybrid_fills_unmapped_placeholder_attributes(schema, skeleton_xml):
     field = populated.find("Body/Record/Field")
     assert field is not None
     assert field.attrib.get("name")
+
+
+@pytest.fixture
+def enterprise_schema():
+    parser = DTDParser(base_dir=FIXTURES)
+    return parser.parse_file(FIXTURES / "enterprise_sample.dtd")
+
+
+def test_literal_default_attribute_populated(enterprise_schema):
+    config = BuildConfig(root_element="success", mode="maximal")
+    skeleton = build_xml(enterprise_schema, config).xml_text
+    result = populate_with_faker(skeleton, enterprise_schema)
+    root = etree.fromstring(result.encode("utf-8"))
+    assert root.attrib.get("document_type") == "a"

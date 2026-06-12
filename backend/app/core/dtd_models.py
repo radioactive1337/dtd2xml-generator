@@ -27,6 +27,16 @@ class AttributeDef(BaseModel):
     allowed_values: list[str] = Field(default_factory=list)
     doc: str = ""
 
+    def dtd_default_value(self) -> str | None:
+        """Return a single constrained value from the DTD, if any."""
+        if self.default_decl.startswith("#FIXED"):
+            return self.default_decl.replace("#FIXED", "").strip().strip("\"'")
+        if self.default_decl and not self.default_decl.startswith("#"):
+            return self.default_decl.strip().strip("\"'")
+        if self.attr_type == "ENUM" and len(self.allowed_values) == 1:
+            return self.allowed_values[0]
+        return None
+
 
 class ElementDef(BaseModel):
     """DTD element definition with parsed content model and attributes."""

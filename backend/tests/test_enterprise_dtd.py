@@ -53,3 +53,26 @@ def test_hyphenated_attribute_names(schema):
 
 def test_element_count(schema):
     assert len(schema.elements) >= 40
+
+
+def test_literal_default_attribute(schema):
+    fault = schema.elements["fault"]
+    attr = fault.attributes["document_type"]
+    assert attr.attr_type == "CDATA"
+    assert attr.default_decl == '"a"'
+    assert attr.dtd_default_value() == "a"
+
+
+def test_single_value_enum_default():
+    parser = DTDParser()
+    dtd = """
+    <!ELEMENT Root EMPTY>
+    <!ATTLIST Root
+        document_type (payment-order) #REQUIRED
+    >
+    """
+    schema = parser.parse_string(dtd)
+    attr = schema.elements["Root"].attributes["document_type"]
+    assert attr.attr_type == "ENUM"
+    assert attr.allowed_values == ["payment-order"]
+    assert attr.dtd_default_value() == "payment-order"

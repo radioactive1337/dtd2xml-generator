@@ -99,9 +99,8 @@ class XMLBuilder:
         return current_path in self.config.custom_paths or attr_path in self.config.custom_paths
 
     def _attribute_placeholder(self, attr: AttributeDef) -> str:
-        if attr.default_decl.startswith("#FIXED"):
-            fixed = attr.default_decl.replace("#FIXED", "").strip().strip("\"'")
-            return fixed
+        if constrained := attr.dtd_default_value():
+            return constrained
         if attr.attr_type == "ENUM" and attr.allowed_values:
             return attr.allowed_values[0]
         if attr.attr_type == "ID":

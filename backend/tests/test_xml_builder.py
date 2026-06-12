@@ -137,3 +137,16 @@ def test_custom_choice_accepts_ui_group_path(aux_auth_schema):
 
     assert aux_auth is not None
     assert [c.tag for c in aux_auth] == ["front-auth-key"]
+
+
+@pytest.fixture
+def enterprise_schema():
+    parser = DTDParser(base_dir=FIXTURES)
+    return parser.parse_file(FIXTURES / "enterprise_sample.dtd")
+
+
+def test_literal_default_attribute_in_skeleton(enterprise_schema):
+    config = BuildConfig(root_element="success", mode="maximal")
+    result = build_xml(enterprise_schema, config)
+    root = etree.fromstring(result.xml_text.encode("utf-8"))
+    assert root.attrib.get("document_type") == "a"
