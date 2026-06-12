@@ -250,13 +250,8 @@
           <button class="btn-primary" :disabled="!canGenerate || generating" @click="generate">
             {{ generating ? 'Generating...' : 'Generate XML' }}
           </button>
-<<<<<<< HEAD
           <button class="btn-secondary" :disabled="!xmlText || filling" @click="fill">
             {{ filling ? 'Filling...' : 'Fill Data' }}
-=======
-          <button class="btn-secondary" :disabled="!xmlText || populating" @click="populate">
-            {{ populating ? 'Filling...' : 'Fill Data' }}
->>>>>>> a1c0495ab3888b2c822d525c7869be4fe1083c94
           </button>
           <button class="btn-secondary" :disabled="!canValidate || validating" @click="validate">
             {{ validating ? 'Validating...' : 'Validate DTD' }}
