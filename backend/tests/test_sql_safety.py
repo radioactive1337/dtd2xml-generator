@@ -4,11 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.sql_safety import (
-    normalize_sql_text,
-    prepare_safe_query,
-    validate_readonly_select,
-)
+from app.services.sql_safety import normalize_sql_text, validate_readonly_select
 
 
 def test_validate_allows_select():
@@ -53,8 +49,3 @@ def test_normalize_replaces_smart_quotes():
         normalize_sql_text("SELECT 1 WHERE x = \u2018abc\u2019")
         == "SELECT 1 WHERE x = 'abc'"
     )
-
-
-def test_prepare_safe_query_does_not_rewrite_sql():
-    sql = "select * from VW_CRIT_ACTIVE where C_7 = 'test'"
-    assert prepare_safe_query(sql, "oracle") == sql

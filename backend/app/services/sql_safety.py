@@ -61,9 +61,3 @@ def validate_readonly_select(sql: str) -> str:
         raise ValueError("Only SELECT queries are allowed")
 
     return normalized
-
-
-def prepare_safe_query(sql: str, driver: str, *, limit_rows: bool = True) -> str:
-    """Validate user SQL. Row limits are enforced by the DB driver, not SQL rewriting."""
-    del driver, limit_rows
-    return validate_readonly_select(sql)

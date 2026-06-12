@@ -14,7 +14,7 @@ from app.config import DatabaseConfig, get_db_password, load_connections
 from app.core.dtd_models import DTDSchema
 from app.core.logging_config import truncate
 from app.services.oracle_client import ensure_oracle_thick_mode, map_oracle_client_error
-from app.services.sql_safety import prepare_safe_query
+from app.services.sql_safety import validate_readonly_select
 from lxml import etree
 
 from app.core.xml_tree import ProtectedAttrs, element_path
@@ -124,23 +124,22 @@ class DBService:
         cfg = connections.databases[alias]
         password = get_db_password(alias)
         driver = cfg.driver.lower()
-        safe_sql = prepare_safe_query(sql, driver, limit_rows=True)
+        validated_sql = validate_readonly_select(sql)
 
         try:
             if driver == "postgresql":
-                return await self._query_postgresql(cfg, password, safe_sql)
+                return await self._query_postgresql(cfg, password, validated_sql)
             if driver in {"oracle", "oracledb"}:
-                return await self._query_oracle(cfg, password, safe_sql)
+                return await self._query_oracle(cfg, password, validated_sql)
         except Exception:
             logger.exception(
-                "SQL query failed [alias=%s driver=%s host=%s:%s db=%s query=%s safe_query=%s]",
+                "SQL query failed [alias=%s driver=%s host=%s:%s db=%s query=%s]",
                 alias,
                 driver,
                 cfg.host,
                 cfg.port,
                 cfg.database or cfg.sid,
-                truncate(sql),
-                truncate(safe_sql),
+                truncate(validated_sql),
             )
             raise
 
@@ -156,13 +155,13 @@ class DBService:
         cfg = connections.databases[alias]
         password = get_db_password(alias)
         driver = cfg.driver.lower()
-        safe_sql = prepare_safe_query(sql, driver, limit_rows=False)
+        validated_sql = validate_readonly_select(sql)
 
         try:
             if driver == "postgresql":
-                return await self._query_columns_postgresql(cfg, password, safe_sql)
+                return await self._query_columns_postgresql(cfg, password, validated_sql)
             if driver in {"oracle", "oracledb"}:
-                return await self._query_columns_oracle(cfg, password, safe_sql)
+                return await self._query_columns_oracle(cfg, password, validated_sql)
         except Exception:
             logger.exception(
                 "SQL column introspection failed [alias=%s driver=%s host=%s:%s query=%s]",
