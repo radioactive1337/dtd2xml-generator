@@ -91,8 +91,8 @@
                 v-model="mapping.target_element"
                 list="target-elements-list"
                 placeholder="Element name (type or pick from list)"
-                @input="blurAfterDatalistPick"
-                @change="blurAfterDatalistPick"
+                @input="onTargetElementInput(mi, $event)"
+                @change="onTargetElementChange(mi, $event)"
                 @keydown.enter="dismissDatalistInput"
                 @focus="restoreDatalistPopup"
                 @blur="closeDatalistPopup"
@@ -264,6 +264,25 @@ function removeField(mi, fi) {
   sqlMappings.value[mi].fields.splice(fi, 1)
   if (sqlMappings.value[mi].fields.length === 0)
     sqlMappings.value[mi].fields.push({ db_col: '', xml_attr: '' })
+}
+
+function resetMappingXmlAttrs(mi) {
+  for (const field of sqlMappings.value[mi].fields) {
+    field.xml_attr = ''
+  }
+}
+
+function onTargetElementInput(mi, event) {
+  blurAfterDatalistPick(event)
+  const { inputType } = event
+  if (!inputType || inputType === 'insertReplacementText') {
+    resetMappingXmlAttrs(mi)
+  }
+}
+
+function onTargetElementChange(mi, event) {
+  resetMappingXmlAttrs(mi)
+  blurAfterDatalistPick(event)
 }
 
 const allAttributes = computed(() => {
