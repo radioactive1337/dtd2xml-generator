@@ -3,6 +3,14 @@
     <div class="editor-header">
       <div class="panel-title">XML Preview</div>
       <div class="editor-actions">
+        <button
+          class="btn-secondary btn-format"
+          :disabled="!modelValue"
+          title="Format document (Alt+Shift+F)"
+          @click="formatDocument"
+        >
+          <span class="format-icon" aria-hidden="true">{ }</span>Format
+        </button>
         <button class="btn-secondary" :disabled="!modelValue" @click="copyToClipboard">
           {{ copied ? 'Copied!' : 'Copy' }}
         </button>
@@ -18,6 +26,7 @@
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import loader from '@monaco-editor/loader'
+import { registerXmlFormatter } from '../utils/formatXml'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -32,6 +41,7 @@ let monaco = null
 
 onMounted(async () => {
   monaco = await loader.init()
+  registerXmlFormatter(monaco)
   editor = monaco.editor.create(editorContainer.value, {
     value: props.modelValue,
     language: 'xml',
@@ -40,6 +50,7 @@ onMounted(async () => {
     minimap: { enabled: false },
     wordWrap: 'on',
     fontSize: 13,
+    tabSize: 2,
     scrollBeyondLastLine: false,
     automaticLayout: true,
   })
@@ -105,6 +116,11 @@ function downloadXml() {
   URL.revokeObjectURL(url)
 }
 
+async function formatDocument() {
+  if (!editor) return
+  await editor.getAction('editor.action.formatDocument')?.run()
+}
+
 function goToPosition(line, column) {
   if (!editor || !line || line < 1) return
   const position = { lineNumber: line, column: column > 0 ? column : 1 }
@@ -135,6 +151,17 @@ defineExpose({ goToPosition })
 .editor-actions {
   display: flex;
   gap: 8px;
+}
+
+.btn-format {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.format-icon {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 600;
+  margin-right: 4px;
 }
 
 .editor-container {
