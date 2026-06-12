@@ -251,7 +251,7 @@
             {{ generating ? 'Generating...' : 'Generate XML' }}
           </button>
           <button class="btn-secondary" :disabled="!xmlText || populating" @click="populate">
-            {{ populating ? 'Populating...' : 'Populate Data' }}
+            {{ populating ? 'Filling...' : 'Fill Data' }}
           </button>
           <button class="btn-secondary" :disabled="!canValidate || validating" @click="validate">
             {{ validating ? 'Validating...' : 'Validate DTD' }}
@@ -291,7 +291,7 @@ import DtdUpload from '../components/DtdUpload.vue'
 import DtdTreeView from '../components/DtdTreeView.vue'
 import XmlEditor from '../components/XmlEditor.vue'
 import { generateXml } from '../api/generate'
-import { populateXml } from '../api/populate'
+import { fillXml } from '../api/fill'
 import { validateXml } from '../api/validate'
 import { fetchQueryColumns } from '../api/db'
 import { getConfigAliases, listElements } from '../api/dtd'
@@ -782,7 +782,7 @@ async function populate() {
           db_alias: m.db_alias || null,
         }))
     }
-    const result = await populateXml(request)
+    const result = await fillXml(request)
     skipXmlSync = true
     xmlText.value = result.xml_text
     validationResult.value = null

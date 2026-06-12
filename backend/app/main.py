@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import db, dtd, export, generate, mapping_presets, populate, presets, validate
+from app.api.routes import db, dtd, export, fill, generate, mapping_presets, presets, validate
 from app.config import PROJECT_ROOT, get_app_settings, get_connection_aliases
 from app.services.oracle_client import bootstrap_oracle_client
 
@@ -29,7 +29,7 @@ app.add_middleware(
 app.include_router(db.router, prefix="/api")
 app.include_router(dtd.router, prefix="/api")
 app.include_router(generate.router, prefix="/api")
-app.include_router(populate.router, prefix="/api")
+app.include_router(fill.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 app.include_router(presets.router, prefix="/api")
 app.include_router(mapping_presets.router, prefix="/api")
