@@ -117,13 +117,25 @@
                 <input
                   v-model="field.db_col"
                   class="field-input"
-                  placeholder="DB column (e.g. inn)"
+                  :list="`db-cols-list-${mi}`"
+                  placeholder="DB column (type or pick from list)"
+                  @input="blurAfterDatalistPick"
+                  @change="blurAfterDatalistPick"
+                  @keydown.enter="dismissDatalistInput"
+                  @focus="onDbColFocus(mi, $event)"
+                  @blur="closeDatalistPopup"
                 />
                 <span class="field-arrow">→</span>
                 <input
                   v-model="field.xml_attr"
                   class="field-input"
-                  placeholder="XML attr (e.g. inn)"
+                  :list="`xml-attrs-list-${mi}`"
+                  placeholder="XML attr (type or pick from list)"
+                  @input="blurAfterDatalistPick"
+                  @change="blurAfterDatalistPick"
+                  @keydown.enter="dismissDatalistInput"
+                  @focus="restoreDatalistPopup"
+                  @blur="closeDatalistPopup"
                 />
                 <button
                   class="btn-icon-remove"
@@ -137,6 +149,26 @@
 
           <datalist id="target-elements-list">
             <option v-for="el in elements" :key="el" :value="el" />
+          </datalist>
+
+          <datalist
+            v-for="(mapping, mi) in sqlMappings"
+            :id="`xml-attrs-list-${mi}`"
+            :key="`xml-attrs-${mi}`"
+          >
+            <option
+              v-for="attr in attributesForTarget(mapping.target_element)"
+              :key="attr"
+              :value="attr"
+            />
+          </datalist>
+
+          <datalist
+            v-for="(mapping, mi) in sqlMappings"
+            :id="`db-cols-list-${mi}`"
+            :key="`db-cols-${mi}`"
+          >
+            <option v-for="col in mappingDbColumns[mi] || []" :key="col" :value="col" />
           </datalist>
 
           <button class="btn-add-mapping" @click="addMapping">+ Add mapping</button>
@@ -189,11 +221,13 @@ import XmlEditor from '../components/XmlEditor.vue'
 import { generateXml } from '../api/generate'
 import { populateXml } from '../api/populate'
 import { validateXml } from '../api/validate'
-import { getConfigAliases } from '../api/dtd'
+import { fetchQueryColumns } from '../api/db'
+import { getConfigAliases, listElements } from '../api/dtd'
 import { extractXmlElementPaths } from '../utils/xmlPaths'
 
 const schemaId = ref('')
 const elements = ref([])
+const elementAttributes = ref({})
 const rootElement = ref('')
 const mode = ref('minimal')
 const repeatCount = ref(1)
@@ -201,6 +235,8 @@ const customPaths = ref([])
 const populateStrategy = ref('faker')
 const dbAlias = ref('')
 const dbAliases = ref([])
+const mappingDbColumns = ref({})
+const mappingColumnsCache = ref({})
 
 function createEmptyMapping() {
   return { target_element: '', query: '', fields: [{ db_col: '', xml_attr: '' }] }
@@ -228,6 +264,80 @@ function removeField(mi, fi) {
   sqlMappings.value[mi].fields.splice(fi, 1)
   if (sqlMappings.value[mi].fields.length === 0)
     sqlMappings.value[mi].fields.push({ db_col: '', xml_attr: '' })
+}
+
+const allAttributes = computed(() => {
+  const names = new Set()
+  for (const attrs of Object.values(elementAttributes.value)) {
+    for (const attr of attrs) names.add(attr)
+  }
+  return [...names].sort()
+})
+
+function attributesForTarget(targetElement) {
+  const attrs = targetElement ? elementAttributes.value[targetElement] : null
+  return attrs?.length ? attrs : allAttributes.value
+}
+
+function getDatalistOptions(input) {
+  const listId = input.dataset.datalistId || input.getAttribute('list')
+  if (!listId) return []
+  if (listId === 'root-elements-list' || listId === 'target-elements-list') {
+    return elements.value
+  }
+  const attrMatch = listId.match(/^xml-attrs-list-(\d+)$/)
+  if (attrMatch) {
+    const mapping = sqlMappings.value[Number(attrMatch[1])]
+    return mapping ? attributesForTarget(mapping.target_element) : allAttributes.value
+  }
+  const dbColMatch = listId.match(/^db-cols-list-(\d+)$/)
+  if (dbColMatch) {
+    return mappingDbColumns.value[Number(dbColMatch[1])] || []
+  }
+  return []
+}
+
+function isDatalistValueSelected(input) {
+  const listId = input.dataset.datalistId || input.getAttribute('list')
+  const options = getDatalistOptions(input)
+  const value = input.value
+  if (listId?.startsWith('db-cols-list-')) {
+    const lower = value.toLowerCase()
+    return options.some((col) => col.toLowerCase() === lower)
+  }
+  return options.includes(value)
+}
+
+async function refreshMappingColumns(mi) {
+  const mapping = sqlMappings.value[mi]
+  const alias = dbAlias.value
+  const query = mapping?.query?.trim()
+  if (!alias || !query) {
+    mappingDbColumns.value = { ...mappingDbColumns.value, [mi]: [] }
+    return
+  }
+
+  const cacheKey = `${alias}:${query}`
+  if (mappingColumnsCache.value[cacheKey]) {
+    mappingDbColumns.value = {
+      ...mappingDbColumns.value,
+      [mi]: mappingColumnsCache.value[cacheKey],
+    }
+    return
+  }
+
+  try {
+    const { columns } = await fetchQueryColumns(alias, query)
+    mappingColumnsCache.value[cacheKey] = columns
+    mappingDbColumns.value = { ...mappingDbColumns.value, [mi]: columns }
+  } catch {
+    mappingDbColumns.value = { ...mappingDbColumns.value, [mi]: [] }
+  }
+}
+
+function onDbColFocus(mi, event) {
+  restoreDatalistPopup(event)
+  refreshMappingColumns(mi)
 }
 
 function restoreDatalistPopup(event) {
@@ -260,7 +370,7 @@ function blurAfterDatalistPick(event) {
   if (!pickedFromList) return
 
   requestAnimationFrame(() => {
-    if (!elements.value.includes(input.value)) return
+    if (!isDatalistValueSelected(input)) return
     closeDatalistPopup(event)
     input.blur()
   })
@@ -279,6 +389,7 @@ const dtdTreeRef = ref(null)
 let skipXmlSync = false
 let skipModeSync = false
 let xmlSyncTimer = null
+let columnsFetchTimer = null
 
 const LEFT_MIN = 440
 const LEFT_MAX = 700
@@ -311,6 +422,17 @@ watch(xmlText, (text) => {
   }, 400)
 })
 
+watch(
+  [dbAlias, sqlMappings],
+  () => {
+    clearTimeout(columnsFetchTimer)
+    columnsFetchTimer = setTimeout(() => {
+      sqlMappings.value.forEach((_, mi) => refreshMappingColumns(mi))
+    }, 600)
+  },
+  { deep: true },
+)
+
 const modes = [
   { value: 'minimal', label: 'Minimal' },
   { value: 'maximal', label: 'Maximal' },
@@ -331,13 +453,20 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   clearTimeout(xmlSyncTimer)
+  clearTimeout(columnsFetchTimer)
   stopResize()
 })
 
-function onDtdUploaded(result) {
+async function onDtdUploaded(result) {
   schemaId.value = result.schema_id
   elements.value = result.elements
   rootElement.value = ''
+  try {
+    const summaries = await listElements(result.schema_id)
+    elementAttributes.value = Object.fromEntries(summaries.map((s) => [s.name, s.attributes]))
+  } catch {
+    elementAttributes.value = {}
+  }
   skipXmlSync = true
   xmlText.value = ''
   buildInfo.value = null

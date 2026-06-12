@@ -61,6 +61,33 @@ async def test_run_query_oracle_returns_normalized_rows():
     assert rows == expected
 
 
+@pytest.mark.asyncio
+async def test_get_query_columns_oracle_returns_description_columns():
+    cfg = _oracle_cfg()
+    connections = ConnectionsConfig(databases={"ORACLE_DB": cfg})
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    with patch("app.services.db_service.load_connections", return_value=connections):
+        with patch("app.services.db_service.get_db_password", return_value="secret"):
+            with patch(
+                "app.services.db_service._oracle_columns_sync",
+                return_value=["inn", "name"],
+            ) as oracle_columns:
+                with patch(
+                    "app.services.db_service.asyncio.to_thread",
+                    new=fake_to_thread,
+                ):
+                    columns = await DBService().get_query_columns(
+                        "ORACLE_DB",
+                        "SELECT inn, name FROM company WHERE rownum = 1",
+                    )
+
+    oracle_columns.assert_called_once()
+    assert columns == ["inn", "name"]
+
+
 def test_oracle_dsn_uses_service_name_by_default():
     dsn = _oracle_dsn(_oracle_cfg())
     assert "ORCLPDB1" in dsn

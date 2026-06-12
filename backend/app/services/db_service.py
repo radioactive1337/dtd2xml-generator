@@ -48,6 +48,29 @@ def _oracle_dsn(cfg: DatabaseConfig) -> str:
     return oracledb.makedsn(cfg.host, cfg.port, service_name=cfg.database)
 
 
+def _oracle_columns_sync(
+    user: str,
+    password: str,
+    dsn: str,
+    sql: str,
+) -> list[str]:
+    ensure_oracle_thick_mode(required=True)
+    if oracledb.is_thin_mode():
+        raise RuntimeError(
+            "Oracle thick mode is required but the driver is still in thin mode."
+        )
+
+    conn = oracledb.connect(user=user, password=password, dsn=dsn)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql)
+            if cursor.description is None:
+                return []
+            return [col[0].lower() for col in cursor.description]
+    finally:
+        conn.close()
+
+
 def _oracle_query_sync(
     user: str,
     password: str,
@@ -97,6 +120,61 @@ class DBService:
             return await self._query_oracle(cfg, password, sql)
 
         raise ValueError(f"Unsupported database driver: {cfg.driver}")
+
+    async def get_query_columns(self, alias: str, sql: str) -> list[str]:
+        connections = load_connections()
+        if alias not in connections.databases:
+            raise ValueError(f"Database alias '{alias}' not found in connections.json")
+
+        cfg = connections.databases[alias]
+        password = get_db_password(alias)
+        driver = cfg.driver.lower()
+
+        if driver == "postgresql":
+            return await self._query_columns_postgresql(cfg, password, sql)
+        if driver in {"oracle", "oracledb"}:
+            return await self._query_columns_oracle(cfg, password, sql)
+
+        raise ValueError(f"Unsupported database driver: {cfg.driver}")
+
+    async def _query_columns_postgresql(
+        self,
+        cfg: DatabaseConfig,
+        password: str,
+        sql: str,
+    ) -> list[str]:
+        conn = await asyncpg.connect(
+            host=cfg.host,
+            port=cfg.port,
+            user=cfg.user,
+            password=password,
+            database=cfg.database,
+        )
+        try:
+            prepared = await conn.prepare(sql)
+            return [attr.name.lower() for attr in prepared.get_attributes()]
+        finally:
+            await conn.close()
+
+    async def _query_columns_oracle(
+        self,
+        cfg: DatabaseConfig,
+        password: str,
+        sql: str,
+    ) -> list[str]:
+        try:
+            return await asyncio.to_thread(
+                _oracle_columns_sync,
+                cfg.user,
+                password,
+                _oracle_dsn(cfg),
+                sql,
+            )
+        except oracledb.Error as exc:
+            mapped = map_oracle_client_error(exc)
+            if mapped is not None:
+                raise mapped from exc
+            raise
 
     async def _query_postgresql(
         self,
