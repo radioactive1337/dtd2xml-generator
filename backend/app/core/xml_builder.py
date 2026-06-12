@@ -238,7 +238,9 @@ class XMLBuilder:
 
     def _select_choice_children(self, node: ContentNode, parent_path: str) -> list[ContentNode]:
         if self.config.mode == "maximal":
-            return list(node.children)
+            if not node.children:
+                return []
+            return [self._pick_richest_choice_child(node.children)]
 
         if self.config.mode == "minimal":
             for child in node.children:
@@ -263,6 +265,55 @@ class XMLBuilder:
             if child.quantifier not in ("?", "*"):
                 return [child]
         return [node.children[0]] if node.children else []
+
+
+    def _pick_richest_choice_child(self, options: list[ContentNode]) -> ContentNode:
+        """Pick the choice branch that yields the largest subtree in maximal mode."""
+        return max(options, key=self._choice_branch_weight)
+
+    def _choice_branch_weight(self, node: ContentNode) -> int:
+        if node.kind == "REF":
+            child_def = self.schema.elements.get(node.ref)
+            inner = self._content_weight(child_def.content_model) if child_def else 1
+            if node.quantifier in ("*", "+"):
+                return inner * self.config.repeat_count
+            if node.quantifier == "?":
+                return inner
+            return inner
+        if node.kind == "SEQUENCE":
+            return sum(self._choice_branch_weight(child) for child in node.children)
+        if node.kind == "CHOICE":
+            if not node.children:
+                return 0
+            return max(self._choice_branch_weight(child) for child in node.children)
+        if node.kind == "PCDATA":
+            return 1
+        return 0
+
+    def _content_weight(self, node: ContentNode) -> int:
+        if node.kind in ("EMPTY", "ANY"):
+            return 0
+        if node.kind == "PCDATA":
+            return 1
+        if node.kind == "REF":
+            return self._choice_branch_weight(node)
+        if node.kind == "SEQUENCE":
+            total = sum(self._content_weight(child) for child in node.children)
+            if node.quantifier in ("*", "+"):
+                return total * self.config.repeat_count
+            if node.quantifier == "?":
+                return total
+            return total
+        if node.kind == "CHOICE":
+            if not node.children:
+                return 0
+            pick = max(self._choice_branch_weight(child) for child in node.children)
+            if node.quantifier in ("*", "+"):
+                return pick * self.config.repeat_count
+            if node.quantifier == "?":
+                return pick
+            return pick
+        return 0
 
 
 def build_xml(schema: DTDSchema, config: BuildConfig) -> BuildResult:
