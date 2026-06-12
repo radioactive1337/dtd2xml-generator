@@ -10,7 +10,7 @@ from faker import Faker
 from lxml import etree
 
 from app.core.dtd_models import AttributeDef, DTDSchema, ElementDef
-from app.core.xml_tree import ProtectedAttrs, element_path
+from app.core.xml_tree import ProtectedAttrs, element_path, is_fillable_attribute_value
 
 _DEFAULT_LOCALE = "ru_RU"
 
@@ -66,10 +66,9 @@ class FakerService:
         for attr_name, attr_value in list(el.attrib.items()):
             if (path, attr_name) in protected_attrs:
                 continue
-            should_fill = (
-                not fill_empty_only
-                or not attr_value.strip()
-                or bool(protected_attrs)
+            should_fill = not fill_empty_only or is_fillable_attribute_value(
+                attr_value,
+                attr_def=elem_def.attributes.get(attr_name),
             )
             if not should_fill:
                 continue

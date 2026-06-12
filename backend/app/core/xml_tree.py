@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from lxml import etree
+
+if TYPE_CHECKING:
+    from app.core.dtd_models import AttributeDef
 
 ElementPath = tuple[tuple[str, int], ...]
 ProtectedAttrs = frozenset[tuple[ElementPath, str]]
@@ -20,3 +25,23 @@ def element_path(el: etree._Element) -> ElementPath:
         current = parent
     parts.reverse()
     return tuple(parts)
+
+
+def is_fillable_attribute_value(
+    value: str,
+    *,
+    attr_def: AttributeDef | None = None,
+) -> bool:
+    """True when a value is empty or still a builder placeholder worth replacing."""
+    stripped = value.strip()
+    if not stripped:
+        return True
+    if stripped == "id-1":
+        return True
+    if attr_def is None:
+        return False
+    if constrained := attr_def.dtd_default_value():
+        return stripped == constrained
+    if attr_def.attr_type == "ENUM" and attr_def.allowed_values:
+        return stripped == attr_def.allowed_values[0]
+    return False

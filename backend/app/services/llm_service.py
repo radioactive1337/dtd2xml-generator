@@ -10,7 +10,7 @@ from lxml import etree
 
 from app.config import get_llm_api_key, load_connections
 from app.core.dtd_models import DTDSchema
-from app.core.xml_tree import ProtectedAttrs, element_path
+from app.core.xml_tree import ProtectedAttrs, element_path, is_fillable_attribute_value
 
 _SYSTEM_PROMPT = (
     "You are a test data generator for QA automation. "
@@ -149,12 +149,11 @@ def merge_fill_empty_only(
         filled_el = filled_by_path.get(path)
         if filled_el is None:
             continue
-        for attr_name in set(el.attrib) | set(filled_el.attrib):
+        for attr_name in el.attrib:
             if (path, attr_name) in protected_attrs:
                 continue
-            original_value = el.attrib.get(attr_name, "")
-            should_fill = not original_value.strip() or bool(protected_attrs)
-            if not should_fill:
+            original_value = el.attrib[attr_name]
+            if not is_fillable_attribute_value(original_value):
                 continue
             filled_value = filled_el.attrib.get(attr_name)
             if filled_value is not None and filled_value.strip():
