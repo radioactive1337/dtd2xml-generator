@@ -329,7 +329,7 @@ function createEmptyMapping() {
     _presetSource: null,
   }
 }
-const sqlMappings = ref([createEmptyMapping()])
+const sqlMappings = ref([])
 
 const isHybridStrategy = computed(
   () => populateStrategy.value === 'hybrid_db_faker' || populateStrategy.value === 'hybrid_db_ai',
@@ -349,7 +349,6 @@ function addMapping() {
 
 function removeMapping(idx) {
   sqlMappings.value.splice(idx, 1)
-  if (sqlMappings.value.length === 0) sqlMappings.value.push(createEmptyMapping())
 }
 
 function addField(mi) {
@@ -413,7 +412,6 @@ async function deleteMappingPreset(name) {
   await apiDeleteMappingPreset(name)
   selectedMappingPresetNames.value = selectedMappingPresetNames.value.filter((n) => n !== name)
   sqlMappings.value = sqlMappings.value.filter((m) => m._presetSource !== name)
-  if (sqlMappings.value.length === 0) sqlMappings.value.push(createEmptyMapping())
   await refreshMappingPresets()
 }
 
@@ -627,10 +625,6 @@ watch(selectedMappingPresetNames, async (newNames, oldNames) => {
   for (const name of added) {
     await addMappingsFromPreset(name)
   }
-
-  if (sqlMappings.value.length === 0) {
-    sqlMappings.value.push(createEmptyMapping())
-  }
 })
 
 const modes = [
@@ -665,7 +659,7 @@ async function onDtdUploaded(result) {
   elements.value = result.elements
   rootElement.value = ''
   selectedMappingPresetNames.value = []
-  sqlMappings.value = [createEmptyMapping()]
+  sqlMappings.value = []
   await refreshMappingPresets()
   try {
     const summaries = await listElements(result.schema_id)
