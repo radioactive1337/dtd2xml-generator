@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from app.core.dtd_models import DTDSchema, ElementDef
 from app.core.dtd_parser import DTDParser
 
 router = APIRouter(prefix="/dtd", tags=["dtd"])
+logger = logging.getLogger(__name__)
 
 # In-memory schema registry (Phase 1; persistent storage in later phases)
 _schema_registry: dict[str, DTDSchema] = {}
@@ -80,8 +82,15 @@ async def upload_dtd(file: UploadFile = File(...)) -> SchemaResponse:
         parser = DTDParser(base_dir=schema_dir)
         schema = parser.parse_file(saved_path)
     except FileNotFoundError as exc:
+        logger.warning("DTD file not found during parse [file=%s]: %s", file.filename, exc)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception(
+            "DTD parsing failed [file=%s path=%s size=%d]",
+            file.filename,
+            saved_path,
+            len(content),
+        )
         raise HTTPException(
             status_code=422, detail=f"DTD parsing failed: {exc}"
         ) from exc

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 import asyncpg
@@ -11,10 +12,13 @@ from pydantic import BaseModel
 
 from app.config import DatabaseConfig, get_db_password, load_connections
 from app.core.dtd_models import DTDSchema
+from app.core.logging_config import truncate
 from app.services.oracle_client import ensure_oracle_thick_mode, map_oracle_client_error
 from lxml import etree
 
 from app.core.xml_tree import ProtectedAttrs, element_path
+
+logger = logging.getLogger(__name__)
 
 
 class SqlMapping(BaseModel):
@@ -109,33 +113,60 @@ class DBService:
     async def run_query(self, alias: str, sql: str) -> list[dict[str, Any]]:
         connections = load_connections()
         if alias not in connections.databases:
+            logger.error("Unknown database alias: %s", alias)
             raise ValueError(f"Database alias '{alias}' not found in connections.json")
 
         cfg = connections.databases[alias]
         password = get_db_password(alias)
         driver = cfg.driver.lower()
 
-        if driver == "postgresql":
-            return await self._query_postgresql(cfg, password, sql)
-        if driver in {"oracle", "oracledb"}:
-            return await self._query_oracle(cfg, password, sql)
+        try:
+            if driver == "postgresql":
+                return await self._query_postgresql(cfg, password, sql)
+            if driver in {"oracle", "oracledb"}:
+                return await self._query_oracle(cfg, password, sql)
+        except Exception:
+            logger.exception(
+                "SQL query failed [alias=%s driver=%s host=%s:%s db=%s query=%s]",
+                alias,
+                driver,
+                cfg.host,
+                cfg.port,
+                cfg.database or cfg.sid,
+                truncate(sql),
+            )
+            raise
 
+        logger.error("Unsupported database driver [alias=%s driver=%s]", alias, cfg.driver)
         raise ValueError(f"Unsupported database driver: {cfg.driver}")
 
     async def get_query_columns(self, alias: str, sql: str) -> list[str]:
         connections = load_connections()
         if alias not in connections.databases:
+            logger.error("Unknown database alias: %s", alias)
             raise ValueError(f"Database alias '{alias}' not found in connections.json")
 
         cfg = connections.databases[alias]
         password = get_db_password(alias)
         driver = cfg.driver.lower()
 
-        if driver == "postgresql":
-            return await self._query_columns_postgresql(cfg, password, sql)
-        if driver in {"oracle", "oracledb"}:
-            return await self._query_columns_oracle(cfg, password, sql)
+        try:
+            if driver == "postgresql":
+                return await self._query_columns_postgresql(cfg, password, sql)
+            if driver in {"oracle", "oracledb"}:
+                return await self._query_columns_oracle(cfg, password, sql)
+        except Exception:
+            logger.exception(
+                "SQL column introspection failed [alias=%s driver=%s host=%s:%s query=%s]",
+                alias,
+                driver,
+                cfg.host,
+                cfg.port,
+                truncate(sql),
+            )
+            raise
 
+        logger.error("Unsupported database driver [alias=%s driver=%s]", alias, cfg.driver)
         raise ValueError(f"Unsupported database driver: {cfg.driver}")
 
     async def _query_columns_postgresql(
@@ -296,8 +327,24 @@ class DBService:
             if not mapping.db_alias:
                 continue
 
-            rows = await self.run_query(mapping.db_alias, mapping.query)
+            try:
+                rows = await self.run_query(mapping.db_alias, mapping.query)
+            except Exception:
+                logger.exception(
+                    "DB override mapping failed [alias=%s element=%s fields=%s query=%s]",
+                    mapping.db_alias,
+                    mapping.target_element,
+                    list(mapping.fields.keys()),
+                    truncate(mapping.query),
+                )
+                raise
             if not rows:
+                logger.warning(
+                    "DB override returned no rows [alias=%s element=%s query=%s]",
+                    mapping.db_alias,
+                    mapping.target_element,
+                    truncate(mapping.query),
+                )
                 continue
 
             row = rows[0]

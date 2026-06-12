@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from app.api.routes.dtd import get_schema_registry
 from app.core.xml_builder import BuildConfig, BuildResult, build_xml
 
 router = APIRouter(prefix="/generate", tags=["generate"])
+logger = logging.getLogger(__name__)
 
 # In-memory cache of last generated XML per schema
 _last_generated: dict[str, str] = {}
@@ -30,6 +33,11 @@ async def generate_xml(config: BuildConfig) -> BuildResult:
     try:
         result = build_xml(schema, config)
     except ValueError as exc:
+        logger.exception(
+            "XML generation failed [schema_id=%s root=%s]",
+            config.schema_id,
+            config.root_element,
+        )
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     _last_generated[config.schema_id] = result.xml_text

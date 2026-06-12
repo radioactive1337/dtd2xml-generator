@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.core.logging_config import truncate
 from app.services.db_service import DBService
 
 router = APIRouter(prefix="/db", tags=["db"])
+logger = logging.getLogger(__name__)
 
 
 class QueryColumnsRequest(BaseModel):
@@ -29,8 +33,20 @@ async def query_columns(request: QueryColumnsRequest) -> QueryColumnsResponse:
     try:
         columns = await DBService().get_query_columns(request.db_alias, query)
     except ValueError as exc:
+        logger.warning(
+            "Query columns validation failed [alias=%s query=%s]: %s",
+            request.db_alias,
+            truncate(query),
+            exc,
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
+        logger.error(
+            "Query columns failed [alias=%s query=%s]: %s",
+            request.db_alias,
+            truncate(query),
+            exc,
+        )
         raise HTTPException(status_code=422, detail=f"Query failed: {exc}") from exc
 
     return QueryColumnsResponse(columns=columns)

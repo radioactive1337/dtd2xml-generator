@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -14,6 +15,7 @@ from app.services.faker_service import populate_with_faker
 from app.services.llm_service import populate_with_llm
 
 router = APIRouter(prefix="/fill", tags=["fill"])
+logger = logging.getLogger(__name__)
 
 # fmt: off
 Strategy = Literal[
@@ -96,6 +98,15 @@ async def fill_xml(request: FillRequest) -> FillResponse:
                     request.sql_mappings,
                 )
             except Exception as exc:
+                aliases = sorted({m.db_alias for m in active_mappings if m.db_alias})
+                logger.error(
+                    "Fill DB stage failed [schema_id=%s strategy=%s mappings=%d aliases=%s]: %s",
+                    request.schema_id,
+                    request.strategy,
+                    len(active_mappings),
+                    aliases,
+                    exc,
+                )
                 raise HTTPException(
                     status_code=422,
                     detail=f"Database stage failed: {exc}",
@@ -133,6 +144,15 @@ async def fill_xml(request: FillRequest) -> FillResponse:
             raise
         except Exception as exc:
             stage = "LLM" if request.strategy in ("ai", "hybrid_db_ai") else "Faker"
+            logger.error(
+                "Fill %s stage failed [schema_id=%s strategy=%s locale=%s llm_alias=%s]: %s",
+                stage,
+                request.schema_id,
+                request.strategy,
+                request.faker_locale,
+                request.llm_alias,
+                exc,
+            )
             raise HTTPException(
                 status_code=422,
                 detail=f"{stage} stage failed: {exc}",
@@ -141,6 +161,12 @@ async def fill_xml(request: FillRequest) -> FillResponse:
     except HTTPException:
         raise
     except Exception as exc:
+        logger.error(
+            "Fill failed [schema_id=%s strategy=%s]: %s",
+            request.schema_id,
+            request.strategy,
+            exc,
+        )
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return FillResponse(xml_text=result, strategy=request.strategy)

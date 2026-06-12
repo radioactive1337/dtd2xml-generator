@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 
@@ -10,7 +11,10 @@ from lxml import etree
 
 from app.config import get_llm_api_key, load_connections
 from app.core.dtd_models import DTDSchema
+from app.core.logging_config import truncate
 from app.core.xml_tree import ProtectedAttrs, element_path, is_fillable_attribute_value
+
+logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
     "You are a test data generator for QA automation. "
@@ -58,6 +62,7 @@ class LLMService:
         protected_attrs: ProtectedAttrs = frozenset(),
     ) -> str:
         if not self.base_url:
+            logger.error("LLM base URL is not configured")
             raise ValueError("LLM base URL is not configured in connections.json or .env")
 
         metadata = self._extract_metadata(schema, xml_text)
@@ -93,12 +98,42 @@ class LLMService:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
         url = f"{self.base_url}/chat/completions"
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPStatusError as exc:
+            body = truncate(exc.response.text, max_len=500)
+            logger.error(
+                "LLM API HTTP error [model=%s url=%s status=%s]: %s",
+                self.model,
+                url,
+                exc.response.status_code,
+                body,
+            )
+            raise ValueError(
+                f"LLM API returned HTTP {exc.response.status_code}: {body}"
+            ) from exc
+        except httpx.RequestError as exc:
+            logger.exception(
+                "LLM request failed [model=%s url=%s timeout=%s]",
+                self.model,
+                url,
+                self.timeout,
+            )
+            raise ValueError(f"LLM request failed: {exc}") from exc
 
-        content = data["choices"][0]["message"]["content"]
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            logger.error(
+                "Unexpected LLM response shape [model=%s keys=%s]",
+                self.model,
+                list(data.keys()) if isinstance(data, dict) else type(data).__name__,
+            )
+            raise ValueError("LLM response did not contain a message") from exc
+
         llm_xml = self._extract_xml(content)
         if fill_empty_only:
             return merge_fill_empty_only(xml_text, llm_xml, protected_attrs=protected_attrs)
@@ -126,6 +161,10 @@ class LLMService:
             return fence_match.group(1).strip()
         if content.startswith("<?xml") or content.startswith("<"):
             return content
+        logger.error(
+            "LLM response did not contain valid XML [preview=%s]",
+            truncate(content, max_len=300),
+        )
         raise ValueError("LLM response did not contain valid XML")
 
 

@@ -146,6 +146,7 @@ def ensure_oracle_thick_mode(*, required: bool = False) -> None:
 
     lib_dir = get_oracle_client_lib_dir()
     if required and not lib_dir:
+        logger.error("Oracle thick mode required but ORACLE_CLIENT_LIB_DIR is not set")
         raise _missing_client_config_error()
     if not lib_dir:
         return
@@ -161,6 +162,10 @@ def ensure_oracle_thick_mode(*, required: bool = False) -> None:
         _client_initialized = True
 
     if oracledb.is_thin_mode():
+        logger.error(
+            "Oracle thick mode failed to initialize [lib_dir=%s]",
+            lib_dir,
+        )
         raise RuntimeError(
             "Oracle thick mode failed to initialize. "
             f"Check ORACLE_CLIENT_LIB_DIR={lib_dir!r} and restart backend."
@@ -173,6 +178,7 @@ def bootstrap_oracle_client() -> None:
         return
 
     if not get_oracle_client_lib_dir():
+        logger.error("Oracle databases configured but client lib dir is missing")
         raise RuntimeError(str(_missing_client_config_error()))
 
     ensure_oracle_thick_mode(required=True)
