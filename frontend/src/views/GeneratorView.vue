@@ -17,13 +17,18 @@
         <div class="field">
           <label>Root Element</label>
           <input
-            v-model="rootSearch"
-            placeholder="Search elements..."
-            class="search-input"
+            v-model="rootElement"
+            list="root-elements-list"
+            placeholder="Element name (type or pick from list)"
+            @input="blurAfterDatalistPick"
+            @change="blurAfterDatalistPick"
+            @keydown.enter="dismissDatalistInput"
+            @focus="restoreDatalistPopup"
+            @blur="closeDatalistPopup"
           />
-          <select v-model="rootElement" size="6" class="element-select">
-            <option v-for="el in filteredElements" :key="el" :value="el">{{ el }}</option>
-          </select>
+          <datalist id="root-elements-list">
+            <option v-for="el in elements" :key="el" :value="el" />
+          </datalist>
         </div>
 
         <div class="field">
@@ -82,10 +87,16 @@
 
             <div class="field">
               <label>Target Element</label>
-              <select v-model="mapping.target_element">
-                <option value="">Select element...</option>
-                <option v-for="el in elements" :key="el" :value="el">{{ el }}</option>
-              </select>
+              <input
+                v-model="mapping.target_element"
+                list="target-elements-list"
+                placeholder="Element name (type or pick from list)"
+                @input="blurAfterDatalistPick"
+                @change="blurAfterDatalistPick"
+                @keydown.enter="dismissDatalistInput"
+                @focus="restoreDatalistPopup"
+                @blur="closeDatalistPopup"
+              />
             </div>
 
             <div class="field">
@@ -123,6 +134,10 @@
               <button class="btn-add-field" @click="addField(mi)">+ Add field</button>
             </div>
           </div>
+
+          <datalist id="target-elements-list">
+            <option v-for="el in elements" :key="el" :value="el" />
+          </datalist>
 
           <button class="btn-add-mapping" @click="addMapping">+ Add mapping</button>
         </div>
@@ -180,7 +195,6 @@ import { extractXmlElementPaths } from '../utils/xmlPaths'
 const schemaId = ref('')
 const elements = ref([])
 const rootElement = ref('')
-const rootSearch = ref('')
 const mode = ref('minimal')
 const repeatCount = ref(1)
 const customPaths = ref([])
@@ -215,6 +229,43 @@ function removeField(mi, fi) {
   if (sqlMappings.value[mi].fields.length === 0)
     sqlMappings.value[mi].fields.push({ db_col: '', xml_attr: '' })
 }
+
+function restoreDatalistPopup(event) {
+  const input = event.target
+  const listId = input.dataset.datalistId || input.getAttribute('list')
+  if (!listId) return
+  input.dataset.datalistId = listId
+  input.setAttribute('list', listId)
+}
+
+function closeDatalistPopup(event) {
+  const input = event.target
+  const listId = input.getAttribute('list') || input.dataset.datalistId
+  if (!listId) return
+
+  input.dataset.datalistId = listId
+  input.removeAttribute('list')
+}
+
+function dismissDatalistInput(event) {
+  const input = event.target
+  closeDatalistPopup(event)
+  input.blur()
+}
+
+function blurAfterDatalistPick(event) {
+  const input = event.target
+  const { inputType } = event
+  const pickedFromList = event.type === 'change' || !inputType || inputType === 'insertReplacementText'
+  if (!pickedFromList) return
+
+  requestAnimationFrame(() => {
+    if (!elements.value.includes(input.value)) return
+    closeDatalistPopup(event)
+    input.blur()
+  })
+}
+
 const xmlText = ref('')
 const buildInfo = ref(null)
 const generating = ref(false)
@@ -266,20 +317,6 @@ const modes = [
   { value: 'custom', label: 'Custom' },
 ]
 
-function elementMatchesSearch(elementName, query) {
-  const name = elementName.toLowerCase()
-  const q = query.toLowerCase().trim().replace(/\s+/g, ' ')
-  if (!q) return true
-  if (name.includes(q)) return true
-  if (name.includes(q.replace(/ /g, '-'))) return true
-  return name.replace(/-/g, ' ').includes(q)
-}
-
-const filteredElements = computed(() => {
-  const q = rootSearch.value
-  return elements.value.filter((el) => elementMatchesSearch(el, q))
-})
-
 const canGenerate = computed(() => schemaId.value && rootElement.value)
 const canValidate = computed(() => schemaId.value && xmlText.value)
 
@@ -300,7 +337,7 @@ onBeforeUnmount(() => {
 function onDtdUploaded(result) {
   schemaId.value = result.schema_id
   elements.value = result.elements
-  rootElement.value = result.elements[0] || ''
+  rootElement.value = ''
   skipXmlSync = true
   xmlText.value = ''
   buildInfo.value = null
@@ -559,14 +596,6 @@ function stopResize() {
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.search-input {
-  margin-bottom: 4px;
-}
-
-.element-select {
-  height: auto;
 }
 
 .mode-group {
