@@ -82,35 +82,63 @@
                 >
                   Save
                 </button>
+                <div ref="presetDropdownRef" class="preset-dropdown">
+                  <button
+                    type="button"
+                    class="preset-dropdown-trigger"
+                    @click.stop="presetDropdownOpen = !presetDropdownOpen"
+                  >
+                    {{ presetDropdownLabel }}
+                    <span class="preset-dropdown-chevron" :class="{ open: presetDropdownOpen }">▾</span>
+                  </button>
+                  <div v-if="presetDropdownOpen" class="preset-dropdown-menu" @click.stop>
+                    <p v-if="!mappingPresets.length" class="preset-dropdown-empty">
+                      No saved presets
+                    </p>
+                    <label
+                      v-for="p in mappingPresets"
+                      :key="p.name"
+                      class="preset-dropdown-item"
+                    >
+                      <input
+                        v-model="selectedMappingPresetNames"
+                        type="checkbox"
+                        :value="p.name"
+                      />
+                      <span class="preset-dropdown-item-label">
+                        <span class="preset-dropdown-item-name">{{ p.name }}</span>
+                        <span class="preset-meta">
+                          {{ p.mapping_count }} mapping{{ p.mapping_count === 1 ? '' : 's' }}
+                        </span>
+                      </span>
+                      <button
+                        class="btn-icon-remove"
+                        title="Delete preset"
+                        @click.prevent="deleteMappingPreset(p.name)"
+                      >
+                        ×
+                      </button>
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
-            <div v-if="mappingPresets.length" class="mapping-preset-list">
-              <label
-                v-for="p in mappingPresets"
-                :key="p.name"
-                class="preset-checkbox"
+            <div v-if="selectedMappingPresetNames.length" class="selected-presets-chips">
+              <span
+                v-for="name in selectedMappingPresetNames"
+                :key="name"
+                class="preset-chip"
               >
-                <input
-                  v-model="selectedMappingPresetNames"
-                  type="checkbox"
-                  :value="p.name"
-                />
-                <span class="preset-checkbox-label">
-                  {{ p.name }}
-                  <span class="preset-meta">
-                    {{ p.mapping_count }} mapping{{ p.mapping_count === 1 ? '' : 's' }}
-                  </span>
-                </span>
+                {{ name }}
                 <button
-                  class="btn-icon-remove"
-                  title="Delete preset"
-                  @click.prevent="deleteMappingPreset(p.name)"
+                  class="preset-chip-remove"
+                  title="Remove preset"
+                  @click="removeSelectedPreset(name)"
                 >
                   ×
                 </button>
-              </label>
+              </span>
             </div>
-            <p v-else-if="schemaId" class="preset-empty-hint">No saved mapping presets</p>
             <span class="overrides-hint">Stage 1 — DB values fill first, Faker/AI fills the rest</span>
           </div>
 
@@ -289,6 +317,8 @@ const mappingColumnsCache = ref({})
 const mappingPresetName = ref('')
 const selectedMappingPresetNames = ref([])
 const mappingPresets = ref([])
+const presetDropdownOpen = ref(false)
+const presetDropdownRef = ref(null)
 
 function createEmptyMapping() {
   return {
@@ -304,6 +334,14 @@ const sqlMappings = ref([createEmptyMapping()])
 const isHybridStrategy = computed(
   () => populateStrategy.value === 'hybrid_db_faker' || populateStrategy.value === 'hybrid_db_ai',
 )
+
+const presetDropdownLabel = computed(() => {
+  const count = selectedMappingPresetNames.value.length
+  if (count) return `${count} preset${count === 1 ? '' : 's'} selected`
+  const total = mappingPresets.value.length
+  if (total) return `Load presets (${total})`
+  return 'Load presets...'
+})
 
 function addMapping() {
   sqlMappings.value.push(createEmptyMapping())
@@ -367,12 +405,23 @@ async function addMappingsFromPreset(name) {
   mappingDbColumns.value = {}
 }
 
+function removeSelectedPreset(name) {
+  selectedMappingPresetNames.value = selectedMappingPresetNames.value.filter((n) => n !== name)
+}
+
 async function deleteMappingPreset(name) {
   await apiDeleteMappingPreset(name)
   selectedMappingPresetNames.value = selectedMappingPresetNames.value.filter((n) => n !== name)
   sqlMappings.value = sqlMappings.value.filter((m) => m._presetSource !== name)
   if (sqlMappings.value.length === 0) sqlMappings.value.push(createEmptyMapping())
   await refreshMappingPresets()
+}
+
+function onPresetDropdownOutsideClick(event) {
+  if (!presetDropdownOpen.value || !presetDropdownRef.value) return
+  if (!presetDropdownRef.value.contains(event.target)) {
+    presetDropdownOpen.value = false
+  }
 }
 
 function resetMappingXmlAttrs(mi) {
@@ -561,6 +610,10 @@ watch(
   { deep: true },
 )
 
+watch(isHybridStrategy, (enabled) => {
+  if (enabled) refreshMappingPresets()
+})
+
 watch(selectedMappingPresetNames, async (newNames, oldNames) => {
   const prev = oldNames || []
   const added = newNames.filter((n) => !prev.includes(n))
@@ -590,6 +643,7 @@ const canGenerate = computed(() => schemaId.value && rootElement.value)
 const canValidate = computed(() => schemaId.value && xmlText.value)
 
 onMounted(async () => {
+  document.addEventListener('click', onPresetDropdownOutsideClick)
   try {
     const aliases = await getConfigAliases()
     dbAliases.value = aliases.databases || []
@@ -600,6 +654,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('click', onPresetDropdownOutsideClick)
   clearTimeout(xmlSyncTimer)
   clearTimeout(columnsFetchTimer)
   stopResize()
@@ -969,39 +1024,134 @@ function stopResize() {
   width: 130px;
 }
 
-.mapping-preset-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 4px;
+.preset-dropdown {
+  position: relative;
 }
 
-.preset-checkbox {
+.preset-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 150px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.preset-dropdown-trigger:hover {
+  border-color: color-mix(in srgb, var(--border) 60%, var(--text));
+}
+
+.preset-dropdown-chevron {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+}
+
+.preset-dropdown-chevron.open {
+  transform: rotate(180deg);
+}
+
+.preset-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 240px;
+  max-width: 320px;
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+.preset-dropdown-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 8px;
+  margin: 0;
+}
+
+.preset-dropdown-item {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 12px;
   cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 4px;
 }
 
-.preset-checkbox input {
+.preset-dropdown-item:hover {
+  background: color-mix(in srgb, var(--border) 30%, transparent);
+}
+
+.preset-dropdown-item input {
   flex-shrink: 0;
 }
 
-.preset-checkbox-label {
+.preset-dropdown-item-label {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.preset-dropdown-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .preset-meta {
+  font-size: 10px;
   color: var(--text-muted);
-  margin-left: 6px;
 }
 
-.preset-empty-hint {
+.selected-presets-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.preset-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   color: var(--text-muted);
-  margin: 4px 0 0;
+  background: color-mix(in srgb, var(--border) 35%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2px 8px;
+}
+
+.preset-chip-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+}
+
+.preset-chip-remove:hover {
+  color: var(--danger);
 }
 
 .mapping-header-left {
