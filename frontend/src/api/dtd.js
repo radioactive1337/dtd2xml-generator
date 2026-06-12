@@ -7,6 +7,11 @@ export async function uploadDtd(file) {
   return data
 }
 
+export async function listSchemas() {
+  const { data } = await client.get('/dtd/schemas')
+  return data
+}
+
 export async function listElements(schemaId) {
   const { data } = await client.get(`/dtd/${schemaId}/elements`)
   return data

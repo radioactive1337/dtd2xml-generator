@@ -34,8 +34,8 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { uploadDtd } from '../api/dtd'
+import { ref, onMounted } from 'vue'
+import { uploadDtd, listSchemas } from '../api/dtd'
 
 const emit = defineEmits(['uploaded'])
 
@@ -47,16 +47,47 @@ const schemaId = ref('')
 const fileName = ref('')
 const elementCount = ref(0)
 
+function schemaFileName(schema) {
+  const source = schema.source_files?.[0] || ''
+  return source.split(/[/\\]/).pop() || 'schema'
+}
+
+function pickPrimarySchema(schemas) {
+  if (!schemas.length) return null
+  const main = schemas.find((s) =>
+    s.source_files?.some((f) => /[/\\]main\.dtd$/i.test(f) || f.toLowerCase() === 'main.dtd'),
+  )
+  if (main) return main
+  return schemas.reduce(
+    (best, s) => (!best || s.element_count > best.element_count ? s : best),
+    null,
+  )
+}
+
+function applySchema(result) {
+  schemaId.value = result.schema_id
+  fileName.value = schemaFileName(result)
+  elementCount.value = result.element_count
+  emit('uploaded', result)
+}
+
+onMounted(async () => {
+  try {
+    const schemas = await listSchemas()
+    const primary = pickPrimarySchema(schemas)
+    if (primary) applySchema(primary)
+  } catch {
+    // No saved schemas or API unavailable — user can upload manually.
+  }
+})
+
 async function processFile(file) {
   if (!file) return
   loading.value = true
   error.value = ''
   try {
     const result = await uploadDtd(file)
-    schemaId.value = result.schema_id
-    fileName.value = file.name
-    elementCount.value = result.element_count
-    emit('uploaded', result)
+    applySchema(result)
   } catch (e) {
     error.value = e.message
   } finally {

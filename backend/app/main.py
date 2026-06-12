@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -20,10 +21,19 @@ logger = logging.getLogger(__name__)
 
 bootstrap_oracle_client()
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    loaded = dtd.initialize_schema_registry()
+    logger.info("DTD schema registry initialized [loaded=%d]", loaded)
+    yield
+
+
 app = FastAPI(
     title="QA XML Generator",
     description="Local QA tool for generating XML from DTD schemas",
     version="0.2.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
