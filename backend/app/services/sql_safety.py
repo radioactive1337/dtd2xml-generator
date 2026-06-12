@@ -81,7 +81,7 @@ def apply_row_limit(sql: str, driver: str) -> str:
     if driver_key in {"oracle", "oracledb"}:
         if _ORACLE_ROW_LIMIT.search(sql):
             return sql
-        return f"{sql} FETCH FIRST 1 ROW ONLY"
+        return f"SELECT * FROM ({sql}) _safe_q WHERE ROWNUM <= 1"
     return sql
 
 

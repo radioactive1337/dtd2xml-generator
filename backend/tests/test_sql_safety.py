@@ -51,7 +51,7 @@ def test_apply_row_limit_postgresql():
 
 def test_apply_row_limit_oracle():
     wrapped = apply_row_limit("SELECT id FROM big_table", "oracle")
-    assert wrapped == "SELECT id FROM big_table FETCH FIRST 1 ROW ONLY"
+    assert wrapped == "SELECT * FROM (SELECT id FROM big_table) _safe_q WHERE ROWNUM <= 1"
 
 
 def test_apply_row_limit_oracle_skips_when_rownum_present():
