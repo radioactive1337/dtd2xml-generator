@@ -104,6 +104,16 @@ function downloadXml() {
   a.click()
   URL.revokeObjectURL(url)
 }
+
+function goToPosition(line, column) {
+  if (!editor || !line || line < 1) return
+  const position = { lineNumber: line, column: column > 0 ? column : 1 }
+  editor.setPosition(position)
+  editor.revealPositionInCenter(position)
+  editor.focus()
+}
+
+defineExpose({ goToPosition })
 </script>
 
 <style scoped>

@@ -274,7 +274,15 @@
         <p v-if="validationResult?.valid" class="validation-msg valid">XML is valid against DTD</p>
         <ul v-else-if="validationResult?.errors?.length" class="validation-errors">
           <li v-for="(err, i) in validationResult.errors" :key="i">
-            <span v-if="err.line">Line {{ err.line }}, col {{ err.column }}: </span>{{ err.message }}
+            <button
+              v-if="err.line"
+              type="button"
+              class="validation-error-link"
+              @click="goToValidationError(err)"
+            >
+              Line {{ err.line }}, col {{ err.column }}: {{ err.message }}
+            </button>
+            <span v-else>{{ err.message }}</span>
           </li>
         </ul>
         <p v-if="buildInfo" class="build-info">
@@ -288,6 +296,7 @@
 
     <div class="generator-right">
       <XmlEditor
+        ref="xmlEditorRef"
         v-model="xmlText"
         :filename="`${rootElement || 'generated'}.xml`"
         :validation-errors="validationResult?.valid === false ? validationResult.errors : []"
@@ -575,6 +584,12 @@ const validationResult = ref(null)
 const error = ref('')
 const xmlSyncHint = ref('')
 const dtdTreeRef = ref(null)
+const xmlEditorRef = ref(null)
+
+function goToValidationError(err) {
+  if (!err?.line) return
+  xmlEditorRef.value?.goToPosition(err.line, err.column)
+}
 
 let skipXmlSync = false
 let skipModeSync = false
@@ -1083,6 +1098,23 @@ function stopResize() {
 
 .validation-errors li {
   margin-bottom: 4px;
+}
+
+.validation-error-link {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.validation-error-link:hover {
+  opacity: 0.85;
 }
 
 @media (max-width: 900px) {
