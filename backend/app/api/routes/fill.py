@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.api.routes.dtd import get_schema_registry
@@ -28,6 +32,8 @@ Strategy = Literal[
 
 _HYBRID = frozenset({"hybrid_db_faker", "hybrid_db_ai"})
 
+ProgressCallback = Callable[[str, str, int], Awaitable[None]]
+
 
 class FillRequest(BaseModel):
     schema_id: str
@@ -47,16 +53,39 @@ class FillResponse(BaseModel):
     strategy: str
 
 
-@router.post("", response_model=FillResponse)
-async def fill_xml(request: FillRequest) -> FillResponse:
-    """Fill XML with test data using a two-stage hybrid pipeline.
+async def _noop_progress(_step: str, _message: str, _percent: int) -> None:
+    pass
 
-    Stage 1 (DB overrides) runs only for hybrid strategies and fills the
-    attributes declared in *sql_mappings* with real database values.
 
-    Stage 2 (fallback engine) fills every remaining empty attribute using
-    either Smart Faker or LLM, depending on the chosen strategy.
-    """
+def _validate_hybrid_mappings(request: FillRequest) -> list[SqlMapping]:
+    if not request.sql_mappings:
+        raise HTTPException(
+            status_code=400,
+            detail="sql_mappings cannot be empty for hybrid strategies",
+        )
+    active_mappings = [
+        m
+        for m in request.sql_mappings
+        if m.query.strip() and m.target_element
+    ]
+    if not active_mappings:
+        raise HTTPException(
+            status_code=400,
+            detail="sql_mappings must include at least one mapping with query and target_element",
+        )
+    if any(not m.db_alias for m in active_mappings):
+        raise HTTPException(
+            status_code=400,
+            detail="Each mapping must have db_alias",
+        )
+    return active_mappings
+
+
+async def execute_fill(
+    request: FillRequest,
+    on_progress: ProgressCallback = _noop_progress,
+) -> str:
+    """Fill XML with test data, optionally emitting progress updates."""
     registry = get_schema_registry()
     if request.schema_id not in registry:
         raise HTTPException(
@@ -65,99 +94,113 @@ async def fill_xml(request: FillRequest) -> FillResponse:
         )
 
     schema = registry[request.schema_id]
+    await on_progress("started", "Preparing fill request...", 0)
 
-    try:
-        xml = request.xml_text
-        protected_attrs: ProtectedAttrs = frozenset()
+    xml = request.xml_text
+    protected_attrs: ProtectedAttrs = frozenset()
 
-        # ── Stage 1: DB overrides (hybrid strategies only) ───────────────────
-        if request.strategy in _HYBRID:
-            if not request.sql_mappings:
-                raise HTTPException(
-                    status_code=400,
-                    detail="sql_mappings cannot be empty for hybrid strategies",
-                )
-            active_mappings = [
-                m
-                for m in request.sql_mappings
-                if m.query.strip() and m.target_element
-            ]
-            if not active_mappings:
-                raise HTTPException(
-                    status_code=400,
-                    detail="sql_mappings must include at least one mapping with query and target_element",
-                )
-            if any(not m.db_alias for m in active_mappings):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Each mapping must have db_alias",
-                )
-            try:
-                xml, protected_attrs = await apply_db_overrides(
-                    xml,
-                    request.sql_mappings,
-                )
-            except Exception as exc:
-                aliases = sorted({m.db_alias for m in active_mappings if m.db_alias})
-                logger.error(
-                    "Fill DB stage failed [schema_id=%s strategy=%s mappings=%d aliases=%s]: %s",
-                    request.schema_id,
-                    request.strategy,
-                    len(active_mappings),
-                    aliases,
-                    exc,
-                )
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Database stage failed: {exc}",
-                ) from exc
-
-        # ── Stage 2: fallback engine for remaining empty fields ───────────────
-        fill_empty_only = request.strategy in _HYBRID
+    # ── Stage 1: DB overrides (hybrid strategies only) ───────────────────
+    if request.strategy in _HYBRID:
+        active_mappings = _validate_hybrid_mappings(request)
+        await on_progress("db_query", "Querying database...", 10)
         try:
-            if request.strategy in ("faker", "hybrid_db_faker"):
-                result = populate_with_faker(
-                    xml,
-                    schema,
-                    locale=request.faker_locale,
-                    fill_empty_only=fill_empty_only,
-                    protected_attrs=protected_attrs,
-                )
-            elif request.strategy in ("ai", "hybrid_db_ai"):
-                result = await populate_with_llm(
-                    xml,
-                    schema,
-                    alias=request.llm_alias,
-                    fill_empty_only=fill_empty_only,
-                    protected_attrs=protected_attrs,
-                )
-                result = populate_with_faker(
-                    result,
-                    schema,
-                    locale=request.faker_locale,
-                    fill_empty_only=True,
-                    protected_attrs=protected_attrs,
-                )
-            else:
-                raise HTTPException(status_code=400, detail=f"Unknown strategy: {request.strategy!r}")
-        except HTTPException:
-            raise
+            xml, protected_attrs = await apply_db_overrides(
+                xml,
+                request.sql_mappings,
+            )
         except Exception as exc:
-            stage = "LLM" if request.strategy in ("ai", "hybrid_db_ai") else "Faker"
+            aliases = sorted({m.db_alias for m in active_mappings if m.db_alias})
             logger.error(
-                "Fill %s stage failed [schema_id=%s strategy=%s locale=%s llm_alias=%s]: %s",
-                stage,
+                "Fill DB stage failed [schema_id=%s strategy=%s mappings=%d aliases=%s]: %s",
                 request.schema_id,
                 request.strategy,
-                request.faker_locale,
-                request.llm_alias,
+                len(active_mappings),
+                aliases,
                 exc,
             )
             raise HTTPException(
                 status_code=422,
-                detail=f"{stage} stage failed: {exc}",
+                detail=f"Database stage failed: {exc}",
             ) from exc
+        await on_progress("db_done", "Database values applied", 35)
 
+    # ── Stage 2: fallback engine for remaining empty fields ───────────────
+    fill_empty_only = request.strategy in _HYBRID
+    try:
+        if request.strategy in ("faker", "hybrid_db_faker"):
+            percent = 45 if request.strategy in _HYBRID else 15
+            await on_progress(
+                "faker",
+                "Generating test data with Smart Faker...",
+                percent,
+            )
+            result = populate_with_faker(
+                xml,
+                schema,
+                locale=request.faker_locale,
+                fill_empty_only=fill_empty_only,
+                protected_attrs=protected_attrs,
+            )
+        elif request.strategy in ("ai", "hybrid_db_ai"):
+            llm_percent = 40 if request.strategy in _HYBRID else 15
+            await on_progress(
+                "llm_request",
+                "Waiting for LLM response...",
+                llm_percent,
+            )
+            result = await populate_with_llm(
+                xml,
+                schema,
+                alias=request.llm_alias,
+                fill_empty_only=fill_empty_only,
+                protected_attrs=protected_attrs,
+            )
+            if fill_empty_only:
+                await on_progress(
+                    "llm_merge",
+                    "Merging LLM output into XML...",
+                    82,
+                )
+            await on_progress(
+                "faker_fallback",
+                "Filling remaining fields with Smart Faker...",
+                90,
+            )
+            result = populate_with_faker(
+                result,
+                schema,
+                locale=request.faker_locale,
+                fill_empty_only=True,
+                protected_attrs=protected_attrs,
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown strategy: {request.strategy!r}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        stage = "LLM" if request.strategy in ("ai", "hybrid_db_ai") else "Faker"
+        logger.error(
+            "Fill %s stage failed [schema_id=%s strategy=%s locale=%s llm_alias=%s]: %s",
+            stage,
+            request.schema_id,
+            request.strategy,
+            request.faker_locale,
+            request.llm_alias,
+            exc,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=f"{stage} stage failed: {exc}",
+        ) from exc
+
+    return result
+
+
+@router.post("", response_model=FillResponse)
+async def fill_xml(request: FillRequest) -> FillResponse:
+    """Fill XML with test data using a two-stage hybrid pipeline."""
+    try:
+        result = await execute_fill(request)
     except HTTPException:
         raise
     except Exception as exc:
@@ -170,3 +213,56 @@ async def fill_xml(request: FillRequest) -> FillResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return FillResponse(xml_text=result, strategy=request.strategy)
+
+
+def _sse_event(payload: dict[str, object]) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+@router.post("/stream")
+async def fill_xml_stream(request: FillRequest) -> StreamingResponse:
+    """Fill XML and stream progress updates as Server-Sent Events."""
+    queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
+
+    async def on_progress(step: str, message: str, percent: int) -> None:
+        await queue.put({"step": step, "message": message, "percent": percent})
+
+    async def run_fill() -> None:
+        try:
+            result = await execute_fill(request, on_progress)
+            await queue.put({"step": "complete", "xml_text": result, "percent": 100})
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            await queue.put({"step": "error", "message": detail, "status": exc.status_code})
+        except Exception as exc:
+            logger.error(
+                "Fill stream failed [schema_id=%s strategy=%s]: %s",
+                request.schema_id,
+                request.strategy,
+                exc,
+            )
+            await queue.put({"step": "error", "message": str(exc), "status": 422})
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(run_fill())
+
+    async def event_stream():
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield _sse_event(event)
+        finally:
+            await task
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

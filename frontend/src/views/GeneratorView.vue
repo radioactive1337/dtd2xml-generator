@@ -258,6 +258,17 @@
           </button>
         </div>
 
+        <div v-if="filling" class="fill-progress" role="status" aria-live="polite">
+          <div class="fill-progress-header">
+            <span class="fill-spinner" aria-hidden="true" />
+            <span class="fill-status">{{ fillStatusMessage }}</span>
+            <span class="fill-elapsed">{{ fillElapsedLabel }}</span>
+          </div>
+          <div class="fill-progress-bar" aria-hidden="true">
+            <div class="fill-progress-fill" :style="{ width: fillPercent + '%' }" />
+          </div>
+        </div>
+
         <p v-if="xmlSyncHint" class="error-msg">{{ xmlSyncHint }}</p>
         <p v-if="error" class="error-msg">{{ error }}</p>
         <p v-if="validationResult?.valid" class="validation-msg valid">XML is valid against DTD</p>
@@ -291,7 +302,7 @@ import DtdUpload from '../components/DtdUpload.vue'
 import DtdTreeView from '../components/DtdTreeView.vue'
 import XmlEditor from '../components/XmlEditor.vue'
 import { generateXml } from '../api/generate'
-import { fillXml } from '../api/fill'
+import { fillXmlStream } from '../api/fill'
 import { validateXml } from '../api/validate'
 import { fetchQueryColumns } from '../api/db'
 import { getConfigAliases, listElements } from '../api/dtd'
@@ -556,6 +567,9 @@ const xmlText = ref('')
 const buildInfo = ref(null)
 const generating = ref(false)
 const filling = ref(false)
+const fillStatusMessage = ref('')
+const fillPercent = ref(0)
+const fillElapsedSeconds = ref(0)
 const validating = ref(false)
 const validationResult = ref(null)
 const error = ref('')
@@ -566,6 +580,34 @@ let skipXmlSync = false
 let skipModeSync = false
 let xmlSyncTimer = null
 let columnsFetchTimer = null
+let fillElapsedTimer = null
+
+const fillElapsedLabel = computed(() => {
+  const seconds = fillElapsedSeconds.value
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  return `${minutes}m ${remainder}s`
+})
+
+function startFillProgressTimer() {
+  fillElapsedSeconds.value = 0
+  clearInterval(fillElapsedTimer)
+  fillElapsedTimer = setInterval(() => {
+    fillElapsedSeconds.value += 1
+  }, 1000)
+}
+
+function stopFillProgressTimer() {
+  clearInterval(fillElapsedTimer)
+  fillElapsedTimer = null
+}
+
+function resetFillProgress() {
+  fillStatusMessage.value = ''
+  fillPercent.value = 0
+  fillElapsedSeconds.value = 0
+}
 
 const LEFT_MIN = 440
 const LEFT_MAX = 700
@@ -658,6 +700,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', onPresetDropdownOutsideClick)
   clearTimeout(xmlSyncTimer)
   clearTimeout(columnsFetchTimer)
+  stopFillProgressTimer()
   stopResize()
 })
 
@@ -764,6 +807,9 @@ async function generate() {
 async function fill() {
   filling.value = true
   error.value = ''
+  resetFillProgress()
+  fillStatusMessage.value = 'Starting fill...'
+  startFillProgressTimer()
   try {
     const request = {
       schema_id: schemaId.value,
@@ -782,13 +828,17 @@ async function fill() {
           db_alias: m.db_alias || null,
         }))
     }
-    const result = await fillXml(request)
+    const result = await fillXmlStream(request, ({ message, percent }) => {
+      if (message) fillStatusMessage.value = message
+      if (typeof percent === 'number') fillPercent.value = percent
+    })
     skipXmlSync = true
     xmlText.value = result.xml_text
     validationResult.value = null
   } catch (e) {
     error.value = e.message
   } finally {
+    stopFillProgressTimer()
     filling.value = false
   }
 }
@@ -953,6 +1003,65 @@ function stopResize() {
 .action-row {
   display: flex;
   gap: 8px;
+}
+
+.fill-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.fill-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fill-spinner {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border: 2px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: fill-spin 0.75s linear infinite;
+}
+
+@keyframes fill-spin {
+  to { transform: rotate(360deg); }
+}
+
+.fill-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.fill-elapsed {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.fill-progress-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--border));
+  overflow: hidden;
+}
+
+.fill-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.35s ease;
 }
 
 .build-info {
