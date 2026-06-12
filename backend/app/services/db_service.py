@@ -23,7 +23,7 @@ class SqlMapping(BaseModel):
     query: str
     target_element: str
     fields: dict[str, str]  # db_column -> xml_attribute (optionally prefixed with @)
-    db_alias: str | None = None  # per-mapping alias; falls back to request-level db_alias
+    db_alias: str | None = None
 
 
 def _normalize_value(value: Any) -> Any:
@@ -278,7 +278,6 @@ class DBService:
         self,
         xml_text: str,
         sql_mappings: list[SqlMapping],
-        db_alias: str,
     ) -> tuple[str, ProtectedAttrs]:
         """Stage-1 pipeline: inject DB values into specific elements by tag name.
 
@@ -294,11 +293,10 @@ class DBService:
             if not mapping.query.strip() or not mapping.target_element:
                 continue
 
-            alias = mapping.db_alias or db_alias
-            if not alias:
+            if not mapping.db_alias:
                 continue
 
-            rows = await self.run_query(alias, mapping.query)
+            rows = await self.run_query(mapping.db_alias, mapping.query)
             if not rows:
                 continue
 
@@ -340,7 +338,6 @@ async def populate_with_db(
 async def apply_db_overrides(
     xml_text: str,
     sql_mappings: list[SqlMapping],
-    db_alias: str,
 ) -> tuple[str, ProtectedAttrs]:
     """Stage-1 of the hybrid pipeline: targeted DB injections before faker/LLM fallback."""
-    return await DBService().apply_overrides(xml_text, sql_mappings, db_alias)
+    return await DBService().apply_overrides(xml_text, sql_mappings)

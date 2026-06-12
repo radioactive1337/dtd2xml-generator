@@ -98,7 +98,7 @@
                 <span class="preset-checkbox-label">
                   {{ p.name }}
                   <span class="preset-meta">
-                    {{ p.db_alias || 'no alias' }} · {{ p.mapping_count }} mapping{{ p.mapping_count === 1 ? '' : 's' }}
+                    {{ p.mapping_count }} mapping{{ p.mapping_count === 1 ? '' : 's' }}
                   </span>
                 </span>
                 <button
@@ -114,14 +114,6 @@
             <span class="overrides-hint">Stage 1 — DB values fill first, Faker/AI fills the rest</span>
           </div>
 
-          <div class="field">
-            <label>Default DB Alias</label>
-            <select v-model="dbAlias">
-              <option value="">Select alias...</option>
-              <option v-for="a in dbAliases" :key="a" :value="a">{{ a }}</option>
-            </select>
-          </div>
-
           <div v-for="(mapping, mi) in sqlMappings" :key="mi" class="mapping-card">
             <div class="mapping-header">
               <div class="mapping-header-left">
@@ -129,8 +121,8 @@
                 <span v-if="mapping._presetSource" class="mapping-preset-badge">{{ mapping._presetSource }}</span>
               </div>
               <div class="mapping-header-right">
-                <select v-model="mapping.db_alias" class="mapping-db-alias" title="DB alias for this mapping">
-                  <option value="">Default</option>
+                <select v-model="mapping.db_alias" class="mapping-db-alias" title="DB alias">
+                  <option value="">DB alias...</option>
                   <option v-for="a in dbAliases" :key="a" :value="a">{{ a }}</option>
                 </select>
                 <button class="btn-icon-remove" @click="removeMapping(mi)" title="Remove mapping">×</button>
@@ -291,7 +283,6 @@ const mode = ref('minimal')
 const repeatCount = ref(1)
 const customPaths = ref([])
 const populateStrategy = ref('faker')
-const dbAlias = ref('')
 const dbAliases = ref([])
 const mappingDbColumns = ref({})
 const mappingColumnsCache = ref({})
@@ -347,7 +338,7 @@ function normalizeMappings(mappings, presetSource = null, presetDbAlias = '') {
 }
 
 function mappingDbAlias(mapping) {
-  return mapping.db_alias || dbAlias.value
+  return mapping.db_alias
 }
 
 async function refreshMappingPresets() {
@@ -364,7 +355,6 @@ async function saveMappingPreset() {
   await apiSaveMappingPreset({
     name: mappingPresetName.value,
     schema_id: schemaId.value,
-    db_alias: dbAlias.value,
     mappings,
   })
   await refreshMappingPresets()
@@ -561,7 +551,7 @@ watch(xmlText, (text) => {
 })
 
 watch(
-  [dbAlias, sqlMappings],
+  sqlMappings,
   () => {
     clearTimeout(columnsFetchTimer)
     columnsFetchTimer = setTimeout(() => {
@@ -725,7 +715,6 @@ async function populate() {
       strategy: populateStrategy.value,
     }
     if (isHybridStrategy.value) {
-      request.db_alias = dbAlias.value || null
       request.sql_mappings = sqlMappings.value
         .filter((m) => m.query?.trim() && m.target_element?.trim())
         .map((m) => ({

@@ -34,7 +34,6 @@ class PopulateRequest(BaseModel):
 
     # Hybrid pipeline: DB overrides (Stage 1)
     sql_mappings: list[SqlMapping] = Field(default_factory=list)
-    db_alias: str | None = None
 
     # Fallback engine options (Stage 2)
     llm_alias: str = "default"
@@ -76,19 +75,25 @@ async def populate_xml(request: PopulateRequest) -> PopulateResponse:
                     status_code=400,
                     detail="sql_mappings cannot be empty for hybrid strategies",
                 )
-            has_alias = bool(request.db_alias) or any(
-                m.db_alias for m in request.sql_mappings
-            )
-            if not has_alias:
+            active_mappings = [
+                m
+                for m in request.sql_mappings
+                if m.query.strip() and m.target_element
+            ]
+            if not active_mappings:
                 raise HTTPException(
                     status_code=400,
-                    detail="db_alias is required for hybrid strategies (global or per mapping)",
+                    detail="sql_mappings must include at least one mapping with query and target_element",
+                )
+            if any(not m.db_alias for m in active_mappings):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Each mapping must have db_alias",
                 )
             try:
                 xml, protected_attrs = await apply_db_overrides(
                     xml,
                     request.sql_mappings,
-                    request.db_alias,
                 )
             except Exception as exc:
                 raise HTTPException(
