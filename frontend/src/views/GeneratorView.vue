@@ -67,7 +67,41 @@
 
         <div v-if="isHybridStrategy" class="db-overrides-panel">
           <div class="overrides-header">
-            <span class="overrides-title">Database Overrides</span>
+            <div class="overrides-header-top">
+              <span class="overrides-title">Database Overrides</span>
+              <div class="mapping-preset-actions">
+                <input
+                  v-model="mappingPresetName"
+                  placeholder="Preset name"
+                  class="preset-input"
+                />
+                <button
+                  class="btn-secondary"
+                  :disabled="!mappingPresetName"
+                  @click="saveMappingPreset"
+                >
+                  Save
+                </button>
+                <select
+                  v-model="loadMappingPresetName"
+                  class="preset-select"
+                  @change="onLoadMappingPreset"
+                >
+                  <option value="">Load preset...</option>
+                  <option v-for="p in mappingPresets" :key="p.name" :value="p.name">
+                    {{ p.name }} ({{ p.mapping_count }})
+                  </option>
+                </select>
+                <button
+                  class="btn-icon-remove"
+                  :disabled="!loadMappingPresetName"
+                  title="Delete preset"
+                  @click="deleteMappingPreset"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
             <span class="overrides-hint">Stage 1 — DB values fill first, Faker/AI fills the rest</span>
           </div>
 
@@ -223,6 +257,12 @@ import { populateXml } from '../api/populate'
 import { validateXml } from '../api/validate'
 import { fetchQueryColumns } from '../api/db'
 import { getConfigAliases, listElements } from '../api/dtd'
+import {
+  listMappingPresets,
+  saveMappingPreset as apiSaveMappingPreset,
+  loadMappingPreset as apiLoadMappingPreset,
+  deleteMappingPreset as apiDeleteMappingPreset,
+} from '../api/mappingPresets'
 import { extractXmlElementPaths } from '../utils/xmlPaths'
 
 const schemaId = ref('')
@@ -237,6 +277,9 @@ const dbAlias = ref('')
 const dbAliases = ref([])
 const mappingDbColumns = ref({})
 const mappingColumnsCache = ref({})
+const mappingPresetName = ref('')
+const loadMappingPresetName = ref('')
+const mappingPresets = ref([])
 
 function createEmptyMapping() {
   return { target_element: '', query: '', fields: [{ db_col: '', xml_attr: '' }] }
@@ -264,6 +307,52 @@ function removeField(mi, fi) {
   sqlMappings.value[mi].fields.splice(fi, 1)
   if (sqlMappings.value[mi].fields.length === 0)
     sqlMappings.value[mi].fields.push({ db_col: '', xml_attr: '' })
+}
+
+function normalizeMappings(mappings) {
+  if (!mappings?.length) return [createEmptyMapping()]
+  return mappings.map((m) => ({
+    target_element: m.target_element || '',
+    query: m.query || '',
+    fields: m.fields?.length
+      ? m.fields.map((f) => ({ db_col: f.db_col || '', xml_attr: f.xml_attr || '' }))
+      : [{ db_col: '', xml_attr: '' }],
+  }))
+}
+
+async function refreshMappingPresets() {
+  try {
+    mappingPresets.value = await listMappingPresets(schemaId.value || undefined)
+  } catch {
+    mappingPresets.value = []
+  }
+}
+
+async function saveMappingPreset() {
+  if (!mappingPresetName.value) return
+  await apiSaveMappingPreset({
+    name: mappingPresetName.value,
+    schema_id: schemaId.value,
+    db_alias: dbAlias.value,
+    mappings: sqlMappings.value,
+  })
+  await refreshMappingPresets()
+  loadMappingPresetName.value = mappingPresetName.value
+}
+
+async function onLoadMappingPreset() {
+  if (!loadMappingPresetName.value) return
+  const preset = await apiLoadMappingPreset(loadMappingPresetName.value)
+  dbAlias.value = preset.db_alias || ''
+  sqlMappings.value = normalizeMappings(preset.mappings)
+  mappingDbColumns.value = {}
+}
+
+async function deleteMappingPreset() {
+  if (!loadMappingPresetName.value) return
+  await apiDeleteMappingPreset(loadMappingPresetName.value)
+  loadMappingPresetName.value = ''
+  await refreshMappingPresets()
 }
 
 function resetMappingXmlAttrs(mi) {
@@ -468,6 +557,7 @@ onMounted(async () => {
   } catch {
     dbAliases.value = []
   }
+  await refreshMappingPresets()
 })
 
 onBeforeUnmount(() => {
@@ -480,6 +570,8 @@ async function onDtdUploaded(result) {
   schemaId.value = result.schema_id
   elements.value = result.elements
   rootElement.value = ''
+  loadMappingPresetName.value = ''
+  await refreshMappingPresets()
   try {
     const summaries = await listElements(result.schema_id)
     elementAttributes.value = Object.fromEntries(summaries.map((s) => [s.name, s.attributes]))
@@ -814,6 +906,29 @@ function stopResize() {
   flex-direction: column;
   gap: 2px;
   margin-bottom: 2px;
+}
+
+.overrides-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mapping-preset-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.preset-input {
+  width: 130px;
+}
+
+.preset-select {
+  width: 160px;
 }
 
 .overrides-title {
