@@ -442,6 +442,7 @@ import {
   collectDtdElementPaths,
   buildFieldMappingsFromColumns,
   mappingsToFields,
+  normalizeFieldName,
 } from '../utils/mappingUtils'
 
 const schemaId = ref('')
@@ -694,8 +695,14 @@ async function suggestMappingsForCard(mi, { keepFilled = true } = {}) {
     return null
   }
 
+  const columnKeys = new Set(columns.map((c) => normalizeFieldName(c)))
   const filled = keepFilled
-    ? mapping.fields.filter((f) => f.db_col?.trim() && f.xml_attr?.trim())
+    ? mapping.fields.filter(
+        (f) =>
+          f.db_col?.trim()
+          && f.xml_attr?.trim()
+          && columnKeys.has(normalizeFieldName(f.db_col)),
+      )
     : []
 
   try {

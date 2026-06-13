@@ -50,6 +50,55 @@ def test_validate_llm_mappings_accepts_exact_names_only():
     ]
 
 
+def test_validate_llm_mappings_drops_unknown_columns():
+    validated = _validate_llm_mappings(
+        [
+            {"db_col": "name", "xml_attr": "name"},
+            {"db_col": "phantom_col", "xml_attr": "name"},
+            {"db_col": "inn", "xml_attr": "made-up-attr"},
+        ],
+        ["name", "inn"],
+        ["name", "is-non-resident"],
+    )
+    assert validated == [
+        {"db_col": "name", "xml_attr": "name"},
+        {"db_col": "inn", "xml_attr": ""},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stale_existing_pairs_are_excluded(schema_from_enterprise):
+    from app.services.field_mapping_service import FieldMappingService
+
+    service = FieldMappingService()
+    service.llm.base_url = ""
+    mappings, _ = await service.suggest_mappings(
+        schema_from_enterprise,
+        "client",
+        ["name"],
+        [{"db_col": "old_col", "xml_attr": "is-non-resident"}],
+    )
+
+    assert mappings == [{"db_col": "name", "xml_attr": "name"}]
+
+
+@pytest.mark.asyncio
+async def test_merge_returns_only_query_columns(schema_from_enterprise):
+    from app.services.field_mapping_service import FieldMappingService
+
+    service = FieldMappingService()
+    service.llm.base_url = ""
+    mappings, _ = await service.suggest_mappings(
+        schema_from_enterprise,
+        "client",
+        ["name", "is_non_resident"],
+        [],
+    )
+
+    assert [row["db_col"] for row in mappings] == ["name", "is_non_resident"]
+    assert len(mappings) == 2
+
+
 @pytest.mark.asyncio
 async def test_suggest_field_mappings_uses_llm_when_available(schema_from_enterprise):
     from app.services.field_mapping_service import FieldMappingService

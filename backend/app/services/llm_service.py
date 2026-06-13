@@ -213,6 +213,7 @@ class LLMService:
             + "\n\nAlready mapped pairs (do not reuse these columns or attributes):\n"
             + ("\n".join(existing_lines) if existing_lines else "(none)")
             + '\n\nReturn JSON: {"mappings": [{"db_col": "...", "xml_attr": "..."}]}\n'
+            "Use only db_col values from the SQL columns list above — do not invent columns. "
             "Use an empty string for xml_attr when there is no confident match."
         )
 

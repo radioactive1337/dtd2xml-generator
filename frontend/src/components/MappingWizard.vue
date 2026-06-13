@@ -185,6 +185,7 @@ import {
   pathsEndingWithTag,
   buildFieldMappingsFromColumns,
   mappingsToFields,
+  normalizeFieldName,
 } from '../utils/mappingUtils'
 
 const props = defineProps({
@@ -306,8 +307,14 @@ async function suggestDraftMappings({ keepFilled = true } = {}) {
     return null
   }
 
+  const columnKeys = new Set(columns.map((c) => normalizeFieldName(c)))
   const filled = keepFilled
-    ? draft.value.fields.filter((f) => f.db_col?.trim() && f.xml_attr?.trim())
+    ? draft.value.fields.filter(
+        (f) =>
+          f.db_col?.trim()
+          && f.xml_attr?.trim()
+          && columnKeys.has(normalizeFieldName(f.db_col)),
+      )
     : []
 
   try {

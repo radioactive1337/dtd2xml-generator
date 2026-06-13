@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
@@ -70,6 +69,54 @@ def suggest_field_mappings_fuzzy(
     return suggestions
 
 
+def _column_lookup(columns: list[str]) -> dict[str, str]:
+    return {_normalize_name(col): col for col in columns}
+
+
+def _filter_pairs_to_columns(
+    pairs: list[dict[str, str]],
+    columns: list[str],
+) -> list[dict[str, str]]:
+    """Keep only manually confirmed pairs whose db_col is in *columns*."""
+    lookup = _column_lookup(columns)
+    result: list[dict[str, str]] = []
+    seen_cols: set[str] = set()
+
+    for pair in pairs:
+        db_col = _resolve_name(str(pair.get("db_col", "")), lookup)
+        xml_attr = str(pair.get("xml_attr", "")).strip()
+        if not db_col or not xml_attr:
+            continue
+        norm = _normalize_name(db_col)
+        if norm in seen_cols:
+            continue
+        result.append({"db_col": db_col, "xml_attr": xml_attr})
+        seen_cols.add(norm)
+
+    return result
+
+
+def _merge_mappings_for_columns(
+    kept: list[dict[str, str]],
+    suggestions: list[dict[str, str]],
+    columns: list[str],
+) -> list[dict[str, str]]:
+    """Return exactly one row per SQL column, in query column order."""
+    by_col: dict[str, str] = {}
+
+    for row in kept:
+        by_col[row["db_col"]] = row["xml_attr"]
+
+    for row in suggestions:
+        db_col = row.get("db_col", "")
+        if not db_col:
+            continue
+        if db_col not in by_col or not by_col[db_col].strip():
+            by_col[db_col] = row.get("xml_attr", "")
+
+    return [{"db_col": col, "xml_attr": by_col.get(col, "")} for col in columns]
+
+
 def _attribute_context(elem: ElementDef) -> list[dict[str, Any]]:
     lines: list[dict[str, Any]] = []
     for name, attr in elem.attributes.items():
@@ -128,11 +175,7 @@ class FieldMappingService:
         elem = schema.elements[target_element]
         xml_attributes = list(elem.attributes.keys())
 
-        kept = [
-            {"db_col": pair["db_col"], "xml_attr": pair["xml_attr"]}
-            for pair in existing_pairs
-            if pair.get("db_col", "").strip() and pair.get("xml_attr", "").strip()
-        ]
+        kept = _filter_pairs_to_columns(existing_pairs, columns)
         used_cols = {_normalize_name(pair["db_col"]) for pair in kept}
         used_attrs = {_normalize_name(pair["xml_attr"]) for pair in kept}
 
@@ -142,7 +185,7 @@ class FieldMappingService:
         ]
 
         if not cols_to_map:
-            return kept, "fuzzy"
+            return _merge_mappings_for_columns(kept, [], columns), "fuzzy"
 
         suggestions: list[dict[str, str]]
         matcher = "fuzzy"
@@ -183,7 +226,7 @@ class FieldMappingService:
                 kept,
             )
 
-        return kept + suggestions, matcher
+        return _merge_mappings_for_columns(kept, suggestions, columns), matcher
 
 
 async def suggest_field_mappings(
