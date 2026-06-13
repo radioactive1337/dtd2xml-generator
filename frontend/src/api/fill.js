@@ -12,15 +12,18 @@ export async function suggestFieldMappingsAi({
   targetElement,
   columns,
   existingMappings = [],
-  llmAlias = 'default',
+  llmAlias,
 }) {
-  const { data } = await client.post('/fill/suggest-field-mappings', {
+  const payload = {
     schema_id: schemaId,
     target_element: targetElement,
     columns,
     existing_mappings: existingMappings,
-    llm_alias: llmAlias,
-  })
+  }
+  if (llmAlias) {
+    payload.llm_alias = llmAlias
+  }
+  const { data } = await client.post('/fill/suggest-field-mappings', payload)
   return data
 }
 

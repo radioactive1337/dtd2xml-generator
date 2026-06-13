@@ -10,11 +10,14 @@ import pytest
 
 from app.config import (
     get_app_settings,
+    get_connection_aliases,
     get_db_password,
+    get_default_llm_alias,
     get_llm_api_key,
     get_ora_tzfile,
     get_oracle_client_lib_dir,
     load_connections,
+    resolve_llm_alias,
 )
 
 
@@ -83,3 +86,50 @@ def test_missing_connections_file_returns_defaults():
     assert connections.llm == {}
     assert app.host == "0.0.0.0"
     assert app.port == 8080
+
+
+def test_get_default_llm_alias_uses_only_configured_alias(connections_file: Path):
+    config = json.loads(connections_file.read_text(encoding="utf-8"))
+    config["llm"] = {
+        "OLLAMA": {
+            "base_url": "http://localhost:11434/v1",
+            "api_key": "llm-secret",
+            "model": "gpt-4o-mini",
+        }
+    }
+    connections_file.write_text(json.dumps(config), encoding="utf-8")
+
+    with patch("app.config._find_connections_file", return_value=connections_file):
+        assert get_default_llm_alias() == "OLLAMA"
+        assert resolve_llm_alias("default") == "OLLAMA"
+        assert resolve_llm_alias() == "OLLAMA"
+        assert get_llm_api_key("default") == "llm-secret"
+
+
+def test_get_default_llm_alias_honors_app_setting(connections_file: Path):
+    config = json.loads(connections_file.read_text(encoding="utf-8"))
+    config["app"]["default_llm_alias"] = "PROD_LLM"
+    config["llm"] = {
+        "DEV_LLM": {
+            "base_url": "http://localhost:11434/v1",
+            "api_key": "dev",
+            "model": "gpt-4o-mini",
+        },
+        "PROD_LLM": {
+            "base_url": "http://prod.example/v1",
+            "api_key": "prod",
+            "model": "gpt-4o",
+        },
+    }
+    connections_file.write_text(json.dumps(config), encoding="utf-8")
+
+    with patch("app.config._find_connections_file", return_value=connections_file):
+        assert get_default_llm_alias() == "PROD_LLM"
+        assert resolve_llm_alias("default") == "PROD_LLM"
+        assert get_connection_aliases()["default_llm"] == "PROD_LLM"
+
+
+def test_resolve_llm_alias_rejects_unknown_alias(connections_file: Path):
+    with patch("app.config._find_connections_file", return_value=connections_file):
+        with pytest.raises(ValueError, match="LLM alias 'missing' is not configured"):
+            resolve_llm_alias("missing")

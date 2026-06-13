@@ -91,7 +91,7 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/api/config/aliases")
-async def config_aliases() -> dict[str, list[str]]:
+async def config_aliases() -> dict[str, list[str] | str | None]:
     """Return connection aliases only — no secrets."""
     return get_connection_aliases()
 

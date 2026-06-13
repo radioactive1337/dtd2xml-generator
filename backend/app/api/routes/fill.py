@@ -10,9 +10,10 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.api.routes.dtd import get_schema_registry
+from app.config import resolve_llm_alias
 from app.core.xml_tree import ProtectedAttrs
 from app.services.db_service import SqlMapping, apply_db_overrides
 from app.services.field_mapping_service import suggest_field_mappings as suggest_field_mappings_service
@@ -48,6 +49,11 @@ class FillRequest(BaseModel):
     llm_alias: str = "default"
     faker_locale: str = "ru_RU"
 
+    @field_validator("llm_alias", mode="before")
+    @classmethod
+    def _resolve_llm_alias(cls, value: object) -> str:
+        return resolve_llm_alias(str(value) if value is not None else None)
+
 
 class FillResponse(BaseModel):
     xml_text: str
@@ -66,6 +72,11 @@ class SuggestFieldMappingsRequest(BaseModel):
     columns: list[str] = Field(default_factory=list)
     existing_mappings: list[FieldMappingPair] = Field(default_factory=list)
     llm_alias: str = "default"
+
+    @field_validator("llm_alias", mode="before")
+    @classmethod
+    def _resolve_llm_alias(cls, value: object) -> str:
+        return resolve_llm_alias(str(value) if value is not None else None)
 
 
 class SuggestFieldMappingsResponse(BaseModel):

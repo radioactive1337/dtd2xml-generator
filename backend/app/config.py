@@ -17,6 +17,7 @@ class AppSettings(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
     log_level: str = "INFO"
+    default_llm_alias: str | None = None
 
 
 class LLMConfig(BaseModel):
@@ -75,10 +76,61 @@ def load_connections() -> ConnectionsConfig:
     return ConnectionsConfig(databases=databases, llm=llm)
 
 
+def get_default_llm_alias() -> str | None:
+    """Return the configured default LLM alias, or None when no LLM is configured."""
+    connections = load_connections()
+    if not connections.llm:
+        return None
+
+    raw = _load_raw_connections()
+    configured = str(raw.get("app", {}).get("default_llm_alias", "")).strip()
+    if configured:
+        if configured in connections.llm:
+            return configured
+        available = ", ".join(sorted(connections.llm))
+        raise ValueError(
+            f"app.default_llm_alias '{configured}' is not defined in llm section. "
+            f"Available: {available}"
+        )
+
+    if "default" in connections.llm:
+        return "default"
+
+    if len(connections.llm) == 1:
+        return next(iter(connections.llm))
+
+    available = ", ".join(sorted(connections.llm))
+    raise ValueError(
+        f"Multiple LLM aliases configured ({available}). "
+        "Set app.default_llm_alias in connections.json."
+    )
+
+
+def resolve_llm_alias(alias: str | None = None) -> str:
+    """Resolve an explicit LLM alias or fall back to the configured default."""
+    connections = load_connections()
+    requested = (alias or "").strip()
+
+    if requested and requested in connections.llm:
+        return requested
+
+    if requested and requested != "default":
+        available = ", ".join(sorted(connections.llm)) or "(none)"
+        raise ValueError(
+            f"LLM alias '{requested}' is not configured. Available: {available}"
+        )
+
+    default = get_default_llm_alias()
+    if default is None:
+        raise ValueError("No LLM aliases configured in connections.json")
+    return default
+
+
 def get_llm_api_key(alias: str = "default") -> str:
     """Return LLM API key from connections.json (server-side only)."""
+    resolved = resolve_llm_alias(alias)
     raw = _load_raw_connections()
-    return raw.get("llm", {}).get(alias, {}).get("api_key", "")
+    return raw.get("llm", {}).get(resolved, {}).get("api_key", "")
 
 
 def get_db_password(alias: str) -> str:
@@ -126,17 +178,28 @@ def get_ora_tzfile() -> str | None:
 def get_app_settings() -> AppSettings:
     raw = _load_raw_connections()
     app = raw.get("app", {})
+    default_llm_alias = app.get("default_llm_alias")
     return AppSettings(
         host=app.get("host", "0.0.0.0"),
         port=int(app.get("port", 8080)),
         log_level=str(app.get("log_level", "INFO")),
+        default_llm_alias=str(default_llm_alias).strip() or None
+        if default_llm_alias is not None
+        else None,
     )
 
 
-def get_connection_aliases() -> dict[str, list[str]]:
+def get_connection_aliases() -> dict[str, list[str] | str | None]:
     """Return only aliases safe to expose in the UI."""
     connections = load_connections()
+    default_llm: str | None = None
+    try:
+        default_llm = get_default_llm_alias()
+    except ValueError:
+        default_llm = None
+
     return {
         "databases": list(connections.databases.keys()),
         "llm": list(connections.llm.keys()),
+        "default_llm": default_llm,
     }

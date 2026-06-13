@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 from lxml import etree
 
-from app.config import get_llm_api_key, load_connections
+from app.config import get_llm_api_key, load_connections, resolve_llm_alias
 from app.core.dtd_models import DTDSchema
 from app.core.logging_config import truncate
 from app.core.xml_tree import ProtectedAttrs, element_path, is_fillable_attribute_value
@@ -53,12 +53,13 @@ class LLMService:
         api_key: str | None = None,
         timeout: float = 120.0,
     ) -> None:
+        self.alias = resolve_llm_alias(alias)
         connections = load_connections()
-        llm_cfg = connections.llm.get(alias)
+        llm_cfg = connections.llm.get(self.alias)
 
         self.base_url = (base_url or (llm_cfg.base_url if llm_cfg else "") or "").rstrip("/")
         self.model = model or (llm_cfg.model if llm_cfg else "gpt-4o-mini")
-        self.api_key = api_key or get_llm_api_key(alias)
+        self.api_key = api_key or get_llm_api_key(self.alias)
         self.timeout = timeout
 
     async def populate_xml(

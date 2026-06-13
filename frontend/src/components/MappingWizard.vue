@@ -216,6 +216,7 @@ const props = defineProps({
   elements: { type: Array, default: () => [] },
   elementAttributes: { type: Object, default: () => ({}) },
   dbAliases: { type: Array, default: () => [] },
+  llmAlias: { type: String, default: '' },
   availablePaths: { type: Array, default: () => [] },
 })
 
@@ -396,6 +397,7 @@ async function suggestDraftMappings({ keepFilled = true } = {}) {
         db_col: f.db_col,
         xml_attr: f.xml_attr,
       })),
+      llmAlias: props.llmAlias || undefined,
     })
     return {
       fields: mappingsToFields(mappings),

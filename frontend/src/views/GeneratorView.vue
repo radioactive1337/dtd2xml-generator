@@ -127,6 +127,7 @@
         :elements="elements"
         :element-attributes="elementAttributes"
         :db-aliases="dbAliases"
+        :llm-alias="llmAlias"
         :available-paths="availableElementPaths"
         @close="onWizardClose"
         @finish="onWizardFinish"
@@ -189,6 +190,7 @@ const repeatCount = ref(1)
 const customPaths = ref([])
 const fillStrategy = ref('faker')
 const dbAliases = ref([])
+const llmAlias = ref(null)
 const mappingPresetName = ref('')
 const selectedMappingPresetNames = ref([])
 const mappingPresets = ref([])
@@ -679,8 +681,10 @@ onMounted(async () => {
   try {
     const aliases = await getConfigAliases()
     dbAliases.value = aliases.databases || []
+    llmAlias.value = aliases.default_llm || aliases.llm?.[0] || null
   } catch {
     dbAliases.value = []
+    llmAlias.value = null
   }
 })
 
@@ -841,6 +845,9 @@ async function fill() {
       schema_id: schemaId.value,
       xml_text: xmlText.value,
       strategy: fillStrategy.value,
+    }
+    if (llmAlias.value) {
+      request.llm_alias = llmAlias.value
     }
     if (isHybridStrategy.value) {
       request.sql_mappings = sqlMappings.value

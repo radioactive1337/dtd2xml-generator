@@ -35,6 +35,7 @@ def test_config_aliases_no_secrets(client: TestClient):
     data = response.json()
     assert "databases" in data
     assert "llm" in data
+    assert "default_llm" in data
 
 
 def test_upload_dtd(client: TestClient):
