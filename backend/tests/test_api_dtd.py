@@ -52,6 +52,18 @@ def test_upload_dtd(client: TestClient):
     assert "PayDoc" in data["elements"]
 
 
+def test_list_schemas(client: TestClient):
+    schema_id = _upload_fixture(client)
+
+    response = client.get("/api/dtd/schemas")
+    assert response.status_code == 200
+    schemas = response.json()
+    assert len(schemas) == 1
+    assert schemas[0]["schema_id"] == schema_id
+    assert schemas[0]["element_count"] > 0
+    assert "PayDoc" in schemas[0]["elements"]
+
+
 def test_list_elements(client: TestClient):
     schema_id = _upload_fixture(client)
 

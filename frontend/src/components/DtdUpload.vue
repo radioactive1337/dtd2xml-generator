@@ -2,7 +2,7 @@
   <div class="dtd-upload">
     <div
       class="drop-zone"
-      :class="{ dragging: isDragging, loaded: schemaId }"
+      :class="{ dragging: isDragging, loaded: isLoaded }"
       @dragover.prevent="isDragging = true"
       @dragleave="isDragging = false"
       @drop.prevent="onDrop"
@@ -18,7 +18,7 @@
       <template v-if="loading">
         <span class="drop-text">Parsing DTD...</span>
       </template>
-      <template v-else-if="schemaId">
+      <template v-else-if="isLoaded">
         <span class="drop-icon">✓</span>
         <span class="drop-text">{{ fileName }}</span>
         <span class="drop-sub">{{ elementCount }} elements loaded</span>
@@ -34,8 +34,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { uploadDtd, listSchemas } from '../api/dtd'
+import { ref } from 'vue'
+import { uploadDtd } from '../api/dtd'
+
+defineProps({
+  isLoaded: { type: Boolean, default: false },
+  fileName: { type: String, default: '' },
+  elementCount: { type: Number, default: 0 },
+})
 
 const emit = defineEmits(['uploaded'])
 
@@ -43,43 +49,6 @@ const fileInput = ref(null)
 const isDragging = ref(false)
 const loading = ref(false)
 const error = ref('')
-const schemaId = ref('')
-const fileName = ref('')
-const elementCount = ref(0)
-
-function schemaFileName(schema) {
-  const source = schema.source_files?.[0] || ''
-  return source.split(/[/\\]/).pop() || 'schema'
-}
-
-function pickPrimarySchema(schemas) {
-  if (!schemas.length) return null
-  const main = schemas.find((s) =>
-    s.source_files?.some((f) => /[/\\]main\.dtd$/i.test(f) || f.toLowerCase() === 'main.dtd'),
-  )
-  if (main) return main
-  return schemas.reduce(
-    (best, s) => (!best || s.element_count > best.element_count ? s : best),
-    null,
-  )
-}
-
-function applySchema(result) {
-  schemaId.value = result.schema_id
-  fileName.value = schemaFileName(result)
-  elementCount.value = result.element_count
-  emit('uploaded', result)
-}
-
-onMounted(async () => {
-  try {
-    const schemas = await listSchemas()
-    const primary = pickPrimarySchema(schemas)
-    if (primary) applySchema(primary)
-  } catch {
-    // No saved schemas or API unavailable — user can upload manually.
-  }
-})
 
 async function processFile(file) {
   if (!file) return
@@ -87,7 +56,7 @@ async function processFile(file) {
   error.value = ''
   try {
     const result = await uploadDtd(file)
-    applySchema(result)
+    emit('uploaded', result)
   } catch (e) {
     error.value = e.message
   } finally {

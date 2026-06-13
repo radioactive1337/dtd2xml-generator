@@ -3,11 +3,21 @@
     <div class="generator-left" :style="{ width: leftWidth + 'px' }">
       <div class="dtd-wrapper card">
         <div class="dtd-collapse-header" @click="dtdCollapsed = !dtdCollapsed">
-          <span class="panel-title">DTD Schema</span>
+          <div class="dtd-header-main">
+            <span class="panel-title">DTD Schema</span>
+            <span v-if="schemaId && dtdCollapsed" class="dtd-header-status">
+              ✓ {{ dtdMeta.fileName }} · {{ dtdMeta.elementCount }} elements
+            </span>
+          </div>
           <span class="collapse-arrow" :class="{ rotated: dtdCollapsed }">▼</span>
         </div>
         <div v-show="!dtdCollapsed">
-          <DtdUpload @uploaded="onDtdUploaded" />
+          <DtdUpload
+            :is-loaded="!!schemaId"
+            :file-name="dtdMeta.fileName"
+            :element-count="dtdMeta.elementCount"
+            @uploaded="onDtdUploaded"
+          />
         </div>
       </div>
 
@@ -442,7 +452,7 @@ import { generateXml } from '../api/generate'
 import { fillXmlStream, suggestFieldMappingsAi } from '../api/fill'
 import { validateXml } from '../api/validate'
 import { fetchQueryColumns, fetchQueryPreview } from '../api/db'
-import { getConfigAliases, listElements, getElementTree } from '../api/dtd'
+import { getConfigAliases, listElements, getElementTree, listSchemas } from '../api/dtd'
 import {
   listMappingPresets,
   saveMappingPreset as apiSaveMappingPreset,
@@ -467,8 +477,10 @@ import {
   mappingsToFields,
   normalizeFieldName,
 } from '../utils/mappingUtils'
+import { pickPrimarySchema, schemaFileName } from '../utils/dtdSchema'
 
 const schemaId = ref('')
+const dtdMeta = ref({ fileName: '', elementCount: 0 })
 const elements = ref([])
 const elementAttributes = ref({})
 const rootElement = ref('')
@@ -1050,7 +1062,7 @@ watch(mode, async (val, oldVal) => {
       await nextTick()
       await applyXmlPathsFromEditor(getEditorXmlText())
     }
-  } else {
+  } else if (!schemaId.value) {
     dtdCollapsed.value = false
   }
 })
@@ -1112,8 +1124,19 @@ const modes = [
 const canGenerate = computed(() => schemaId.value && rootElement.value)
 const canValidate = computed(() => schemaId.value && xmlText.value)
 
+async function restoreSavedSchema() {
+  try {
+    const schemas = await listSchemas()
+    const primary = pickPrimarySchema(schemas)
+    if (primary) await onDtdUploaded(primary)
+  } catch {
+    // No saved schemas or API unavailable — user can upload manually.
+  }
+}
+
 onMounted(async () => {
   document.addEventListener('click', onPresetDropdownOutsideClick)
+  await restoreSavedSchema()
   try {
     const aliases = await getConfigAliases()
     dbAliases.value = aliases.databases || []
@@ -1134,6 +1157,10 @@ onBeforeUnmount(() => {
 
 async function onDtdUploaded(result) {
   schemaId.value = result.schema_id
+  dtdMeta.value = {
+    fileName: schemaFileName(result),
+    elementCount: result.element_count,
+  }
   elements.value = result.elements
   rootElement.value = ''
   selectedMappingPresetNames.value = []
@@ -1149,6 +1176,7 @@ async function onDtdUploaded(result) {
   validationResult.value = null
   error.value = ''
   xmlSyncHint.value = ''
+  dtdCollapsed.value = true
 
   await nextTick()
   const editorXml = getEditorXmlText()?.trim()
@@ -1382,6 +1410,22 @@ function stopResize() {
   cursor: pointer;
   padding: 2px 0 8px;
   user-select: none;
+}
+
+.dtd-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dtd-header-status {
+  font-size: 12px;
+  color: var(--success);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dtd-collapse-header:hover .panel-title {
