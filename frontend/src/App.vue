@@ -3,11 +3,11 @@
     <header class="app-header">
       <div class="logo">
         <span class="logo-icon">XML</span>
-        <span class="logo-text">QA XML Generator</span>
+        <span class="logo-text">Генератор XML для QA</span>
       </div>
       <nav class="nav">
-        <router-link to="/" class="nav-link">Generator</router-link>
-        <router-link to="/settings" class="nav-link">Settings</router-link>
+        <router-link to="/" class="nav-link">Генератор</router-link>
+        <router-link to="/settings" class="nav-link">Настройки</router-link>
       </nav>
     </header>
     <main class="app-main">

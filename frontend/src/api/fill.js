@@ -1,4 +1,6 @@
 import client from './client'
+import { translateApiError } from '../utils/apiErrors'
+import { translateFillStep } from '../utils/fillProgress'
 
 export async function fillXml(request) {
   const { data } = await client.post('/fill', request)
@@ -61,12 +63,13 @@ export async function fillXmlStream(request, onProgress) {
     } catch {
       // Keep default status text.
     }
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+    const detailText = typeof detail === 'string' ? detail : JSON.stringify(detail)
+    throw new Error(translateApiError(detailText))
   }
 
   const reader = response.body?.getReader()
   if (!reader) {
-    throw new Error('Streaming is not supported by this browser')
+    throw new Error(translateApiError('Streaming is not supported by this browser'))
   }
 
   const decoder = new TextDecoder()
@@ -89,26 +92,26 @@ export async function fillXmlStream(request, onProgress) {
         }
         onProgress?.({
           step: 'complete',
-          message: 'Fill complete',
+          message: translateFillStep('complete'),
           percent: 100,
         })
         continue
       }
 
       if (event.step === 'error') {
-        throw new Error(event.message || 'Fill failed')
+        throw new Error(translateApiError(event.message || 'Fill failed'))
       }
 
       onProgress?.({
         step: event.step,
-        message: event.message,
+        message: translateFillStep(event.step) || event.message,
         percent: event.percent ?? 0,
       })
     }
   }
 
   if (!result?.xml_text) {
-    throw new Error('Fill stream ended without a result')
+    throw new Error(translateApiError('Fill stream ended without a result'))
   }
 
   return result

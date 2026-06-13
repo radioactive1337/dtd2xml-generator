@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { translateApiError } from '../utils/apiErrors'
 
 const client = axios.create({
   baseURL: '/api',
@@ -16,7 +17,8 @@ client.interceptors.response.use(
       detail ||
       error.message ||
       'Unknown error'
-    const text = typeof message === 'string' ? message : JSON.stringify(message)
+    const raw = typeof message === 'string' ? message : JSON.stringify(message)
+    const text = translateApiError(raw)
 
     console.error(
       `[API] ${method || 'REQUEST'} ${url || ''} failed` +

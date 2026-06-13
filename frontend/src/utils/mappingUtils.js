@@ -101,20 +101,20 @@ export function getMappingValidationIssues(mapping, { elements, preview }) {
   const warnings = []
 
   if (!mapping.db_alias?.trim()) {
-    errors.push('DB alias is required')
+    errors.push('Укажите алиас БД')
   }
   if (!mapping.query?.trim()) {
-    errors.push('SQL query is required')
+    errors.push('Укажите SQL-запрос')
   }
   if (!mapping.target_element?.trim()) {
-    errors.push('Target element is required')
+    errors.push('Укажите целевой элемент')
   } else if (elements?.length && !elements.includes(mapping.target_element)) {
-    errors.push(`Target element "${mapping.target_element}" is not in the DTD`)
+    errors.push(`Элемент «${mapping.target_element}» не найден в DTD`)
   }
 
   const filledPairs = (mapping.fields || []).filter((f) => f.db_col && f.xml_attr)
   if (!filledPairs.length) {
-    errors.push('At least one field mapping (DB column → XML attribute) is required')
+    errors.push('Нужно хотя бы одно сопоставление поле БД → атрибут XML')
   }
 
   const xmlAttrs = filledPairs.map((f) => f.xml_attr)
@@ -122,7 +122,7 @@ export function getMappingValidationIssues(mapping, { elements, preview }) {
   for (const attr of xmlAttrs) {
     const key = normalizeFieldName(attr)
     if (seen.has(key)) {
-      errors.push(`Duplicate XML attribute "${attr}"`)
+      errors.push(`Дублируется атрибут XML «${attr}»`)
       break
     }
     seen.add(key)
@@ -132,7 +132,7 @@ export function getMappingValidationIssues(mapping, { elements, preview }) {
     errors.push(preview.error)
   } else if (preview && !preview.loading) {
     if (preview.columns?.length && preview.row === null) {
-      warnings.push('Query returned 0 rows')
+      warnings.push('Запрос не вернул строк')
     }
   }
 

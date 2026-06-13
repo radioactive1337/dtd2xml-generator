@@ -1,12 +1,12 @@
 <template>
   <div class="tab-pane">
     <div class="field">
-      <label>Fill Strategy</label>
+      <label>Стратегия заполнения</label>
       <select :value="fillStrategy" @change="$emit('update:fillStrategy', $event.target.value)">
-        <option value="faker">Smart Faker (Fast &amp; Local)</option>
-        <option value="ai">AI / LLM (Smart Context)</option>
-        <option value="hybrid_db_faker">Hybrid: Database + Smart Faker</option>
-        <option value="hybrid_db_ai">Hybrid: Database + AI</option>
+        <option value="faker">Faker (быстро, локально)</option>
+        <option value="ai">AI / LLM (контекстная генерация)</option>
+        <option value="hybrid_db_faker">Гибрид: БД + Faker</option>
+        <option value="hybrid_db_ai">Гибрид: БД + AI</option>
       </select>
     </div>
 
@@ -16,17 +16,17 @@
         :checked="autoValidateAfterFill"
         @change="$emit('update:autoValidateAfterFill', $event.target.checked)"
       />
-      Auto-validate after Fill
+      Проверять DTD после заполнения
     </label>
 
     <div v-if="isHybridStrategy" class="db-overrides-panel">
       <div class="overrides-header">
         <div class="overrides-header-top">
-          <span class="overrides-title">Database Overrides</span>
+          <span class="overrides-title">Подстановка из БД</span>
           <div class="mapping-preset-actions">
             <input
               :value="mappingPresetName"
-              placeholder="Preset name"
+              placeholder="Имя пресета"
               class="preset-input"
               @input="$emit('update:mappingPresetName', $event.target.value)"
             />
@@ -35,7 +35,7 @@
               :disabled="!mappingPresetName"
               @click="$emit('save-mapping-preset')"
             >
-              Save
+              Сохранить
             </button>
             <div ref="presetDropdownRef" class="preset-dropdown">
               <button
@@ -48,7 +48,7 @@
               </button>
               <div v-if="presetDropdownOpen" class="preset-dropdown-menu" @click.stop>
                 <p v-if="!mappingPresets.length" class="preset-dropdown-empty">
-                  No saved presets
+                  Нет сохранённых пресетов
                 </p>
                 <label
                   v-for="p in mappingPresets"
@@ -64,12 +64,12 @@
                   <span class="preset-dropdown-item-label">
                     <span class="preset-dropdown-item-name">{{ p.name }}</span>
                     <span class="preset-meta">
-                      {{ p.mapping_count }} mapping{{ p.mapping_count === 1 ? '' : 's' }}
+                      {{ formatMappings(p.mapping_count) }}
                     </span>
                   </span>
                   <button
                     class="btn-icon-remove"
-                    title="Delete preset"
+                    title="Удалить пресет"
                     @click.prevent="$emit('delete-mapping-preset', p.name)"
                   >
                     ×
@@ -88,45 +88,45 @@
             {{ name }}
             <button
               class="preset-chip-remove"
-              title="Remove preset"
+              title="Убрать пресет"
               @click="$emit('remove-selected-preset', name)"
             >
               ×
             </button>
           </span>
         </div>
-        <span class="overrides-hint">Stage 1 — DB values fill first, Faker/AI fills the rest</span>
+        <span class="overrides-hint">Этап 1 — сначала БД, затем Faker/AI для остального</span>
       </div>
 
       <div v-for="(mapping, mi) in sqlMappings" :key="mi" class="mapping-card">
         <div class="mapping-header">
           <div class="mapping-header-left">
-            <span class="mapping-title">Mapping {{ mi + 1 }}</span>
+            <span class="mapping-title">Маппинг {{ mi + 1 }}</span>
             <span v-if="mapping._presetSource" class="mapping-preset-badge">{{ mapping._presetSource }}</span>
             <span
               v-if="mappingPreview[mi] && !mappingPreview[mi].loading && mappingPreview[mi].columns?.length"
               class="preview-badge"
               :class="mappingPreview[mi].row === null ? 'warn' : 'ok'"
             >
-              {{ mappingPreview[mi].row === null ? '0 rows' : 'OK' }}
+              {{ mappingPreview[mi].row === null ? '0 строк' : 'OK' }}
             </span>
           </div>
           <div class="mapping-header-right">
-            <button class="btn-mapping-edit" @click="$emit('open-mapping-wizard', mi)">Edit</button>
-            <button class="btn-icon-remove" @click="$emit('remove-mapping', mi)" title="Remove mapping">×</button>
+            <button class="btn-mapping-edit" @click="$emit('open-mapping-wizard', mi)">Изменить</button>
+            <button class="btn-icon-remove" @click="$emit('remove-mapping', mi)" title="Удалить маппинг">×</button>
           </div>
         </div>
 
         <dl class="mapping-summary">
-          <dt>DB Alias</dt>
+          <dt>Алиас БД</dt>
           <dd>{{ mapping.db_alias || '—' }}</dd>
-          <dt>Target Element</dt>
+          <dt>Целевой элемент</dt>
           <dd>{{ mapping.target_element || '—' }}</dd>
-          <dt>Target Path</dt>
-          <dd>{{ mapping.target_path || '(all matching tags)' }}</dd>
-          <dt>SQL Query</dt>
+          <dt>Путь к элементу</dt>
+          <dd>{{ mapping.target_path || '(все совпадающие теги)' }}</dd>
+          <dt>SQL-запрос</dt>
           <dd class="mapping-summary-query">{{ mapping.query || '—' }}</dd>
-          <dt>Fields</dt>
+          <dt>Поля</dt>
           <dd>
             <ul v-if="filledMappingFields(mapping).length" class="mapping-summary-fields">
               <li v-for="f in filledMappingFields(mapping)" :key="f.db_col + f.xml_attr">
@@ -146,7 +146,7 @@
       </div>
 
       <div class="mapping-add-row">
-        <button class="btn-add-mapping" @click="$emit('open-mapping-wizard')">+ Add mapping</button>
+        <button class="btn-add-mapping" @click="$emit('open-mapping-wizard')">+ Добавить маппинг</button>
       </div>
     </div>
   </div>
@@ -154,6 +154,7 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { formatMappings } from '../../utils/ruPlural'
 
 const props = defineProps({
   fillStrategy: { type: String, default: 'faker' },

@@ -13,19 +13,19 @@
           class="validation-error-link"
           @click="$emit('go-to-error', err)"
         >
-          Line {{ err.line }}, col {{ err.column }}: {{ err.message }}
+          Строка {{ err.line }}, столбец {{ err.column }}: {{ err.message }}
         </button>
         <span v-else>{{ err.message }}</span>
       </li>
     </ul>
 
     <p v-if="buildInfo" class="build-info">
-      {{ buildInfo.node_count }} nodes
+      {{ nodesLabel }}
     </p>
 
     <template v-if="buildInfo?.warnings?.length">
       <p class="build-warnings-heading">
-        {{ buildInfo.warnings.length }} warning{{ buildInfo.warnings.length === 1 ? '' : 's' }}:
+        {{ warningsHeading }}
       </p>
       <ul class="build-warnings">
         <li v-for="(warning, i) in buildInfo.warnings" :key="i">{{ warning }}</li>
@@ -38,6 +38,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { formatErrors, formatNodes, formatWarnings } from '../../utils/ruPlural'
 
 const props = defineProps({
   validationResult: { type: Object, default: null },
@@ -56,23 +57,34 @@ const status = computed(() => {
   return null
 })
 
+const nodesLabel = computed(() => {
+  if (!props.buildInfo) return ''
+  return formatNodes(props.buildInfo.node_count)
+})
+
+const warningsHeading = computed(() => {
+  const count = props.buildInfo?.warnings?.length ?? 0
+  return `${formatWarnings(count)}:`
+})
+
 const statusMessage = computed(() => {
   if (status.value === 'error') {
     if (props.validationResult?.valid === false && props.validationResult?.errors?.length) {
       const count = props.validationResult.errors.length
-      return `Validation failed — ${count} error${count === 1 ? '' : 's'}`
+      return `Проверка не пройдена — ${formatErrors(count)}`
     }
     return props.xmlSyncHint
   }
   if (status.value === 'warn') {
     const count = props.buildInfo.warnings.length
-    return `Build completed with ${count} warning${count === 1 ? '' : 's'}`
+    if (count === 1) return 'Сборка завершена с 1 предупреждением'
+    return `Сборка завершена с ${count} предупреждениями`
   }
   if (props.validationResult?.valid === true) {
-    return 'XML is valid against DTD'
+    return 'XML соответствует DTD'
   }
   if (props.buildInfo) {
-    return `Generated — ${props.buildInfo.node_count} nodes, no warnings`
+    return `Сгенерировано — ${formatNodes(props.buildInfo.node_count)}, без предупреждений`
   }
   return ''
 })

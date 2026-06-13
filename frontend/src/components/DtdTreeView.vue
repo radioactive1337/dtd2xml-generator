@@ -1,12 +1,12 @@
 <template>
   <div class="tree-view card">
     <div class="tree-header">
-      <div class="panel-title">Custom Tree</div>
+      <div class="panel-title">Дерево (свой режим)</div>
       <div class="tree-actions">
-        <input v-model="presetName" placeholder="Preset name" class="preset-input" />
-        <button class="btn-secondary" :disabled="!presetName" @click="savePreset">Save</button>
+        <input v-model="presetName" placeholder="Имя пресета" class="preset-input" />
+        <button class="btn-secondary" :disabled="!presetName" @click="savePreset">Сохранить</button>
         <select v-model="loadPresetName" class="preset-select" @change="onLoadPreset">
-          <option value="">Select preset...</option>
+          <option value="">Выберите пресет…</option>
           <option v-for="p in presets" :key="p.name" :value="p.name">{{ p.name }}</option>
         </select>
       </div>
@@ -53,8 +53,8 @@
         <template v-else>
           {{
             rootElement
-              ? 'Building tree...'
-              : 'Select a root element or load a preset.'
+              ? 'Построение дерева…'
+              : 'Выберите корневой элемент или загрузите пресет.'
           }}
         </template>
       </div>
@@ -80,7 +80,7 @@ const treeRoot = ref(null)
 const flatNodes = ref([])
 const checkedPaths = ref(new Set())
 const loading = ref(false)
-const loadingMessage = ref('Loading tree...')
+const loadingMessage = ref('Загрузка дерева…')
 const presetName = ref('')
 const loadPresetName = ref('')
 const presets = ref([])
@@ -99,7 +99,7 @@ function cancelPendingLoads() {
   loading.value = false
 }
 
-function beginLoad(message = 'Loading tree...') {
+function beginLoad(message = 'Загрузка дерева…') {
   loadingMessage.value = message
   loading.value = true
 }
@@ -180,7 +180,7 @@ async function refreshPresets() {
 }
 
 async function buildInitialTree(seq) {
-  beginLoad('Loading tree...')
+  beginLoad('Загрузка дерева…')
   try {
     const data = await getElementTree(props.schemaId, props.rootElement)
     if (isStale(seq)) return false
@@ -464,7 +464,7 @@ async function toggleExpand(item) {
 
   const seq = loadSeq
   if (!node._loaded && node._refName) {
-    beginLoad('Loading branch...')
+    beginLoad('Загрузка ветки…')
     try {
       const data = await getElementTree(props.schemaId, node._refName)
       if (seq !== loadSeq) return
@@ -635,7 +635,7 @@ async function ensureTreeLoadedForElementPaths(elementPaths, seq) {
 async function applyElementPathsToTree(elementPaths, seq = loadSeq) {
   if (!treeRoot.value || !elementPaths?.length || isStale(seq)) return
 
-  beginLoad('Syncing selection from XML...')
+  beginLoad('Синхронизация выбора из XML…')
   try {
     const elPathSet = new Set(elementPaths)
     await ensureTreeLoadedForElementPaths(elementPaths, seq)

@@ -16,16 +16,16 @@
         @change="onFileSelect"
       />
       <template v-if="loading">
-        <span class="drop-text">Parsing DTD...</span>
+        <span class="drop-text">Разбор DTD…</span>
       </template>
       <template v-else-if="isLoaded">
         <span class="drop-icon">✓</span>
         <span class="drop-text">{{ fileName }}</span>
-        <span class="drop-sub">{{ elementCount }} elements loaded</span>
+        <span class="drop-sub">Загружено элементов: {{ elementCount }}</span>
       </template>
       <template v-else>
         <span class="drop-icon">↑</span>
-        <span class="drop-text">Drop DTD or JAR file here or click to browse</span>
+        <span class="drop-text">Перетащите DTD или JAR сюда или нажмите для выбора</span>
         <span class="drop-sub">.dtd, .ent, .mod, .jar</span>
       </template>
     </div>

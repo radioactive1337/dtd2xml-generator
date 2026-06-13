@@ -2,8 +2,8 @@
   <div v-if="open" class="wizard-overlay" @click.self="close">
     <div class="wizard-dialog" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
       <div class="wizard-header">
-        <h3 id="wizard-title">{{ isEditMode ? 'Edit Mapping' : 'Add Mapping' }}</h3>
-        <button class="btn-icon-remove" title="Close" @click="close">×</button>
+        <h3 id="wizard-title">{{ isEditMode ? 'Изменить маппинг' : 'Добавить маппинг' }}</h3>
+        <button class="btn-icon-remove" title="Закрыть" @click="close">×</button>
       </div>
 
       <div class="wizard-steps">
@@ -22,11 +22,11 @@
       <div class="wizard-body">
         <!-- Step 0: Element -->
         <div v-if="step === 0" class="wizard-panel">
-          <label>Target Element</label>
+          <label>Целевой элемент</label>
           <input
             v-model="draft.target_element"
             :list="datalistListFor('wizard-el', 'wizard-elements-list')"
-            placeholder="Search or type element name"
+            placeholder="Имя элемента (введите или выберите из списка)"
             @input="onElementInput"
             @focus="openDatalist('wizard-el')"
             @blur="scheduleCloseDatalist('wizard-el')"
@@ -36,16 +36,16 @@
           <datalist id="wizard-elements-list">
             <option v-for="el in filteredElements" :key="el" :value="el" />
           </datalist>
-          <p class="wizard-hint">Pick the XML element whose attributes will be filled from SQL.</p>
+          <p class="wizard-hint">Выберите XML-элемент, атрибуты которого будут заполнены из SQL.</p>
         </div>
 
         <!-- Step 1: Optional path -->
         <div v-if="step === 1" class="wizard-panel">
-          <label>Target Path <span class="label-hint">(optional)</span></label>
+          <label>Путь к элементу <span class="label-hint">(необязательно)</span></label>
           <input
             v-model="draft.target_path"
             :list="datalistListFor('wizard-path', 'wizard-paths-list')"
-            placeholder="PayDoc.client.contact[0] (optional)"
+            placeholder="PayDoc.client.contact[0] (необязательно)"
             @input="onPathChange"
             @focus="openDatalist('wizard-path')"
             @blur="scheduleCloseDatalist('wizard-path')"
@@ -53,11 +53,11 @@
             @keydown.enter="onDatalistEnter($event, 'wizard-path')"
           />
           <p v-if="!pathOptions.length && draft.target_element && props.xmlText?.trim()" class="wizard-hint wizard-hint-warn">
-            No paths for &lt;{{ draft.target_element }}&gt; in the current XML.
+            В текущем XML нет путей для &lt;{{ draft.target_element }}&gt;.
           </p>
           <p v-else-if="pathOptions.length > 1" class="wizard-hint wizard-hint-warn">
-            Without a path, all &lt;{{ draft.target_element }}&gt; tags in the document will be filled.
-            Duplicate siblings: <code>contact[0]</code>, <code>contact[1]</code>.
+            Без пути будут заполнены все теги &lt;{{ draft.target_element }}&gt; в документе.
+            Дубликаты: <code>contact[0]</code>, <code>contact[1]</code>.
           </p>
           <datalist id="wizard-paths-list">
             <option v-for="p in pathOptions" :key="p" :value="p" />
@@ -67,13 +67,13 @@
         <!-- Step 2: SQL -->
         <div v-if="step === 2" class="wizard-panel">
           <div class="wizard-row">
-            <label>DB Alias</label>
+            <label>Алиас БД</label>
             <select v-model="draft.db_alias">
-              <option value="">Select alias...</option>
+              <option value="">Выберите алиас…</option>
               <option v-for="a in dbAliases" :key="a" :value="a">{{ a }}</option>
             </select>
           </div>
-          <label>SQL Query</label>
+          <label>SQL-запрос</label>
           <textarea
             v-model="draft.query"
             rows="4"
@@ -85,7 +85,7 @@
               :disabled="!canTestQuery || preview.loading"
               @click="testQuery"
             >
-              {{ preview.loading ? 'Testing...' : 'Test query' }}
+              {{ preview.loading ? 'Проверка…' : 'Проверить запрос' }}
             </button>
             <span v-if="previewBadge" class="preview-badge" :class="previewBadge.kind">
               {{ previewBadge.text }}
@@ -112,14 +112,14 @@
               :disabled="!canAutoMap || autoMapLoading"
               @click="autoMap"
             >
-              {{ autoMapLoading ? 'Mapping...' : 'Auto-map (AI)' }}
+              {{ autoMapLoading ? 'Сопоставление…' : 'Автосопоставление (AI)' }}
             </button>
             <button
               class="btn-secondary"
               :disabled="!preview.columns?.length || autoMapLoading"
               @click="addAllColumns"
             >
-              {{ autoMapLoading ? 'Mapping...' : 'Add all columns' }}
+              {{ autoMapLoading ? 'Сопоставление…' : 'Добавить все столбцы' }}
             </button>
           </div>
           <p v-if="autoMapHint" class="wizard-hint">{{ autoMapHint }}</p>
@@ -127,35 +127,35 @@
             <input
               v-model="field.db_col"
               class="field-input"
-              placeholder="DB column"
+              placeholder="Столбец БД"
             />
             <span class="field-arrow">→</span>
             <input
               v-model="field.xml_attr"
               class="field-input"
               :list="'wizard-attrs-list'"
-              placeholder="XML attr"
+              placeholder="Атрибут XML"
             />
-            <button class="btn-icon-remove" title="Remove" @click="removeField(fi)">×</button>
+            <button class="btn-icon-remove" title="Удалить" @click="removeField(fi)">×</button>
           </div>
           <datalist id="wizard-attrs-list">
             <option v-for="attr in xmlAttrs" :key="attr" :value="attr" />
           </datalist>
-          <button class="btn-add-field" @click="addField">+ Add field</button>
+          <button class="btn-add-field" @click="addField">+ Добавить поле</button>
         </div>
 
         <!-- Step 4: Review -->
         <div v-if="step === 4" class="wizard-panel">
           <dl class="review-list">
-            <dt>Element</dt>
+            <dt>Элемент</dt>
             <dd>{{ draft.target_element || '—' }}</dd>
-            <dt>Path</dt>
-            <dd>{{ draft.target_path || '(all matching tags)' }}</dd>
-            <dt>DB Alias</dt>
+            <dt>Путь</dt>
+            <dd>{{ draft.target_path || '(все совпадающие теги)' }}</dd>
+            <dt>Алиас БД</dt>
             <dd>{{ draft.db_alias || '—' }}</dd>
-            <dt>Query</dt>
+            <dt>SQL-запрос</dt>
             <dd class="review-query">{{ draft.query || '—' }}</dd>
-            <dt>Fields</dt>
+            <dt>Поля</dt>
             <dd>
               <ul v-if="filledFields.length" class="review-fields">
                 <li v-for="f in filledFields" :key="f.db_col + f.xml_attr">
@@ -175,12 +175,12 @@
       </div>
 
       <div class="wizard-footer">
-        <button class="btn-secondary" :disabled="step === 0" @click="step -= 1">Back</button>
+        <button class="btn-secondary" :disabled="step === 0" @click="step -= 1">Назад</button>
         <button v-if="step < 4" class="btn-primary" :disabled="!canAdvance" @click="step += 1">
-          Next
+          Далее
         </button>
         <button v-else class="btn-primary" :disabled="validation.errors.length" @click="finish">
-          {{ isEditMode ? 'Save mapping' : 'Add mapping' }}
+          {{ isEditMode ? 'Сохранить маппинг' : 'Добавить маппинг' }}
         </button>
       </div>
     </div>
@@ -223,7 +223,7 @@ const isEditMode = computed(() => !!props.initialMapping)
 
 const emit = defineEmits(['close', 'finish'])
 
-const stepLabels = ['Element', 'Path', 'SQL', 'Fields', 'Review']
+const stepLabels = ['Элемент', 'Путь', 'SQL', 'Поля', 'Обзор']
 const step = ref(0)
 const elementFilter = ref('')
 
@@ -283,9 +283,9 @@ const canAutoMap = computed(
 
 const previewBadge = computed(() => {
   if (preview.value.loading) return null
-  if (preview.value.error) return { kind: 'error', text: 'Error' }
+  if (preview.value.error) return { kind: 'error', text: 'Ошибка' }
   if (!preview.value.columns?.length && !preview.value.error) return null
-  if (preview.value.row === null) return { kind: 'warn', text: '0 rows' }
+  if (preview.value.row === null) return { kind: 'warn', text: '0 строк' }
   if (preview.value.row) return { kind: 'ok', text: 'OK' }
   return null
 })
@@ -400,13 +400,13 @@ async function suggestDraftMappings({ keepFilled = true } = {}) {
     return {
       fields: mappingsToFields(mappings),
       hint: matcher === 'llm'
-        ? 'Matched via AI using DTD attribute docs.'
-        : 'LLM unavailable — used local fuzzy matching.',
+        ? 'Сопоставлено через AI по документации DTD.'
+        : 'LLM недоступен — использовано локальное сопоставление.',
     }
   } catch (e) {
     return {
       fields: buildFieldMappingsFromColumns(columns, xmlAttrs.value, filled),
-      hint: `AI mapping failed (${e.message}) — used local fuzzy matching.`,
+      hint: `Ошибка AI-сопоставления (${e.message}) — использовано локальное сопоставление.`,
     }
   }
 }
@@ -438,7 +438,7 @@ async function testQuery() {
       loading: false,
       columns: [],
       row: undefined,
-      error: e.message || 'Query failed',
+      error: e.message || 'Ошибка запроса',
     }
   }
 }

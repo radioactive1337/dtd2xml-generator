@@ -4,9 +4,9 @@
       <div class="dtd-wrapper card">
         <div class="dtd-collapse-header" @click="dtdCollapsed = !dtdCollapsed">
           <div class="dtd-header-main">
-            <span class="panel-title">DTD Schema</span>
+            <span class="panel-title">Схема DTD</span>
             <span v-if="schemaId && dtdCollapsed" class="dtd-header-status">
-              ✓ {{ dtdMeta.fileName }} · {{ dtdMeta.elementCount }} elements
+              ✓ {{ dtdMeta.fileName }} · {{ elementCountLabel }}
             </span>
           </div>
           <span class="collapse-arrow" :class="{ rotated: dtdCollapsed }">▼</span>
@@ -25,7 +25,7 @@
         v-if="schemaId"
         class="left-tabs-bar"
         role="tablist"
-        aria-label="Generation panels"
+        aria-label="Панели генерации"
       >
         <button
           v-for="tab in leftTabs"
@@ -44,7 +44,7 @@
           <span
             v-if="tab.id === 'data' && showDataBadge"
             class="left-tab-badge left-tab-badge--warn"
-            aria-label="Needs attention"
+            aria-label="Требует внимания"
           />
           <span
             v-if="tab.id === 'results' && resultsTabBadge"
@@ -133,7 +133,7 @@
       />
     </div>
 
-    <div class="col-divider" @mousedown.prevent="startHResize" title="Drag to resize" />
+    <div class="col-divider" @mousedown.prevent="startHResize" title="Потяните для изменения ширины" />
 
     <div class="generator-right">
       <XmlEditor
@@ -176,6 +176,8 @@ import {
 } from '../utils/mappingUtils'
 import { pickPrimarySchema, schemaFileName } from '../utils/dtdSchema'
 import { extractXmlElementPaths } from '../utils/xmlPaths'
+import { formatElements } from '../utils/ruPlural'
+import { translateFillStep } from '../utils/fillProgress'
 
 const schemaId = ref('')
 const dtdMeta = ref({ fileName: '', elementCount: 0 })
@@ -208,11 +210,13 @@ const wizardInitialMapping = computed(() =>
 
 const presetDropdownLabel = computed(() => {
   const count = selectedMappingPresetNames.value.length
-  if (count) return `${count} preset${count === 1 ? '' : 's'} selected`
+  if (count) return `Выбрано пресетов: ${count}`
   const total = mappingPresets.value.length
-  if (total) return `Load presets (${total})`
-  return 'Load presets...'
+  if (total) return `Загрузить пресеты (${total})`
+  return 'Загрузить пресеты…'
 })
+
+const elementCountLabel = computed(() => formatElements(dtdMeta.value.elementCount))
 
 function openMappingWizard(mi = null) {
   wizardEditIndex.value = mi
@@ -356,7 +360,7 @@ async function refreshMappingPreview(mi) {
         loading: false,
         columns: [],
         row: undefined,
-        error: e.message || 'Query failed',
+        error: e.message || 'Ошибка запроса',
       },
     }
   }
@@ -422,9 +426,9 @@ const activeTab = ref(readActiveTab())
 let hybridTabSwitched = false
 
 const leftTabs = [
-  { id: 'structure', label: 'Structure' },
-  { id: 'data', label: 'Data' },
-  { id: 'results', label: 'Results' },
+  { id: 'structure', label: 'Структура' },
+  { id: 'data', label: 'Данные' },
+  { id: 'results', label: 'Результат' },
 ]
 
 watch(activeTab, (val) => {
@@ -451,9 +455,9 @@ const resultsTabBadge = computed(() => {
 })
 
 const resultsTabBadgeLabel = computed(() => {
-  if (resultsTabBadge.value === 'error') return 'Has errors'
-  if (resultsTabBadge.value === 'warn') return 'Has warnings'
-  if (resultsTabBadge.value === 'ok') return 'All clear'
+  if (resultsTabBadge.value === 'error') return 'Есть ошибки'
+  if (resultsTabBadge.value === 'warn') return 'Есть предупреждения'
+  if (resultsTabBadge.value === 'ok') return 'Всё в порядке'
   return ''
 })
 
@@ -738,12 +742,12 @@ async function applyXmlPathsFromEditor(text) {
     const { rootTag, elementPaths } = parsed
 
     if (!rootTag) {
-      xmlSyncHint.value = 'XML has no root element — select a root element manually.'
+      xmlSyncHint.value = 'В XML нет корневого элемента — выберите корень вручную'
       return
     }
 
     if (!elements.value.includes(rootTag)) {
-      xmlSyncHint.value = `Root element "${rootTag}" is not defined in the DTD schema.`
+      xmlSyncHint.value = `Корневой элемент «${rootTag}» не описан в DTD`
       return
     }
 
@@ -757,7 +761,7 @@ async function applyXmlPathsFromEditor(text) {
     await nextTick()
     await treeRef?.applyXmlElementPaths(elementPaths)
   } catch (e) {
-    xmlSyncHint.value = e.message || 'Failed to parse XML paths'
+    xmlSyncHint.value = e.message || 'Не удалось разобрать пути элементов в XML'
   }
 }
 
@@ -775,12 +779,12 @@ async function syncFromPastedXml(text) {
     const { rootTag } = parsed
 
     if (!rootTag) {
-      xmlSyncHint.value = 'XML has no root element — select a root element manually.'
+      xmlSyncHint.value = 'В XML нет корневого элемента — выберите корень вручную'
       return
     }
 
     if (!elements.value.includes(rootTag)) {
-      xmlSyncHint.value = `Root element "${rootTag}" is not defined in the DTD schema.`
+      xmlSyncHint.value = `Корневой элемент «${rootTag}» не описан в DTD`
       return
     }
 
@@ -792,7 +796,7 @@ async function syncFromPastedXml(text) {
     await waitForDtdTreeRef()
     await applyXmlPathsFromEditor(text)
   } catch (e) {
-    xmlSyncHint.value = e.message || 'Failed to sync XML from editor'
+    xmlSyncHint.value = e.message || 'Не удалось синхронизировать XML из редактора'
   }
 }
 
@@ -829,7 +833,7 @@ async function fill() {
   filling.value = true
   error.value = ''
   resetFillProgress()
-  fillStatusMessage.value = 'Starting fill...'
+  fillStatusMessage.value = 'Запуск заполнения…'
   startFillProgressTimer()
   let filled = false
   try {
@@ -851,8 +855,10 @@ async function fill() {
           db_alias: m.db_alias || null,
         }))
     }
-    const result = await fillXmlStream(request, ({ message, percent }) => {
-      if (message) fillStatusMessage.value = message
+    const result = await fillXmlStream(request, ({ step, message, percent }) => {
+      const translated = translateFillStep(step)
+      if (translated) fillStatusMessage.value = translated
+      else if (message) fillStatusMessage.value = message
       if (typeof percent === 'number') fillPercent.value = percent
     })
     await setProgrammaticXml(result.xml_text)

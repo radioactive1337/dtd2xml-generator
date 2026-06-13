@@ -1,7 +1,7 @@
 <template>
   <div class="xml-editor card">
     <div class="editor-header">
-      <div class="panel-title">XML Preview</div>
+      <div class="panel-title">Просмотр XML</div>
       <div class="editor-actions">
         <input
           ref="fileInput"
@@ -12,24 +12,24 @@
         />
         <button
           class="btn-secondary"
-          title="Load XML from a file"
+          title="Загрузить XML из файла"
           @click="triggerImport"
         >
-          Import .xml
+          Импорт .xml
         </button>
         <button
           class="btn-secondary btn-format"
           :disabled="!modelValue"
-          title="Format document (Alt+Shift+F)"
+          title="Форматировать документ (Alt+Shift+F)"
           @click="formatDocument"
         >
-          <span class="format-icon" aria-hidden="true">{ }</span>Format
+          <span class="format-icon" aria-hidden="true">{ }</span>Форматировать
         </button>
         <button class="btn-secondary" :disabled="!modelValue" @click="copyToClipboard">
-          {{ copied ? 'Copied!' : 'Copy' }}
+          {{ copied ? 'Скопировано!' : 'Копировать' }}
         </button>
         <button class="btn-secondary" :disabled="!modelValue" @click="downloadXml">
-          Download .xml
+          Скачать .xml
         </button>
       </div>
     </div>
@@ -162,7 +162,7 @@ function readFileAsText(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result ?? ''))
-    reader.onerror = () => reject(new Error('Failed to read file'))
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл'))
     reader.readAsText(file, 'UTF-8')
   })
 }
@@ -176,12 +176,12 @@ async function onFileSelect(e) {
   try {
     const text = await readFileAsText(file)
     if (!text.trim()) {
-      importError.value = 'File is empty'
+      importError.value = 'Файл пуст'
       return
     }
     emit('import', { text, fileName: file.name })
   } catch (err) {
-    importError.value = err.message || 'Failed to import XML file'
+    importError.value = err.message || 'Не удалось импортировать XML'
   }
 }
 

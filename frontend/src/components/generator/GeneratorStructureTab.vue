@@ -1,11 +1,11 @@
 <template>
   <div class="tab-pane structure-tab">
     <div class="field">
-      <label>Root Element</label>
+      <label>Корневой элемент</label>
       <input
         :value="rootElement"
         :list="datalistListFor('root', 'root-elements-list')"
-        placeholder="Element name (type or pick from list)"
+        placeholder="Имя элемента (введите или выберите из списка)"
         @input="$emit('update:rootElement', $event.target.value)"
         @focus="openDatalist('root')"
         @blur="scheduleCloseDatalist('root')"
@@ -18,7 +18,7 @@
     </div>
 
     <div class="field">
-      <label>Build Mode</label>
+      <label>Режим сборки</label>
       <div class="mode-group">
         <label v-for="m in modes" :key="m.value" class="mode-label">
           <input
@@ -32,7 +32,7 @@
     </div>
 
     <div v-if="mode === 'maximal' || mode === 'custom'" class="field">
-      <label>Repeat Count (+ / *)</label>
+      <label>Число повторов (+ / *)</label>
       <input
         :value="repeatCount"
         type="number"
@@ -76,9 +76,9 @@ const props = defineProps({
 defineEmits(['update:rootElement', 'update:mode', 'update:repeatCount', 'update:customPaths'])
 
 const modes = [
-  { value: 'minimal', label: 'Minimal' },
-  { value: 'maximal', label: 'Maximal' },
-  { value: 'custom', label: 'Custom' },
+  { value: 'minimal', label: 'Минимальный' },
+  { value: 'maximal', label: 'Максимальный' },
+  { value: 'custom', label: 'Свой' },
 ]
 
 const dtdTreeRef = ref(null)

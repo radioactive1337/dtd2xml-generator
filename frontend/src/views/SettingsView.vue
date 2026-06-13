@@ -1,18 +1,18 @@
 <template>
   <div class="settings">
     <div class="card">
-      <div class="panel-title">Connection Aliases</div>
+      <div class="panel-title">Алиасы подключений</div>
       <p class="hint">
-        Credentials are read from local <code>connections.json</code>.
-        Only aliases are shown here — no secrets are exposed through the UI.
-        Use Test DB / Test LLM to verify connectivity before Fill.
+        Учётные данные читаются из локального <code>connections.json</code>.
+        В интерфейсе отображаются только алиасы — секреты не передаются.
+        Используйте «Проверить БД» / «Проверить LLM» перед заполнением данных.
       </p>
 
-      <div v-if="loading" class="loading">Loading...</div>
+      <div v-if="loading" class="loading">Загрузка…</div>
 
       <template v-else>
         <section class="alias-section">
-          <h3>Database Aliases</h3>
+          <h3>Алиасы БД</h3>
           <ul v-if="aliases.databases?.length" class="alias-list">
             <li v-for="db in aliases.databases" :key="db" class="alias-item">
               <span class="alias-icon">DB</span>
@@ -22,7 +22,7 @@
                 :disabled="isDbTesting(db)"
                 @click="testDb(db)"
               >
-                {{ isDbTesting(db) ? 'Testing...' : 'Test DB' }}
+                {{ isDbTesting(db) ? 'Проверка…' : 'Проверить БД' }}
               </button>
               <span
                 v-if="dbStatus(db)"
@@ -30,7 +30,7 @@
                 :class="dbStatus(db).ok ? 'ok' : 'error'"
                 :title="dbStatus(db).message"
               >
-                {{ dbStatus(db).ok ? 'OK' : 'Failed' }}
+                {{ dbStatus(db).ok ? 'OK' : 'Ошибка' }}
               </span>
               <p v-if="dbStatus(db) && !dbStatus(db).ok" class="status-detail error-msg">
                 {{ dbStatus(db).message }}
@@ -40,11 +40,11 @@
               </p>
             </li>
           </ul>
-          <p v-else class="empty">No database aliases configured.</p>
+          <p v-else class="empty">Алиасы БД не настроены.</p>
         </section>
 
         <section class="alias-section">
-          <h3>LLM Aliases</h3>
+          <h3>Алиасы LLM</h3>
           <ul v-if="aliases.llm?.length" class="alias-list">
             <li v-for="llm in aliases.llm" :key="llm" class="alias-item">
               <span class="alias-icon llm">LLM</span>
@@ -54,7 +54,7 @@
                 :disabled="isLlmTesting(llm)"
                 @click="testLlm(llm)"
               >
-                {{ isLlmTesting(llm) ? 'Testing...' : 'Test LLM' }}
+                {{ isLlmTesting(llm) ? 'Проверка…' : 'Проверить LLM' }}
               </button>
               <span
                 v-if="llmStatus(llm)"
@@ -62,7 +62,7 @@
                 :class="llmStatus(llm).ok ? 'ok' : 'error'"
                 :title="llmStatus(llm).message"
               >
-                {{ llmStatus(llm).ok ? 'OK' : 'Failed' }}
+                {{ llmStatus(llm).ok ? 'OK' : 'Ошибка' }}
               </span>
               <p v-if="llmStatus(llm) && !llmStatus(llm).ok" class="status-detail error-msg">
                 {{ llmStatus(llm).message }}
@@ -72,15 +72,15 @@
               </p>
             </li>
           </ul>
-          <p v-else class="empty">No LLM aliases configured.</p>
+          <p v-else class="empty">Алиасы LLM не настроены.</p>
         </section>
 
         <section class="setup-hint card inner">
-          <div class="panel-title">Setup</div>
+          <div class="panel-title">Настройка</div>
           <ol>
-            <li>Copy <code>backend/connections.json.example</code> to <code>connections.json</code></li>
-            <li>Fill in your DB, LLM, and Oracle credentials locally</li>
-            <li>Never commit these files to version control</li>
+            <li>Скопируйте <code>backend/connections.json.example</code> в <code>connections.json</code></li>
+            <li>Заполните локально учётные данные БД, LLM и Oracle</li>
+            <li>Не добавляйте эти файлы в систему контроля версий</li>
           </ol>
         </section>
       </template>

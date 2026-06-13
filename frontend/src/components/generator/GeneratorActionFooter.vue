@@ -2,17 +2,17 @@
   <div class="left-sticky-footer">
     <div class="action-row">
       <button class="btn-primary" :disabled="!canGenerate || generating" @click="$emit('generate')">
-        {{ generating ? 'Generating...' : 'Generate XML' }}
+        {{ generating ? 'Генерация…' : 'Сгенерировать XML' }}
       </button>
       <button
         class="btn-secondary"
         :disabled="!xmlText || filling || hasMappingBlockers"
         @click="$emit('fill')"
       >
-        {{ filling ? 'Filling...' : 'Fill Data' }}
+        {{ filling ? 'Заполнение…' : 'Заполнить данными' }}
       </button>
       <button class="btn-secondary" :disabled="!canValidate || validating" @click="$emit('validate')">
-        {{ validating ? 'Validating...' : 'Validate DTD' }}
+        {{ validating ? 'Проверка…' : 'Проверить по DTD' }}
       </button>
     </div>
 
@@ -27,7 +27,7 @@
       </div>
     </div>
 
-    <p v-if="validationResult?.valid" class="validation-msg valid">XML is valid against DTD</p>
+    <p v-if="validationResult?.valid" class="validation-msg valid">XML соответствует DTD</p>
     <p v-if="error" class="error-msg">{{ error }}</p>
   </div>
 </template>
