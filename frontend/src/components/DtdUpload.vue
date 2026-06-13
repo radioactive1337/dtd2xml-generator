@@ -11,7 +11,7 @@
       <input
         ref="fileInput"
         type="file"
-        accept=".dtd,.ent,.mod"
+        accept=".dtd,.ent,.mod,.jar"
         style="display: none"
         @change="onFileSelect"
       />
@@ -25,8 +25,8 @@
       </template>
       <template v-else>
         <span class="drop-icon">↑</span>
-        <span class="drop-text">Drop DTD file here or click to browse</span>
-        <span class="drop-sub">.dtd, .ent, .mod</span>
+        <span class="drop-text">Drop DTD or JAR file here or click to browse</span>
+        <span class="drop-sub">.dtd, .ent, .mod, .jar</span>
       </template>
     </div>
     <p v-if="error" class="error-msg">{{ error }}</p>
@@ -35,7 +35,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { uploadDtd } from '../api/dtd'
+import { uploadDtd, uploadDtdJar } from '../api/dtd'
 
 defineProps({
   isLoaded: { type: Boolean, default: false },
@@ -50,12 +50,16 @@ const isDragging = ref(false)
 const loading = ref(false)
 const error = ref('')
 
+function isJarFile(file) {
+  return file.name.toLowerCase().endsWith('.jar')
+}
+
 async function processFile(file) {
   if (!file) return
   loading.value = true
   error.value = ''
   try {
-    const result = await uploadDtd(file)
+    const result = isJarFile(file) ? await uploadDtdJar(file) : await uploadDtd(file)
     emit('uploaded', result)
   } catch (e) {
     error.value = e.message

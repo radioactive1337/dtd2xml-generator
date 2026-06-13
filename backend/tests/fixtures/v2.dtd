@@ -1,0 +1,35 @@
+<!ENTITY % types SYSTEM "types.dtd">
+
+<!-- Документ платежного поручения.
+     @doc Основной корневой элемент
+     @att kladr код КЛАДР
+-->
+<!ELEMENT PayDoc (Header, Body, Footer?)>
+<!ATTLIST PayDoc
+    id ID #REQUIRED
+    kladr CDATA #REQUIRED
+    active %Boolean; #REQUIRED
+    status %Status; #IMPLIED
+>
+
+<!-- @doc Заголовок документа -->
+<!ELEMENT Header (Title, Meta*)>
+<!ATTLIST Header
+    version CDATA #FIXED "1.0"
+>
+
+<!ELEMENT Body (Record+)>
+<!ELEMENT Footer EMPTY>
+
+<!ELEMENT Title (#PCDATA)>
+<!ELEMENT Meta EMPTY>
+<!ELEMENT Record (Field | Group)*>
+
+<!-- @att type тип поля -->
+<!ELEMENT Field (#PCDATA)>
+<!ATTLIST Field
+    name CDATA #REQUIRED
+    type (string|number|date) #REQUIRED
+>
+
+<!ELEMENT Group (Field+)>
