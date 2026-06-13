@@ -2,7 +2,7 @@
   <div v-if="open" class="wizard-overlay" @click.self="close">
     <div class="wizard-dialog" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
       <div class="wizard-header">
-        <h3 id="wizard-title">Add Mapping (Wizard)</h3>
+        <h3 id="wizard-title">{{ isEditMode ? 'Edit Mapping' : 'Add Mapping' }}</h3>
         <button class="btn-icon-remove" title="Close" @click="close">×</button>
       </div>
 
@@ -180,7 +180,7 @@
           Next
         </button>
         <button v-else class="btn-primary" :disabled="validation.errors.length" @click="finish">
-          Add mapping
+          {{ isEditMode ? 'Save mapping' : 'Add mapping' }}
         </button>
       </div>
     </div>
@@ -210,6 +210,7 @@ import {
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  initialMapping: { type: Object, default: null },
   schemaId: { type: String, default: '' },
   xmlText: { type: String, default: '' },
   elements: { type: Array, default: () => [] },
@@ -217,6 +218,8 @@ const props = defineProps({
   dbAliases: { type: Array, default: () => [] },
   availablePaths: { type: Array, default: () => [] },
 })
+
+const isEditMode = computed(() => !!props.initialMapping)
 
 const emit = defineEmits(['close', 'finish'])
 
@@ -300,15 +303,30 @@ const canAdvance = computed(() => {
   return true
 })
 
+function draftFromMapping(mapping) {
+  if (!mapping) return createEmptyDraft()
+  return {
+    target_element: mapping.target_element || '',
+    target_path: mapping.target_path || '',
+    query: mapping.query || '',
+    fields: mapping.fields?.length
+      ? mapping.fields.map((f) => ({ db_col: f.db_col || '', xml_attr: f.xml_attr || '' }))
+      : [{ db_col: '', xml_attr: '' }],
+    db_alias: mapping.db_alias || '',
+  }
+}
+
 watch(
-  () => props.open,
-  (isOpen) => {
-    if (isOpen) {
-      step.value = 0
-      draft.value = createEmptyDraft()
-      preview.value = { loading: false, columns: [], row: undefined, error: '' }
-      autoMapHint.value = ''
-      elementFilter.value = ''
+  () => [props.open, props.initialMapping],
+  ([isOpen, initialMapping]) => {
+    if (!isOpen) return
+    step.value = 0
+    draft.value = draftFromMapping(initialMapping)
+    preview.value = { loading: false, columns: [], row: undefined, error: '' }
+    autoMapHint.value = ''
+    elementFilter.value = ''
+    if (initialMapping?.db_alias?.trim() && initialMapping?.query?.trim()) {
+      testQuery()
     }
   },
 )

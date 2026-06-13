@@ -170,148 +170,30 @@
                 </span>
               </div>
               <div class="mapping-header-right">
-                <select v-model="mapping.db_alias" class="mapping-db-alias" title="DB alias">
-                  <option value="">DB alias...</option>
-                  <option v-for="a in dbAliases" :key="a" :value="a">{{ a }}</option>
-                </select>
+                <button class="btn-mapping-edit" @click="openMappingWizard(mi)">Edit</button>
                 <button class="btn-icon-remove" @click="removeMapping(mi)" title="Remove mapping">×</button>
               </div>
             </div>
 
-            <div class="field">
-              <label>Target Element</label>
-              <input
-                v-model="mapping.target_element"
-                :list="datalistListFor(datalistKey('target-el', mi), 'target-elements-list')"
-                :readonly="!!mapping.target_path?.trim()"
-                placeholder="Element name (type or pick from list)"
-                @focus="onTargetElementFocus(mi)"
-                @blur="scheduleCloseDatalist(datalistKey('target-el', mi))"
-                @change="onTargetElementChange(mi, $event)"
-                @keydown.enter="onDatalistEnter($event, datalistKey('target-el', mi))"
-              />
-            </div>
-
-            <div class="field">
-              <label>
-                Target Path
-                <span class="label-hint">(optional)</span>
-              </label>
-              <input
-                v-model="mapping.target_path"
-                :list="pathOptionsForMapping(mapping).length ? `target-paths-list-${mi}` : undefined"
-                placeholder="PayDoc.client.contact[0] (optional)"
-                @input="onTargetPathInput(mi)"
-                @change="onTargetPathChange(mi, $event)"
-              />
-              <ul
-                v-if="pathOptionsForMapping(mapping).length"
-                class="path-suggestions"
-              >
-                <li
-                  v-for="p in pathOptionsForMapping(mapping)"
-                  :key="p"
-                >
-                  <button type="button" class="path-suggestion-btn" @click="selectTargetPath(mi, p)">
-                    {{ p }}
-                  </button>
-                </li>
-              </ul>
-              <p v-else-if="mapping.target_element && xmlText?.trim()" class="path-hint path-hint-muted">
-                No matching paths in current XML — type a path manually or generate XML first.
-              </p>
-              <p class="path-hint">
-                Without a path, all &lt;{{ mapping.target_element || 'element' }}&gt; tags in the document will be filled.
-                Duplicate siblings use index syntax: <code>contact[0]</code>, <code>contact[1]</code>.
-              </p>
-            </div>
-
-            <div class="field">
-              <label>SQL Query</label>
-              <textarea
-                v-model="mapping.query"
-                rows="2"
-                placeholder="SELECT col1, col2 FROM schema.view WHERE col = N'value' AND ROWNUM = 1"
-              />
-              <div class="query-actions">
-                <button
-                  class="btn-test-query"
-                  :disabled="!mapping.db_alias || !mapping.query?.trim() || mappingPreview[mi]?.loading"
-                  @click="testMappingQuery(mi)"
-                >
-                  {{ mappingPreview[mi]?.loading ? 'Testing...' : 'Test query' }}
-                </button>
-              </div>
-              <p v-if="mappingPreview[mi]?.error" class="mapping-inline-error">
-                {{ mappingPreview[mi].error }}
-              </p>
-              <div
-                v-else-if="mappingPreview[mi]?.row"
-                class="preview-table-wrap"
-              >
-                <table class="preview-table">
-                  <tbody>
-                    <tr v-for="col in mappingPreview[mi].columns" :key="col">
-                      <th>{{ col }}</th>
-                      <td>{{ formatPreviewValue(mappingPreview[mi].row[col]) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div class="field">
-              <label>
-                Field Mappings
-                <span class="label-hint">DB column → XML attribute</span>
-              </label>
-              <div class="field-mapping-actions">
-                <button
-                  class="btn-add-field"
-                  :disabled="!canAutoMap(mi) || autoMapLoading[mi]"
-                  @click="autoMapFields(mi)"
-                >
-                  {{ autoMapLoading[mi] ? 'Mapping...' : 'Auto-map (AI)' }}
-                </button>
-                <button
-                  class="btn-add-field"
-                  :disabled="!columnsForMapping(mi).length || autoMapLoading[mi]"
-                  @click="addAllColumns(mi)"
-                >
-                  {{ autoMapLoading[mi] ? 'Mapping...' : 'Add all columns' }}
-                </button>
-              </div>
-              <p v-if="autoMapHint[mi]" class="auto-map-hint">{{ autoMapHint[mi] }}</p>
-              <div v-for="(field, fi) in mapping.fields" :key="fi" class="field-row">
-                <input
-                  v-model="field.db_col"
-                  class="field-input"
-                  :list="datalistListFor(datalistKey('db-col', mi, fi), `db-cols-list-${mi}`)"
-                  placeholder="DB column (type or pick from list)"
-                  @focus="onDbColFocus(mi, fi)"
-                  @blur="scheduleCloseDatalist(datalistKey('db-col', mi, fi))"
-                  @change="onDbColChange(mi, fi, $event)"
-                  @keydown.enter="onDatalistEnter($event, datalistKey('db-col', mi, fi))"
-                />
-                <span class="field-arrow">→</span>
-                <input
-                  v-model="field.xml_attr"
-                  class="field-input"
-                  :list="datalistListFor(datalistKey('xml-attr', mi, fi), `xml-attrs-list-${mi}`)"
-                  placeholder="XML attr (type or pick from list)"
-                  @focus="openDatalist(datalistKey('xml-attr', mi, fi))"
-                  @blur="scheduleCloseDatalist(datalistKey('xml-attr', mi, fi))"
-                  @change="onXmlAttrChange(mi, fi, $event)"
-                  @keydown.enter="onDatalistEnter($event, datalistKey('xml-attr', mi, fi))"
-                />
-                <button
-                  class="btn-icon-remove"
-                  @click="removeField(mi, fi)"
-                  title="Remove field"
-                >×</button>
-              </div>
-              <button class="btn-add-field" @click="addField(mi)">+ Add field</button>
-            </div>
+            <dl class="mapping-summary">
+              <dt>DB Alias</dt>
+              <dd>{{ mapping.db_alias || '—' }}</dd>
+              <dt>Target Element</dt>
+              <dd>{{ mapping.target_element || '—' }}</dd>
+              <dt>Target Path</dt>
+              <dd>{{ mapping.target_path || '(all matching tags)' }}</dd>
+              <dt>SQL Query</dt>
+              <dd class="mapping-summary-query">{{ mapping.query || '—' }}</dd>
+              <dt>Fields</dt>
+              <dd>
+                <ul v-if="filledMappingFields(mapping).length" class="mapping-summary-fields">
+                  <li v-for="f in filledMappingFields(mapping)" :key="f.db_col + f.xml_attr">
+                    {{ f.db_col }} → {{ f.xml_attr }}
+                  </li>
+                </ul>
+                <span v-else>—</span>
+              </dd>
+            </dl>
 
             <ul v-if="mappingValidation[mi]?.errors?.length" class="mapping-errors">
               <li v-for="(err, i) in mappingValidation[mi].errors" :key="'e' + i">{{ err }}</li>
@@ -321,57 +203,21 @@
             </ul>
           </div>
 
-          <datalist id="target-elements-list">
-            <option v-for="el in elements" :key="el" :value="el" />
-          </datalist>
-
-          <datalist
-            v-for="(mapping, mi) in sqlMappings"
-            :id="`target-paths-list-${mi}`"
-            :key="`target-paths-${mi}`"
-          >
-            <option
-              v-for="p in pathOptionsForMapping(mapping)"
-              :key="p"
-              :value="p"
-            />
-          </datalist>
-
-          <datalist
-            v-for="(mapping, mi) in sqlMappings"
-            :id="`xml-attrs-list-${mi}`"
-            :key="`xml-attrs-${mi}`"
-          >
-            <option
-              v-for="attr in attributesForTarget(mapping.target_element)"
-              :key="attr"
-              :value="attr"
-            />
-          </datalist>
-
-          <datalist
-            v-for="(mapping, mi) in sqlMappings"
-            :id="`db-cols-list-${mi}`"
-            :key="`db-cols-${mi}`"
-          >
-            <option v-for="col in mappingDbColumns[mi] || []" :key="col" :value="col" />
-          </datalist>
-
           <div class="mapping-add-row">
-            <button class="btn-add-mapping" @click="addMapping">+ Add mapping</button>
-            <button class="btn-add-mapping" @click="wizardOpen = true">Add mapping (wizard)</button>
+            <button class="btn-add-mapping" @click="openMappingWizard()">+ Add mapping</button>
           </div>
         </div>
 
         <MappingWizard
           :open="wizardOpen"
+          :initial-mapping="wizardInitialMapping"
           :schema-id="schemaId"
           :xml-text="liveXmlText || xmlText"
           :elements="elements"
           :element-attributes="elementAttributes"
           :db-aliases="dbAliases"
           :available-paths="availableElementPaths"
-          @close="wizardOpen = false"
+          @close="onWizardClose"
           @finish="onWizardFinish"
         />
 
@@ -449,9 +295,9 @@ import DtdTreeView from '../components/DtdTreeView.vue'
 import XmlEditor from '../components/XmlEditor.vue'
 import MappingWizard from '../components/MappingWizard.vue'
 import { generateXml } from '../api/generate'
-import { fillXmlStream, suggestFieldMappingsAi } from '../api/fill'
+import { fillXmlStream } from '../api/fill'
 import { validateXml } from '../api/validate'
-import { fetchQueryColumns, fetchQueryPreview } from '../api/db'
+import { fetchQueryPreview } from '../api/db'
 import { getConfigAliases, listElements, getElementTree, listSchemas } from '../api/dtd'
 import {
   listMappingPresets,
@@ -460,7 +306,6 @@ import {
   deleteMappingPreset as apiDeleteMappingPreset,
 } from '../api/mappingPresets'
 import {
-  datalistKey,
   datalistListFor,
   openDatalist,
   scheduleCloseDatalist,
@@ -470,12 +315,7 @@ import {
 } from '../utils/datalistInput'
 import {
   getMappingValidationIssues,
-  lastPathSegment,
-  pathsEndingWithTag,
   collectDtdElementPaths,
-  buildFieldMappingsFromColumns,
-  mappingsToFields,
-  normalizeFieldName,
 } from '../utils/mappingUtils'
 import { pickPrimarySchema, schemaFileName } from '../utils/dtdSchema'
 import { extractXmlElementPaths } from '../utils/xmlPaths'
@@ -490,34 +330,25 @@ const repeatCount = ref(1)
 const customPaths = ref([])
 const fillStrategy = ref('faker')
 const dbAliases = ref([])
-const mappingDbColumns = ref({})
-const mappingColumnsCache = ref({})
 const mappingPresetName = ref('')
 const selectedMappingPresetNames = ref([])
 const mappingPresets = ref([])
 const presetDropdownOpen = ref(false)
 const presetDropdownRef = ref(null)
 const wizardOpen = ref(false)
+const wizardEditIndex = ref(null)
 const mappingPreview = ref({})
-const autoMapLoading = ref({})
-const autoMapHint = ref({})
-const lastTargetElement = ref({})
+const suppressPresetMappingSync = ref(false)
 const dtdElementPaths = ref([])
 
-function createEmptyMapping() {
-  return {
-    target_element: '',
-    target_path: '',
-    query: '',
-    fields: [{ db_col: '', xml_attr: '' }],
-    db_alias: '',
-    _presetSource: null,
-  }
-}
 const sqlMappings = ref([])
 
 const isHybridStrategy = computed(
   () => fillStrategy.value === 'hybrid_db_faker' || fillStrategy.value === 'hybrid_db_ai',
+)
+
+const wizardInitialMapping = computed(() =>
+  wizardEditIndex.value !== null ? sqlMappings.value[wizardEditIndex.value] : null,
 )
 
 const presetDropdownLabel = computed(() => {
@@ -528,29 +359,36 @@ const presetDropdownLabel = computed(() => {
   return 'Load presets...'
 })
 
-function addMapping() {
-  const mi = sqlMappings.value.length
-  sqlMappings.value.push(createEmptyMapping())
-  lastTargetElement.value = { ...lastTargetElement.value, [mi]: '' }
+function openMappingWizard(mi = null) {
+  wizardEditIndex.value = mi
+  wizardOpen.value = true
+}
+
+function onWizardClose() {
+  wizardOpen.value = false
+  wizardEditIndex.value = null
 }
 
 function removeMapping(idx) {
+  const mapping = sqlMappings.value[idx]
+  const presetSource = mapping?._presetSource
+
   sqlMappings.value.splice(idx, 1)
-  const next = {}
-  sqlMappings.value.forEach((m, mi) => {
-    next[mi] = lastTargetElement.value[mi] ?? m.target_element ?? ''
+
+  if (!presetSource || !selectedMappingPresetNames.value.includes(presetSource)) return
+
+  suppressPresetMappingSync.value = true
+  selectedMappingPresetNames.value = selectedMappingPresetNames.value.filter((n) => n !== presetSource)
+  for (const m of sqlMappings.value) {
+    if (m._presetSource === presetSource) m._presetSource = null
+  }
+  nextTick(() => {
+    suppressPresetMappingSync.value = false
   })
-  lastTargetElement.value = next
 }
 
-function addField(mi) {
-  sqlMappings.value[mi].fields.push({ db_col: '', xml_attr: '' })
-}
-
-function removeField(mi, fi) {
-  sqlMappings.value[mi].fields.splice(fi, 1)
-  if (sqlMappings.value[mi].fields.length === 0)
-    sqlMappings.value[mi].fields.push({ db_col: '', xml_attr: '' })
+function filledMappingFields(mapping) {
+  return (mapping.fields || []).filter((f) => f.db_col && f.xml_attr)
 }
 
 function normalizeMappings(mappings, presetSource = null) {
@@ -565,18 +403,6 @@ function normalizeMappings(mappings, presetSource = null) {
     db_alias: m.db_alias || '',
     _presetSource: presetSource,
   }))
-}
-
-function syncLastTargetElements() {
-  const next = { ...lastTargetElement.value }
-  sqlMappings.value.forEach((m, mi) => {
-    if (next[mi] === undefined) next[mi] = m.target_element || ''
-  })
-  lastTargetElement.value = next
-}
-
-function mappingDbAlias(mapping) {
-  return mapping.db_alias
 }
 
 async function refreshMappingPresets() {
@@ -602,9 +428,11 @@ async function saveMappingPreset() {
 async function addMappingsFromPreset(name) {
   const preset = await apiLoadMappingPreset(name)
   const newMappings = normalizeMappings(preset.mappings, name)
+  const startIdx = sqlMappings.value.length
   sqlMappings.value.push(...newMappings)
-  mappingDbColumns.value = {}
-  syncLastTargetElements()
+  for (let mi = startIdx; mi < sqlMappings.value.length; mi += 1) {
+    await refreshMappingPreview(mi)
+  }
 }
 
 function removeSelectedPreset(name) {
@@ -625,12 +453,6 @@ function onPresetDropdownOutsideClick(event) {
   }
 }
 
-function resetMappingXmlAttrs(mi) {
-  for (const field of sqlMappings.value[mi].fields) {
-    field.xml_attr = ''
-  }
-}
-
 function onDatalistEnter(event, key) {
   confirmDatalistPick(key)
   event.target.blur()
@@ -641,57 +463,6 @@ function onRootElementChange(event) {
   if (!input.value || isOptionSelected(input, elements.value)) {
     confirmDatalistPick('root')
   }
-}
-
-function onTargetElementFocus(mi) {
-  if (sqlMappings.value[mi]?.target_path?.trim()) return
-  openDatalist(datalistKey('target-el', mi))
-}
-
-function onTargetElementChange(mi, event) {
-  const input = event.target
-  const value = input.value.trim()
-  const prev = lastTargetElement.value[mi] ?? ''
-
-  if (value !== prev) {
-    resetMappingXmlAttrs(mi)
-    lastTargetElement.value = { ...lastTargetElement.value, [mi]: value }
-  }
-
-  if (!value || isOptionSelected(input, elements.value)) {
-    confirmDatalistPick(datalistKey('target-el', mi))
-  }
-}
-
-function onTargetPathInput(mi) {
-  const mapping = sqlMappings.value[mi]
-  const seg = lastPathSegment(mapping.target_path)
-  if (!seg || seg === mapping.target_element) return
-
-  mapping.target_element = seg
-  const prev = lastTargetElement.value[mi] ?? ''
-  if (seg !== prev) {
-    resetMappingXmlAttrs(mi)
-    lastTargetElement.value = { ...lastTargetElement.value, [mi]: seg }
-  }
-}
-
-function onTargetPathChange(mi, event) {
-  onTargetPathInput(mi)
-  const input = event.target
-  const paths = pathOptionsForMapping(sqlMappings.value[mi])
-  if (!input.value || paths.includes(input.value)) {
-    return
-  }
-}
-
-function selectTargetPath(mi, path) {
-  sqlMappings.value[mi].target_path = path
-  onTargetPathInput(mi)
-}
-
-function pathOptionsForMapping(mapping) {
-  return pathsEndingWithTag(availableElementPaths.value, mapping.target_element)
 }
 
 const availableElementPaths = computed(() => {
@@ -723,26 +494,14 @@ const hasMappingBlockers = computed(() => {
   })
 })
 
-function formatPreviewValue(val) {
-  if (val === null || val === undefined) return '—'
-  return String(val)
-}
-
-function columnsForMapping(mi) {
-  return mappingPreview.value[mi]?.columns || mappingDbColumns.value[mi] || []
-}
-
-function canAutoMap(mi) {
+async function refreshMappingPreview(mi) {
   const mapping = sqlMappings.value[mi]
-  return (
-    columnsForMapping(mi).length > 0
-    && mapping.target_element?.trim()
-    && attributesForTarget(mapping.target_element).length > 0
-  )
-}
-
-async function testMappingQuery(mi) {
-  const mapping = sqlMappings.value[mi]
+  if (!mapping?.db_alias || !mapping?.query?.trim()) {
+    const next = { ...mappingPreview.value }
+    delete next[mi]
+    mappingPreview.value = next
+    return
+  }
   mappingPreview.value = {
     ...mappingPreview.value,
     [mi]: { loading: true, columns: [], row: undefined, error: '' },
@@ -758,22 +517,6 @@ async function testMappingQuery(mi) {
         error: '',
       },
     }
-    if (data.columns?.length) {
-      mappingDbColumns.value = { ...mappingDbColumns.value, [mi]: data.columns }
-      const current = sqlMappings.value[mi]
-      if (current.target_element?.trim() && schemaId.value) {
-        autoMapLoading.value = { ...autoMapLoading.value, [mi]: true }
-        try {
-          const result = await suggestMappingsForCard(mi, { keepFilled: true })
-          if (result) {
-            sqlMappings.value[mi] = { ...current, fields: result.fields }
-            autoMapHint.value = { ...autoMapHint.value, [mi]: result.hint }
-          }
-        } finally {
-          autoMapLoading.value = { ...autoMapLoading.value, [mi]: false }
-        }
-      }
-    }
   } catch (e) {
     mappingPreview.value = {
       ...mappingPreview.value,
@@ -787,88 +530,19 @@ async function testMappingQuery(mi) {
   }
 }
 
-async function suggestMappingsForCard(mi, { keepFilled = true } = {}) {
-  const mapping = sqlMappings.value[mi]
-  const columns = columnsForMapping(mi)
-  if (!columns.length || !schemaId.value || !mapping.target_element?.trim()) {
-    return null
-  }
-
-  const columnKeys = new Set(columns.map((c) => normalizeFieldName(c)))
-  const filled = keepFilled
-    ? mapping.fields.filter(
-        (f) =>
-          f.db_col?.trim()
-          && f.xml_attr?.trim()
-          && columnKeys.has(normalizeFieldName(f.db_col)),
-      )
-    : []
-
-  try {
-    const { mappings, matcher } = await suggestFieldMappingsAi({
-      schemaId: schemaId.value,
-      targetElement: mapping.target_element,
-      columns,
-      existingMappings: filled.map((f) => ({
-        db_col: f.db_col,
-        xml_attr: f.xml_attr,
-      })),
-    })
-    return {
-      fields: mappingsToFields(mappings),
-      matcher,
-      hint: matcher === 'llm'
-        ? 'Matched via AI using DTD attribute docs.'
-        : 'LLM unavailable — used local fuzzy matching.',
-    }
-  } catch (e) {
-    return {
-      fields: buildFieldMappingsFromColumns(
-        columns,
-        attributesForTarget(mapping.target_element),
-        filled,
-      ),
-      matcher: 'fuzzy',
-      hint: `AI mapping failed (${e.message}) — used local fuzzy matching.`,
-    }
-  }
-}
-
-async function autoMapFields(mi) {
-  autoMapLoading.value = { ...autoMapLoading.value, [mi]: true }
-  autoMapHint.value = { ...autoMapHint.value, [mi]: '' }
-  try {
-    const result = await suggestMappingsForCard(mi, { keepFilled: true })
-    if (!result) return
-    sqlMappings.value[mi] = {
-      ...sqlMappings.value[mi],
-      fields: result.fields,
-    }
-    autoMapHint.value = { ...autoMapHint.value, [mi]: result.hint }
-  } finally {
-    autoMapLoading.value = { ...autoMapLoading.value, [mi]: false }
-  }
-}
-
-async function addAllColumns(mi) {
-  autoMapLoading.value = { ...autoMapLoading.value, [mi]: true }
-  autoMapHint.value = { ...autoMapHint.value, [mi]: '' }
-  try {
-    const result = await suggestMappingsForCard(mi, { keepFilled: false })
-    if (!result) return
-    sqlMappings.value[mi] = {
-      ...sqlMappings.value[mi],
-      fields: result.fields,
-    }
-    autoMapHint.value = { ...autoMapHint.value, [mi]: result.hint }
-  } finally {
-    autoMapLoading.value = { ...autoMapLoading.value, [mi]: false }
-  }
-}
-
 function onWizardFinish(mapping) {
-  sqlMappings.value.push(mapping)
-  wizardOpen.value = false
+  if (wizardEditIndex.value !== null) {
+    const idx = wizardEditIndex.value
+    sqlMappings.value[idx] = {
+      ...mapping,
+      _presetSource: sqlMappings.value[idx]._presetSource,
+    }
+    refreshMappingPreview(idx)
+  } else {
+    sqlMappings.value.push(mapping)
+    refreshMappingPreview(sqlMappings.value.length - 1)
+  }
+  onWizardClose()
 }
 
 async function refreshDtdElementPaths() {
@@ -884,68 +558,6 @@ async function refreshDtdElementPaths() {
     )
   } catch {
     dtdElementPaths.value = []
-  }
-}
-
-const allAttributes = computed(() => {
-  const names = new Set()
-  for (const attrs of Object.values(elementAttributes.value)) {
-    for (const attr of attrs) names.add(attr)
-  }
-  return [...names].sort()
-})
-
-function attributesForTarget(targetElement) {
-  const attrs = targetElement ? elementAttributes.value[targetElement] : null
-  return attrs?.length ? attrs : allAttributes.value
-}
-
-function onDbColFocus(mi, fi) {
-  openDatalist(datalistKey('db-col', mi, fi))
-  refreshMappingColumns(mi)
-}
-
-function onDbColChange(mi, fi, event) {
-  const cols = mappingDbColumns.value[mi] || []
-  const input = event.target
-  if (!input.value || isOptionSelected(input, cols, { caseInsensitive: true })) {
-    confirmDatalistPick(datalistKey('db-col', mi, fi))
-  }
-}
-
-function onXmlAttrChange(mi, fi, event) {
-  const mapping = sqlMappings.value[mi]
-  const attrs = attributesForTarget(mapping.target_element)
-  const input = event.target
-  if (!input.value || isOptionSelected(input, attrs)) {
-    confirmDatalistPick(datalistKey('xml-attr', mi, fi))
-  }
-}
-
-async function refreshMappingColumns(mi) {
-  const mapping = sqlMappings.value[mi]
-  const alias = mappingDbAlias(mapping)
-  const query = mapping?.query?.trim()
-  if (!alias || !query) {
-    mappingDbColumns.value = { ...mappingDbColumns.value, [mi]: [] }
-    return
-  }
-
-  const cacheKey = `${alias}:${query}`
-  if (mappingColumnsCache.value[cacheKey]) {
-    mappingDbColumns.value = {
-      ...mappingDbColumns.value,
-      [mi]: mappingColumnsCache.value[cacheKey],
-    }
-    return
-  }
-
-  try {
-    const { columns } = await fetchQueryColumns(alias, query)
-    mappingColumnsCache.value[cacheKey] = columns
-    mappingDbColumns.value = { ...mappingDbColumns.value, [mi]: columns }
-  } catch {
-    mappingDbColumns.value = { ...mappingDbColumns.value, [mi]: [] }
   }
 }
 
@@ -1087,10 +699,11 @@ watch(mode, async (val, oldVal) => {
 watch(
   sqlMappings,
   () => {
-    syncLastTargetElements()
     clearTimeout(columnsFetchTimer)
     columnsFetchTimer = setTimeout(() => {
-      sqlMappings.value.forEach((_, mi) => refreshMappingColumns(mi))
+      sqlMappings.value.forEach((m, mi) => {
+        if (m.db_alias && m.query?.trim()) refreshMappingPreview(mi)
+      })
     }, 600)
   },
   { deep: true },
@@ -1112,19 +725,19 @@ watch([schemaId, rootElement], () => {
 })
 
 watch(selectedMappingPresetNames, async (newNames, oldNames) => {
+  if (suppressPresetMappingSync.value) return
+
   const prev = oldNames || []
   const added = newNames.filter((n) => !prev.includes(n))
   const removed = prev.filter((n) => !newNames.includes(n))
 
   if (!newNames.length && removed.length) {
     sqlMappings.value = []
-    mappingDbColumns.value = {}
     return
   }
 
   if (removed.length) {
     sqlMappings.value = sqlMappings.value.filter((m) => !removed.includes(m._presetSource))
-    mappingDbColumns.value = {}
   }
 
   for (const name of added) {
@@ -1897,12 +1510,6 @@ function stopResize() {
   max-width: 120px;
 }
 
-.mapping-db-alias {
-  width: 100px;
-  font-size: 11px;
-  padding: 2px 4px;
-}
-
 .overrides-title {
   font-size: 13px;
   font-weight: 600;
@@ -1928,6 +1535,51 @@ function stopResize() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.btn-mapping-edit {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.btn-mapping-edit:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.mapping-summary {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+  margin: 0;
+}
+
+.mapping-summary dt {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.mapping-summary dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.mapping-summary-query {
+  font-family: monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.mapping-summary-fields {
+  margin: 0;
+  padding-left: 16px;
 }
 
 .mapping-title {
