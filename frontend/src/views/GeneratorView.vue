@@ -65,6 +65,11 @@
           </select>
         </div>
 
+        <label class="auto-validate-label">
+          <input v-model="autoValidateAfterFill" type="checkbox" />
+          Auto-validate after Fill
+        </label>
+
         <div v-if="isHybridStrategy" class="db-overrides-panel">
           <div class="overrides-header">
             <div class="overrides-header-top">
@@ -588,6 +593,28 @@ const fillPercent = ref(0)
 const fillElapsedSeconds = ref(0)
 const validating = ref(false)
 const validationResult = ref(null)
+
+const AUTO_VALIDATE_KEY = 'xml-gen-auto-validate'
+
+function readAutoValidatePreference() {
+  try {
+    const stored = localStorage.getItem(AUTO_VALIDATE_KEY)
+    if (stored === null) return true
+    return stored === 'true'
+  } catch {
+    return true
+  }
+}
+
+const autoValidateAfterFill = ref(readAutoValidatePreference())
+
+watch(autoValidateAfterFill, (val) => {
+  try {
+    localStorage.setItem(AUTO_VALIDATE_KEY, String(val))
+  } catch {
+    // ignore storage errors
+  }
+})
 const error = ref('')
 const xmlSyncHint = ref('')
 const dtdTreeRef = ref(null)
@@ -832,6 +859,7 @@ async function fill() {
   resetFillProgress()
   fillStatusMessage.value = 'Starting fill...'
   startFillProgressTimer()
+  let filled = false
   try {
     const request = {
       schema_id: schemaId.value,
@@ -856,16 +884,25 @@ async function fill() {
     })
     skipXmlSync = true
     xmlText.value = result.xml_text
-    validationResult.value = null
+    filled = true
   } catch (e) {
     error.value = e.message
   } finally {
     stopFillProgressTimer()
     filling.value = false
   }
+  if (filled) {
+    if (autoValidateAfterFill.value) {
+      await runValidation()
+    } else {
+      validationResult.value = null
+    }
+  }
 }
 
-async function validate() {
+async function runValidation() {
+  if (!schemaId.value || !xmlText.value) return
+
   validating.value = true
   error.value = ''
   try {
@@ -876,6 +913,10 @@ async function validate() {
   } finally {
     validating.value = false
   }
+}
+
+async function validate() {
+  await runValidation()
 }
 
 // ---- Resize logic ----
@@ -1020,6 +1061,28 @@ function stopResize() {
   font-size: 14px;
   color: var(--text);
   cursor: pointer;
+}
+
+.auto-validate-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin-bottom: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.auto-validate-label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  padding: 0;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
 }
 
 .action-row {
