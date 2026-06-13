@@ -242,19 +242,20 @@
               <div class="field-mapping-actions">
                 <button
                   class="btn-add-field"
-                  :disabled="!canAutoMap(mi)"
+                  :disabled="!canAutoMap(mi) || autoMapLoading[mi]"
                   @click="autoMapFields(mi)"
                 >
-                  Auto-map
+                  {{ autoMapLoading[mi] ? 'Mapping...' : 'Auto-map (AI)' }}
                 </button>
                 <button
                   class="btn-add-field"
-                  :disabled="!mappingPreview[mi]?.columns?.length"
+                  :disabled="!columnsForMapping(mi).length || autoMapLoading[mi]"
                   @click="addAllColumns(mi)"
                 >
-                  Add all columns
+                  {{ autoMapLoading[mi] ? 'Mapping...' : 'Add all columns' }}
                 </button>
               </div>
+              <p v-if="autoMapHint[mi]" class="auto-map-hint">{{ autoMapHint[mi] }}</p>
               <div v-for="(field, fi) in mapping.fields" :key="fi" class="field-row">
                 <input
                   v-model="field.db_col"
@@ -340,6 +341,7 @@
 
         <MappingWizard
           :open="wizardOpen"
+          :schema-id="schemaId"
           :elements="elements"
           :element-attributes="elementAttributes"
           :db-aliases="dbAliases"
@@ -422,7 +424,7 @@ import DtdTreeView from '../components/DtdTreeView.vue'
 import XmlEditor from '../components/XmlEditor.vue'
 import MappingWizard from '../components/MappingWizard.vue'
 import { generateXml } from '../api/generate'
-import { fillXmlStream } from '../api/fill'
+import { fillXmlStream, suggestFieldMappingsAi } from '../api/fill'
 import { validateXml } from '../api/validate'
 import { fetchQueryColumns, fetchQueryPreview } from '../api/db'
 import { getConfigAliases, listElements, getElementTree } from '../api/dtd'
@@ -434,12 +436,12 @@ import {
 } from '../api/mappingPresets'
 import { extractXmlElementPaths } from '../utils/xmlPaths'
 import {
-  suggestFieldMappings,
   getMappingValidationIssues,
   lastPathSegment,
   pathsEndingWithTag,
   collectDtdElementPaths,
-  applyAutoSuggestToFields,
+  buildFieldMappingsFromColumns,
+  mappingsToFields,
 } from '../utils/mappingUtils'
 
 const schemaId = ref('')
@@ -460,6 +462,8 @@ const presetDropdownOpen = ref(false)
 const presetDropdownRef = ref(null)
 const wizardOpen = ref(false)
 const mappingPreview = ref({})
+const autoMapLoading = ref({})
+const autoMapHint = ref({})
 const dtdElementPaths = ref([])
 
 function createEmptyMapping() {
@@ -624,13 +628,16 @@ function formatPreviewValue(val) {
   return String(val)
 }
 
+function columnsForMapping(mi) {
+  return mappingPreview.value[mi]?.columns || mappingDbColumns.value[mi] || []
+}
+
 function canAutoMap(mi) {
   const mapping = sqlMappings.value[mi]
-  const preview = mappingPreview.value[mi]
   return (
-    preview?.columns?.length
-    && mapping.target_element
-    && attributesForTarget(mapping.target_element).length
+    columnsForMapping(mi).length > 0
+    && mapping.target_element?.trim()
+    && attributesForTarget(mapping.target_element).length > 0
   )
 }
 
@@ -653,11 +660,19 @@ async function testMappingQuery(mi) {
     }
     if (data.columns?.length) {
       mappingDbColumns.value = { ...mappingDbColumns.value, [mi]: data.columns }
-      sqlMappings.value[mi].fields = applyAutoSuggestToFields(
-        sqlMappings.value[mi].fields,
-        data.columns,
-        attributesForTarget(mapping.target_element),
-      )
+      const current = sqlMappings.value[mi]
+      if (current.target_element?.trim() && schemaId.value) {
+        autoMapLoading.value = { ...autoMapLoading.value, [mi]: true }
+        try {
+          const result = await suggestMappingsForCard(mi, { keepFilled: true })
+          if (result) {
+            sqlMappings.value[mi] = { ...current, fields: result.fields }
+            autoMapHint.value = { ...autoMapHint.value, [mi]: result.hint }
+          }
+        } finally {
+          autoMapLoading.value = { ...autoMapLoading.value, [mi]: false }
+        }
+      }
     }
   } catch (e) {
     mappingPreview.value = {
@@ -672,28 +687,77 @@ async function testMappingQuery(mi) {
   }
 }
 
-function autoMapFields(mi) {
+async function suggestMappingsForCard(mi, { keepFilled = true } = {}) {
   const mapping = sqlMappings.value[mi]
-  const preview = mappingPreview.value[mi]
-  const suggestions = suggestFieldMappings(
-    preview?.columns || mappingDbColumns.value[mi] || [],
-    attributesForTarget(mapping.target_element),
-    mapping.fields.filter((f) => f.xml_attr),
-  )
-  if (suggestions.length) {
-    mapping.fields = suggestions
+  const columns = columnsForMapping(mi)
+  if (!columns.length || !schemaId.value || !mapping.target_element?.trim()) {
+    return null
+  }
+
+  const filled = keepFilled
+    ? mapping.fields.filter((f) => f.db_col?.trim() && f.xml_attr?.trim())
+    : []
+
+  try {
+    const { mappings, matcher } = await suggestFieldMappingsAi({
+      schemaId: schemaId.value,
+      targetElement: mapping.target_element,
+      columns,
+      existingMappings: filled.map((f) => ({
+        db_col: f.db_col,
+        xml_attr: f.xml_attr,
+      })),
+    })
+    return {
+      fields: mappingsToFields(mappings),
+      matcher,
+      hint: matcher === 'llm'
+        ? 'Matched via AI using DTD attribute docs.'
+        : 'LLM unavailable — used local fuzzy matching.',
+    }
+  } catch (e) {
+    return {
+      fields: buildFieldMappingsFromColumns(
+        columns,
+        attributesForTarget(mapping.target_element),
+        filled,
+      ),
+      matcher: 'fuzzy',
+      hint: `AI mapping failed (${e.message}) — used local fuzzy matching.`,
+    }
   }
 }
 
-function addAllColumns(mi) {
-  const mapping = sqlMappings.value[mi]
-  const columns = mappingPreview.value[mi]?.columns || mappingDbColumns.value[mi] || []
-  const suggestions = suggestFieldMappings(
-    columns,
-    attributesForTarget(mapping.target_element),
-    [],
-  )
-  mapping.fields = suggestions.length ? suggestions : [{ db_col: '', xml_attr: '' }]
+async function autoMapFields(mi) {
+  autoMapLoading.value = { ...autoMapLoading.value, [mi]: true }
+  autoMapHint.value = { ...autoMapHint.value, [mi]: '' }
+  try {
+    const result = await suggestMappingsForCard(mi, { keepFilled: true })
+    if (!result) return
+    sqlMappings.value[mi] = {
+      ...sqlMappings.value[mi],
+      fields: result.fields,
+    }
+    autoMapHint.value = { ...autoMapHint.value, [mi]: result.hint }
+  } finally {
+    autoMapLoading.value = { ...autoMapLoading.value, [mi]: false }
+  }
+}
+
+async function addAllColumns(mi) {
+  autoMapLoading.value = { ...autoMapLoading.value, [mi]: true }
+  autoMapHint.value = { ...autoMapHint.value, [mi]: '' }
+  try {
+    const result = await suggestMappingsForCard(mi, { keepFilled: false })
+    if (!result) return
+    sqlMappings.value[mi] = {
+      ...sqlMappings.value[mi],
+      fields: result.fields,
+    }
+    autoMapHint.value = { ...autoMapHint.value, [mi]: result.hint }
+  } finally {
+    autoMapLoading.value = { ...autoMapLoading.value, [mi]: false }
+  }
 }
 
 function onWizardFinish(mapping) {
@@ -1884,6 +1948,12 @@ function stopResize() {
   display: flex;
   gap: 6px;
   margin-bottom: 4px;
+}
+
+.auto-map-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0 0 4px;
 }
 
 .preview-badge {

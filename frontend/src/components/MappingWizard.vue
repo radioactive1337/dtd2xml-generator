@@ -97,19 +97,20 @@
           <div class="wizard-row">
             <button
               class="btn-secondary"
-              :disabled="!canAutoMap"
+              :disabled="!canAutoMap || autoMapLoading"
               @click="autoMap"
             >
-              Auto-map
+              {{ autoMapLoading ? 'Mapping...' : 'Auto-map (AI)' }}
             </button>
             <button
               class="btn-secondary"
-              :disabled="!preview.columns?.length"
+              :disabled="!preview.columns?.length || autoMapLoading"
               @click="addAllColumns"
             >
-              Add all columns
+              {{ autoMapLoading ? 'Mapping...' : 'Add all columns' }}
             </button>
           </div>
+          <p v-if="autoMapHint" class="wizard-hint">{{ autoMapHint }}</p>
           <div v-for="(field, fi) in draft.fields" :key="fi" class="field-row">
             <input
               v-model="field.db_col"
@@ -177,16 +178,18 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { fetchQueryPreview } from '../api/db'
+import { suggestFieldMappingsAi } from '../api/fill'
 import {
-  suggestFieldMappings,
   getMappingValidationIssues,
   lastPathSegment,
   pathsEndingWithTag,
-  applyAutoSuggestToFields,
+  buildFieldMappingsFromColumns,
+  mappingsToFields,
 } from '../utils/mappingUtils'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  schemaId: { type: String, default: '' },
   elements: { type: Array, default: () => [] },
   elementAttributes: { type: Object, default: () => ({}) },
   dbAliases: { type: Array, default: () => [] },
@@ -201,6 +204,8 @@ const elementFilter = ref('')
 
 const draft = ref(createEmptyDraft())
 const preview = ref({ loading: false, columns: [], row: undefined, error: '' })
+const autoMapLoading = ref(false)
+const autoMapHint = ref('')
 
 function createEmptyDraft() {
   return {
@@ -269,6 +274,7 @@ watch(
       step.value = 0
       draft.value = createEmptyDraft()
       preview.value = { loading: false, columns: [], row: undefined, error: '' }
+      autoMapHint.value = ''
       elementFilter.value = ''
     }
   },
@@ -294,6 +300,40 @@ function formatPreviewValue(val) {
   return String(val)
 }
 
+async function suggestDraftMappings({ keepFilled = true } = {}) {
+  const columns = preview.value.columns || []
+  if (!columns.length || !props.schemaId || !draft.value.target_element?.trim()) {
+    return null
+  }
+
+  const filled = keepFilled
+    ? draft.value.fields.filter((f) => f.db_col?.trim() && f.xml_attr?.trim())
+    : []
+
+  try {
+    const { mappings, matcher } = await suggestFieldMappingsAi({
+      schemaId: props.schemaId,
+      targetElement: draft.value.target_element,
+      columns,
+      existingMappings: filled.map((f) => ({
+        db_col: f.db_col,
+        xml_attr: f.xml_attr,
+      })),
+    })
+    return {
+      fields: mappingsToFields(mappings),
+      hint: matcher === 'llm'
+        ? 'Matched via AI using DTD attribute docs.'
+        : 'LLM unavailable — used local fuzzy matching.',
+    }
+  } catch (e) {
+    return {
+      fields: buildFieldMappingsFromColumns(columns, xmlAttrs.value, filled),
+      hint: `AI mapping failed (${e.message}) — used local fuzzy matching.`,
+    }
+  }
+}
+
 async function testQuery() {
   preview.value = { loading: true, columns: [], row: undefined, error: '' }
   try {
@@ -305,11 +345,16 @@ async function testQuery() {
       error: '',
     }
     if (data.columns?.length && draft.value.target_element) {
-      draft.value.fields = applyAutoSuggestToFields(
-        draft.value.fields,
-        data.columns,
-        xmlAttrs.value,
-      )
+      autoMapLoading.value = true
+      try {
+        const result = await suggestDraftMappings({ keepFilled: true })
+        if (result) {
+          draft.value.fields = result.fields
+          autoMapHint.value = result.hint
+        }
+      } finally {
+        autoMapLoading.value = false
+      }
     }
   } catch (e) {
     preview.value = {
@@ -321,25 +366,32 @@ async function testQuery() {
   }
 }
 
-function autoMap() {
-  const suggestions = suggestFieldMappings(
-    preview.value.columns,
-    xmlAttrs.value,
-    draft.value.fields.filter((f) => f.xml_attr),
-  )
-  draft.value.fields = suggestions.length
-    ? suggestions
-    : [{ db_col: '', xml_attr: '' }]
+async function autoMap() {
+  autoMapLoading.value = true
+  autoMapHint.value = ''
+  try {
+    const result = await suggestDraftMappings({ keepFilled: true })
+    if (result) {
+      draft.value.fields = result.fields
+      autoMapHint.value = result.hint
+    }
+  } finally {
+    autoMapLoading.value = false
+  }
 }
 
-function addAllColumns() {
-  const existing = draft.value.fields.filter((f) => f.db_col)
-  const suggestions = suggestFieldMappings(
-    preview.value.columns,
-    xmlAttrs.value,
-    existing,
-  )
-  draft.value.fields = suggestions
+async function addAllColumns() {
+  autoMapLoading.value = true
+  autoMapHint.value = ''
+  try {
+    const result = await suggestDraftMappings({ keepFilled: false })
+    if (result) {
+      draft.value.fields = result.fields
+      autoMapHint.value = result.hint
+    }
+  } finally {
+    autoMapLoading.value = false
+  }
 }
 
 function addField() {

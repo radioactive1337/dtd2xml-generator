@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+from typing import Any
 
 import httpx
 from lxml import etree
@@ -30,6 +32,13 @@ _HYBRID_SYSTEM_PROMPT = (
     "Do NOT add, remove, or rename any elements or attributes. "
     "Preserve the exact XML structure, element order, and nesting. "
     "Return only valid XML without markdown fences or explanations."
+)
+
+_FIELD_MAPPING_SYSTEM_PROMPT = (
+    "You match SQL result column names to XML element attribute names. "
+    "Use semantic meaning, naming conventions (snake_case, kebab-case, prefixes), "
+    "and any provided documentation. "
+    "Return only valid JSON without markdown fences or explanations."
 )
 
 
@@ -165,6 +174,132 @@ class LLMService:
             truncate(content, max_len=300),
         )
         raise ValueError("LLM response did not contain valid XML")
+
+    async def suggest_field_mappings_json(
+        self,
+        *,
+        target_element: str,
+        element_doc: str,
+        columns: list[str],
+        attributes: list[dict[str, Any]],
+        existing_pairs: list[dict[str, str]],
+    ) -> list[dict[str, Any]]:
+        """Ask the LLM to map SQL columns to XML attributes."""
+        if not self.base_url:
+            raise ValueError("LLM base URL is not configured in connections.json")
+
+        attr_lines = []
+        for attr in attributes:
+            line = f"- {attr['name']}"
+            if attr.get("doc"):
+                line += f": {attr['doc']}"
+            if attr.get("allowed_values"):
+                line += f" (allowed: {', '.join(attr['allowed_values'])})"
+            attr_lines.append(line)
+
+        existing_lines = [
+            f"- {pair['db_col']} -> {pair['xml_attr']}"
+            for pair in existing_pairs
+            if pair.get("db_col") and pair.get("xml_attr")
+        ]
+
+        user_message = (
+            f"Target XML element: {target_element}\n"
+            f"Element documentation: {element_doc or '(none)'}\n\n"
+            f"SQL columns to map (return one mapping per column, exact names):\n"
+            + "\n".join(f"- {col}" for col in columns)
+            + "\n\nAvailable XML attributes (use only these exact names):\n"
+            + ("\n".join(attr_lines) if attr_lines else "(none)")
+            + "\n\nAlready mapped pairs (do not reuse these columns or attributes):\n"
+            + ("\n".join(existing_lines) if existing_lines else "(none)")
+            + '\n\nReturn JSON: {"mappings": [{"db_col": "...", "xml_attr": "..."}]}\n'
+            "Use an empty string for xml_attr when there is no confident match."
+        )
+
+        content = await self._chat_completion(
+            system_prompt=_FIELD_MAPPING_SYSTEM_PROMPT,
+            user_message=user_message,
+            temperature=0.2,
+        )
+        data = self._extract_json(content)
+        mappings = data.get("mappings", [])
+        if not isinstance(mappings, list):
+            raise ValueError("LLM response JSON must contain a mappings array")
+        return mappings
+
+    async def _chat_completion(
+        self,
+        *,
+        system_prompt: str,
+        user_message: str,
+        temperature: float = 0.7,
+    ) -> str:
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": temperature,
+        }
+
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        url = f"{self.base_url}/chat/completions"
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPStatusError as exc:
+            body = truncate(exc.response.text, max_len=500)
+            logger.error(
+                "LLM API HTTP error [model=%s url=%s status=%s]: %s",
+                self.model,
+                url,
+                exc.response.status_code,
+                body,
+            )
+            raise ValueError(
+                f"LLM API returned HTTP {exc.response.status_code}: {body}"
+            ) from exc
+        except httpx.RequestError as exc:
+            logger.exception(
+                "LLM request failed [model=%s url=%s timeout=%s]",
+                self.model,
+                url,
+                self.timeout,
+            )
+            raise ValueError(f"LLM request failed: {exc}") from exc
+
+        try:
+            return data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            logger.error(
+                "Unexpected LLM response shape [model=%s keys=%s]",
+                self.model,
+                list(data.keys()) if isinstance(data, dict) else type(data).__name__,
+            )
+            raise ValueError("LLM response did not contain a message") from exc
+
+    def _extract_json(self, content: str) -> dict[str, Any]:
+        content = content.strip()
+        fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", content, re.IGNORECASE)
+        if fence_match:
+            content = fence_match.group(1).strip()
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as exc:
+            logger.error(
+                "LLM response did not contain valid JSON [preview=%s]",
+                truncate(content, max_len=300),
+            )
+            raise ValueError("LLM response did not contain valid JSON") from exc
+        if not isinstance(data, dict):
+            raise ValueError("LLM response JSON must be an object")
+        return data
 
 
 def _build_path_map(root: etree._Element) -> dict[tuple[tuple[str, int], ...], etree._Element]:

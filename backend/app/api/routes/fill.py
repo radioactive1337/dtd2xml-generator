@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.api.routes.dtd import get_schema_registry
 from app.core.xml_tree import ProtectedAttrs
 from app.services.db_service import SqlMapping, apply_db_overrides
+from app.services.field_mapping_service import suggest_field_mappings as suggest_field_mappings_service
 from app.services.faker_service import populate_with_faker
 from app.services.llm_service import populate_with_llm
 
@@ -52,6 +53,24 @@ class FillResponse(BaseModel):
     xml_text: str
     strategy: str
     warnings: list[str] = Field(default_factory=list)
+
+
+class FieldMappingPair(BaseModel):
+    db_col: str = ""
+    xml_attr: str = ""
+
+
+class SuggestFieldMappingsRequest(BaseModel):
+    schema_id: str
+    target_element: str
+    columns: list[str] = Field(default_factory=list)
+    existing_mappings: list[FieldMappingPair] = Field(default_factory=list)
+    llm_alias: str = "default"
+
+
+class SuggestFieldMappingsResponse(BaseModel):
+    mappings: list[FieldMappingPair]
+    matcher: str  # "llm" | "fuzzy"
 
 
 async def _noop_progress(_step: str, _message: str, _percent: int) -> None:
@@ -198,6 +217,57 @@ async def execute_fill(
         ) from exc
 
     return result, fill_warnings
+
+
+@router.post("/suggest-field-mappings", response_model=SuggestFieldMappingsResponse)
+async def suggest_field_mappings_route(
+    request: SuggestFieldMappingsRequest,
+) -> SuggestFieldMappingsResponse:
+    """Use LLM (with fuzzy fallback) to map SQL columns to XML attributes."""
+    registry = get_schema_registry()
+    if request.schema_id not in registry:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Schema '{request.schema_id}' not found",
+        )
+
+    target_element = request.target_element.strip()
+    if not target_element:
+        raise HTTPException(status_code=400, detail="target_element is required")
+
+    columns = [col for col in request.columns if col and col.strip()]
+    if not columns:
+        raise HTTPException(status_code=400, detail="columns cannot be empty")
+
+    schema = registry[request.schema_id]
+    existing = [
+        {"db_col": pair.db_col, "xml_attr": pair.xml_attr}
+        for pair in request.existing_mappings
+    ]
+
+    try:
+        mappings, matcher = await suggest_field_mappings_service(
+            schema,
+            target_element,
+            columns,
+            existing_pairs=existing,
+            llm_alias=request.llm_alias,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error(
+            "Field mapping suggestion failed [schema_id=%s element=%s]: %s",
+            request.schema_id,
+            target_element,
+            exc,
+        )
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return SuggestFieldMappingsResponse(
+        mappings=[FieldMappingPair(**row) for row in mappings],
+        matcher=matcher,
+    )
 
 
 @router.post("", response_model=FillResponse)

@@ -137,13 +137,40 @@ export function getMappingValidationIssues(mapping, { elements, preview }) {
   return { errors, warnings }
 }
 
-/** Apply auto-suggest to empty xml_attr slots without overwriting filled pairs. */
+/**
+ * Build one row per SQL column. Keeps manually filled pairs; suggests attrs for the rest.
+ */
+export function buildFieldMappingsFromColumns(columns, xmlAttributes, existingPairs = []) {
+  const kept = (existingPairs || []).filter((f) => f.db_col?.trim() && f.xml_attr?.trim())
+  const usedColNames = new Set(kept.map((f) => normalizeFieldName(f.db_col)))
+  const colsToMap = (columns || []).filter((c) => !usedColNames.has(normalizeFieldName(c)))
+  const suggestions = suggestFieldMappings(colsToMap, xmlAttributes, kept)
+  const merged = [...kept, ...suggestions]
+  return merged.length ? merged : [{ db_col: '', xml_attr: '' }]
+}
+
+/** After Test query: fill empty xml_attr and add rows for columns not yet listed. */
 export function applyAutoSuggestToFields(fields, columns, xmlAttributes) {
-  const suggestions = suggestFieldMappings(columns, xmlAttributes, fields)
-  return fields.map((field, i) => {
-    if (field.xml_attr?.trim()) return field
-    const suggested = suggestions[i]
-    if (!suggested) return field
-    return { ...field, xml_attr: suggested.xml_attr || field.xml_attr }
-  })
+  const result = (fields || []).map((f) => ({ ...f }))
+
+  for (const field of result) {
+    if (field.xml_attr?.trim() || !field.db_col?.trim()) continue
+    const suggested = suggestFieldMappings([field.db_col], xmlAttributes, result)[0]
+    if (suggested?.xml_attr) field.xml_attr = suggested.xml_attr
+  }
+
+  const usedCols = new Set(result.map((f) => normalizeFieldName(f.db_col)).filter(Boolean))
+  const newCols = (columns || []).filter((c) => !usedCols.has(normalizeFieldName(c)))
+  const newRows = suggestFieldMappings(newCols, xmlAttributes, result)
+  const merged = [...result, ...newRows]
+  return merged.length ? merged : [{ db_col: '', xml_attr: '' }]
+}
+
+/** Convert API mapping rows to editable field rows. */
+export function mappingsToFields(mappings) {
+  if (!mappings?.length) return [{ db_col: '', xml_attr: '' }]
+  return mappings.map((m) => ({
+    db_col: m.db_col || '',
+    xml_attr: m.xml_attr || '',
+  }))
 }

@@ -5,6 +5,23 @@ export async function fillXml(request) {
   return data
 }
 
+export async function suggestFieldMappingsAi({
+  schemaId,
+  targetElement,
+  columns,
+  existingMappings = [],
+  llmAlias = 'default',
+}) {
+  const { data } = await client.post('/fill/suggest-field-mappings', {
+    schema_id: schemaId,
+    target_element: targetElement,
+    columns,
+    existing_mappings: existingMappings,
+    llm_alias: llmAlias,
+  })
+  return data
+}
+
 function parseSseChunk(buffer) {
   const events = []
   const parts = buffer.split('\n\n')
