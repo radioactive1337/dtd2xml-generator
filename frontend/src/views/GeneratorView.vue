@@ -299,7 +299,8 @@ import { generateXml } from '../api/generate'
 import { fillXmlStream } from '../api/fill'
 import { validateXml } from '../api/validate'
 import { fetchQueryPreview } from '../api/db'
-import { getConfigAliases, listElements, getElementTree, listSchemas } from '../api/dtd'
+import { getConfigAliases } from '../api/config'
+import { listElements, getElementTree, listSchemas } from '../api/dtd'
 import {
   listMappingPresets,
   saveMappingPreset as apiSaveMappingPreset,

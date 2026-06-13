@@ -32,8 +32,3 @@ export async function getElementTree(schemaId, elementName) {
   const { data } = await client.get(`/dtd/${schemaId}/elements/${elementName}/tree`)
   return data
 }
-
-export async function getConfigAliases() {
-  const { data } = await client.get('/config/aliases')
-  return data
-}

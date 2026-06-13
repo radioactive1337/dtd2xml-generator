@@ -302,6 +302,43 @@ class LLMService:
             raise ValueError("LLM response JSON must be an object")
         return data
 
+    async def test_connection(self) -> str:
+        """Verify that the configured LLM endpoint is reachable."""
+        if not self.base_url:
+            logger.error("LLM base URL is not configured")
+            raise ValueError("LLM base URL is not configured in connections.json")
+
+        headers: dict[str, str] = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        url = f"{self.base_url}/models"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(url, headers=headers)
+                response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = truncate(exc.response.text, max_len=300)
+            logger.error(
+                "LLM connection test HTTP error [model=%s url=%s status=%s]: %s",
+                self.model,
+                url,
+                exc.response.status_code,
+                body,
+            )
+            raise ValueError(
+                f"LLM API returned HTTP {exc.response.status_code}: {body}"
+            ) from exc
+        except httpx.RequestError as exc:
+            logger.exception(
+                "LLM connection test failed [model=%s url=%s]",
+                self.model,
+                url,
+            )
+            raise ValueError(f"LLM request failed: {exc}") from exc
+
+        return f"Reachable (model: {self.model})"
+
 
 def _build_path_map(root: etree._Element) -> dict[tuple[tuple[str, int], ...], etree._Element]:
     return {element_path(el): el for el in root.iter()}

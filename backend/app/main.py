@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api.routes import db, dtd, export, fill, generate, mapping_presets, presets, validate
+from app.api.routes import config, db, dtd, export, fill, generate, mapping_presets, presets, validate
 from app.config import PROJECT_ROOT, get_app_settings, get_connection_aliases
 from app.core.logging_config import setup_logging
 from app.services.oracle_client import bootstrap_oracle_client
@@ -44,6 +44,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(config.router, prefix="/api")
 app.include_router(db.router, prefix="/api")
 app.include_router(dtd.router, prefix="/api")
 app.include_router(generate.router, prefix="/api")

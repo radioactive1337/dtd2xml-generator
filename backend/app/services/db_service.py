@@ -78,6 +78,22 @@ def _oracle_columns_sync(
         conn.close()
 
 
+def _oracle_ping_sync(user: str, password: str, dsn: str) -> None:
+    ensure_oracle_thick_mode(required=True)
+    if oracledb.is_thin_mode():
+        raise RuntimeError(
+            "Oracle thick mode is required but the driver is still in thin mode."
+        )
+
+    conn = oracledb.connect(user=user, password=password, dsn=dsn)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT 1 FROM DUAL")
+            cursor.fetchone()
+    finally:
+        conn.close()
+
+
 def _oracle_query_sync(
     user: str,
     password: str,
@@ -115,6 +131,65 @@ def _oracle_query_sync(
 
 class DBService:
     """Execute SQL queries against configured database aliases."""
+
+    async def test_connection(self, alias: str) -> str:
+        """Verify that a configured database alias is reachable."""
+        connections = load_connections()
+        if alias not in connections.databases:
+            logger.error("Unknown database alias: %s", alias)
+            raise ValueError(f"Database alias '{alias}' not found in connections.json")
+
+        cfg = connections.databases[alias]
+        password = get_db_password(alias)
+        driver = cfg.driver.lower()
+
+        try:
+            if driver == "postgresql":
+                await self._test_postgresql(cfg, password)
+                return f"Connected ({driver})"
+            if driver in {"oracle", "oracledb"}:
+                await self._test_oracle(cfg, password)
+                return f"Connected ({driver})"
+        except Exception:
+            logger.exception(
+                "Database connection test failed [alias=%s driver=%s host=%s:%s db=%s]",
+                alias,
+                driver,
+                cfg.host,
+                cfg.port,
+                cfg.database or cfg.sid,
+            )
+            raise
+
+        logger.error("Unsupported database driver [alias=%s driver=%s]", alias, cfg.driver)
+        raise ValueError(f"Unsupported database driver: {cfg.driver}")
+
+    async def _test_postgresql(self, cfg: DatabaseConfig, password: str) -> None:
+        conn = await asyncpg.connect(
+            host=cfg.host,
+            port=cfg.port,
+            user=cfg.user,
+            password=password,
+            database=cfg.database,
+        )
+        try:
+            await conn.fetchval("SELECT 1")
+        finally:
+            await conn.close()
+
+    async def _test_oracle(self, cfg: DatabaseConfig, password: str) -> None:
+        try:
+            await asyncio.to_thread(
+                _oracle_ping_sync,
+                cfg.user,
+                password,
+                _oracle_dsn(cfg),
+            )
+        except oracledb.Error as exc:
+            mapped = map_oracle_client_error(exc)
+            if mapped is not None:
+                raise mapped from exc
+            raise
 
     async def run_query(self, alias: str, sql: str) -> list[dict[str, Any]]:
         connections = load_connections()

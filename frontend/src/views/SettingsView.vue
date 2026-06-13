@@ -5,6 +5,7 @@
       <p class="hint">
         Credentials are read from local <code>connections.json</code>.
         Only aliases are shown here — no secrets are exposed through the UI.
+        Use Test DB / Test LLM to verify connectivity before Fill.
       </p>
 
       <div v-if="loading" class="loading">Loading...</div>
@@ -15,7 +16,28 @@
           <ul v-if="aliases.databases?.length" class="alias-list">
             <li v-for="db in aliases.databases" :key="db" class="alias-item">
               <span class="alias-icon">DB</span>
-              {{ db }}
+              <span class="alias-name">{{ db }}</span>
+              <button
+                class="btn-secondary btn-test"
+                :disabled="isDbTesting(db)"
+                @click="testDb(db)"
+              >
+                {{ isDbTesting(db) ? 'Testing...' : 'Test DB' }}
+              </button>
+              <span
+                v-if="dbStatus(db)"
+                class="status-badge"
+                :class="dbStatus(db).ok ? 'ok' : 'error'"
+                :title="dbStatus(db).message"
+              >
+                {{ dbStatus(db).ok ? 'OK' : 'Failed' }}
+              </span>
+              <p v-if="dbStatus(db) && !dbStatus(db).ok" class="status-detail error-msg">
+                {{ dbStatus(db).message }}
+              </p>
+              <p v-else-if="dbStatus(db)?.ok" class="status-detail ok-msg">
+                {{ dbStatus(db).message }}
+              </p>
             </li>
           </ul>
           <p v-else class="empty">No database aliases configured.</p>
@@ -26,7 +48,28 @@
           <ul v-if="aliases.llm?.length" class="alias-list">
             <li v-for="llm in aliases.llm" :key="llm" class="alias-item">
               <span class="alias-icon llm">LLM</span>
-              {{ llm }}
+              <span class="alias-name">{{ llm }}</span>
+              <button
+                class="btn-secondary btn-test"
+                :disabled="isLlmTesting(llm)"
+                @click="testLlm(llm)"
+              >
+                {{ isLlmTesting(llm) ? 'Testing...' : 'Test LLM' }}
+              </button>
+              <span
+                v-if="llmStatus(llm)"
+                class="status-badge"
+                :class="llmStatus(llm).ok ? 'ok' : 'error'"
+                :title="llmStatus(llm).message"
+              >
+                {{ llmStatus(llm).ok ? 'OK' : 'Failed' }}
+              </span>
+              <p v-if="llmStatus(llm) && !llmStatus(llm).ok" class="status-detail error-msg">
+                {{ llmStatus(llm).message }}
+              </p>
+              <p v-else-if="llmStatus(llm)?.ok" class="status-detail ok-msg">
+                {{ llmStatus(llm).message }}
+              </p>
             </li>
           </ul>
           <p v-else class="empty">No LLM aliases configured.</p>
@@ -49,11 +92,67 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getConfigAliases } from '../api/dtd'
+import { getConfigAliases, testDbConnection, testLlmConnection } from '../api/config'
 
 const aliases = ref({ databases: [], llm: [] })
 const loading = ref(true)
 const error = ref('')
+const dbTests = ref({})
+const llmTests = ref({})
+
+function dbStatus(alias) {
+  return dbTests.value[alias] ?? null
+}
+
+function llmStatus(alias) {
+  return llmTests.value[alias] ?? null
+}
+
+function isDbTesting(alias) {
+  return dbTests.value[alias]?.testing === true
+}
+
+function isLlmTesting(alias) {
+  return llmTests.value[alias]?.testing === true
+}
+
+async function testDb(alias) {
+  dbTests.value = {
+    ...dbTests.value,
+    [alias]: { testing: true },
+  }
+  try {
+    const result = await testDbConnection(alias)
+    dbTests.value = {
+      ...dbTests.value,
+      [alias]: { ok: result.ok, message: result.message },
+    }
+  } catch (e) {
+    dbTests.value = {
+      ...dbTests.value,
+      [alias]: { ok: false, message: e.message },
+    }
+  }
+}
+
+async function testLlm(alias) {
+  llmTests.value = {
+    ...llmTests.value,
+    [alias]: { testing: true },
+  }
+  try {
+    const result = await testLlmConnection(alias)
+    llmTests.value = {
+      ...llmTests.value,
+      [alias]: { ok: result.ok, message: result.message },
+    }
+  } catch (e) {
+    llmTests.value = {
+      ...llmTests.value,
+      [alias]: { ok: false, message: e.message },
+    }
+  }
+}
 
 onMounted(async () => {
   try {
@@ -68,7 +167,7 @@ onMounted(async () => {
 
 <style scoped>
 .settings {
-  max-width: 600px;
+  max-width: 640px;
 }
 
 .hint {
@@ -105,12 +204,51 @@ code {
 
 .alias-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
   background: var(--surface2);
   border-radius: var(--radius);
   font-size: 14px;
+}
+
+.alias-name {
+  flex: 1;
+  min-width: 80px;
+}
+
+.btn-test {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.status-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.status-badge.ok {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success);
+}
+
+.status-badge.error {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger);
+}
+
+.status-detail {
+  width: 100%;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ok-msg {
+  color: var(--success);
 }
 
 .alias-icon {
