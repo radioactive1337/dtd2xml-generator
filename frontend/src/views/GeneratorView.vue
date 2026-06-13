@@ -75,6 +75,9 @@
           <GeneratorDataTab
             v-show="activeTab === 'data'"
             v-model:fill-strategy="fillStrategy"
+            v-model:llm-alias="llmAlias"
+            :llm-aliases="llmAliases"
+            :default-llm-alias="defaultLlmAlias"
             v-model:auto-validate-after-fill="autoValidateAfterFill"
             v-model:mapping-preset-name="mappingPresetName"
             v-model:selected-mapping-preset-names="selectedMappingPresetNames"
@@ -105,7 +108,7 @@
           :generating="generating"
           :xml-text="xmlText"
           :filling="filling"
-          :has-mapping-blockers="hasMappingBlockers"
+          :has-mapping-blockers="hasMappingBlockers || hasLlmBlocker"
           :can-validate="canValidate"
           :validating="validating"
           :fill-status-message="fillStatusMessage"
@@ -190,7 +193,9 @@ const repeatCount = ref(1)
 const customPaths = ref([])
 const fillStrategy = ref('faker')
 const dbAliases = ref([])
-const llmAlias = ref(null)
+const llmAliases = ref([])
+const defaultLlmAlias = ref('')
+const llmAlias = ref('')
 const mappingPresetName = ref('')
 const selectedMappingPresetNames = ref([])
 const mappingPresets = ref([])
@@ -204,6 +209,14 @@ const sqlMappings = ref([])
 
 const isHybridStrategy = computed(
   () => fillStrategy.value === 'hybrid_db_faker' || fillStrategy.value === 'hybrid_db_ai',
+)
+
+const usesLlmStrategy = computed(
+  () => fillStrategy.value === 'ai' || fillStrategy.value === 'hybrid_db_ai',
+)
+
+const hasLlmBlocker = computed(
+  () => usesLlmStrategy.value && !llmAlias.value,
 )
 
 const wizardInitialMapping = computed(() =>
@@ -443,6 +456,7 @@ watch(activeTab, (val) => {
 
 const showDataBadge = computed(() => {
   if (hasMappingBlockers.value) return true
+  if (hasLlmBlocker.value) return true
   if (isHybridStrategy.value && !sqlMappings.value.length) return true
   return false
 })
@@ -494,6 +508,7 @@ watch(autoValidateAfterFill, (val) => {
     // ignore storage errors
   }
 })
+
 const error = ref('')
 const xmlSyncHint = ref('')
 const structureTabRef = ref(null)
@@ -681,10 +696,14 @@ onMounted(async () => {
   try {
     const aliases = await getConfigAliases()
     dbAliases.value = aliases.databases || []
-    llmAlias.value = aliases.default_llm || aliases.llm?.[0] || null
+    llmAliases.value = aliases.llm || []
+    defaultLlmAlias.value = aliases.default_llm || ''
+    llmAlias.value = defaultLlmAlias.value || llmAliases.value[0] || ''
   } catch {
     dbAliases.value = []
-    llmAlias.value = null
+    llmAliases.value = []
+    defaultLlmAlias.value = ''
+    llmAlias.value = ''
   }
 })
 

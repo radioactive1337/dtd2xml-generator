@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from app.services.db_service import DBService
 from app.services.llm_service import LLMService
+from app.config import set_default_llm_alias
 
 router = APIRouter(prefix="/config", tags=["config"])
 logger = logging.getLogger(__name__)
@@ -22,6 +23,14 @@ class ConnectionTestResponse(BaseModel):
     alias: str
     ok: bool
     message: str
+
+
+class DefaultLlmRequest(BaseModel):
+    alias: str
+
+
+class DefaultLlmResponse(BaseModel):
+    default_llm: str
 
 
 @router.post("/test-db", response_model=ConnectionTestResponse)
@@ -60,3 +69,18 @@ async def test_llm_connection(request: AliasRequest) -> ConnectionTestResponse:
         return ConnectionTestResponse(alias=alias, ok=False, message=str(exc))
 
     return ConnectionTestResponse(alias=alias, ok=True, message=message)
+
+
+@router.put("/default-llm", response_model=DefaultLlmResponse)
+async def set_default_llm(request: DefaultLlmRequest) -> DefaultLlmResponse:
+    """Set the default LLM alias in connections.json."""
+    alias = request.alias.strip()
+    if not alias:
+        raise HTTPException(status_code=400, detail="LLM alias is required")
+
+    try:
+        default_llm = set_default_llm_alias(alias)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return DefaultLlmResponse(default_llm=default_llm)

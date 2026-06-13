@@ -45,6 +45,20 @@
 
         <section class="alias-section">
           <h3>Алиасы LLM</h3>
+          <div v-if="aliases.llm?.length > 1" class="default-llm-field">
+            <label for="default-llm-select">LLM по умолчанию</label>
+            <select
+              id="default-llm-select"
+              v-model="defaultLlmAlias"
+              :disabled="savingDefaultLlm"
+              @change="saveDefaultLlm"
+            >
+              <option v-for="llm in aliases.llm" :key="llm" :value="llm">{{ llm }}</option>
+            </select>
+            <p class="default-llm-hint">
+              Используется при заполнении XML и автосопоставлении полей, если алиас не выбран вручную.
+            </p>
+          </div>
           <ul v-if="aliases.llm?.length" class="alias-list">
             <li v-for="llm in aliases.llm" :key="llm" class="alias-item">
               <span class="alias-icon llm">LLM</span>
@@ -92,9 +106,11 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getConfigAliases, testDbConnection, testLlmConnection } from '../api/config'
+import { getConfigAliases, setDefaultLlmAlias, testDbConnection, testLlmConnection } from '../api/config'
 
 const aliases = ref({ databases: [], llm: [] })
+const defaultLlmAlias = ref('')
+const savingDefaultLlm = ref(false)
 const loading = ref(true)
 const error = ref('')
 const dbTests = ref({})
@@ -154,9 +170,30 @@ async function testLlm(alias) {
   }
 }
 
+async function saveDefaultLlm() {
+  if (!defaultLlmAlias.value) return
+  const previous = aliases.value.default_llm || aliases.value.llm?.[0] || ''
+  savingDefaultLlm.value = true
+  error.value = ''
+  try {
+    const result = await setDefaultLlmAlias(defaultLlmAlias.value)
+    aliases.value = {
+      ...aliases.value,
+      default_llm: result.default_llm,
+    }
+    defaultLlmAlias.value = result.default_llm
+  } catch (e) {
+    error.value = e.message
+    defaultLlmAlias.value = previous
+  } finally {
+    savingDefaultLlm.value = false
+  }
+}
+
 onMounted(async () => {
   try {
     aliases.value = await getConfigAliases()
+    defaultLlmAlias.value = aliases.value.default_llm || aliases.value.llm?.[0] || ''
   } catch (e) {
     error.value = e.message
   } finally {
@@ -193,6 +230,26 @@ code {
   font-weight: 600;
   margin-bottom: 8px;
   color: var(--text-muted);
+}
+
+.default-llm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.default-llm-field label {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 0;
+}
+
+.default-llm-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.4;
 }
 
 .alias-list {

@@ -3,7 +3,7 @@
     <header class="app-header">
       <div class="logo">
         <span class="logo-icon">XML</span>
-        <span class="logo-text">Генератор XML для QA</span>
+        <span class="logo-text">Генератор XML</span>
       </div>
       <nav class="nav">
         <router-link to="/" class="nav-link">Генератор</router-link>

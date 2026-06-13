@@ -10,6 +10,25 @@
       </select>
     </div>
 
+    <div v-if="usesLlmStrategy" class="field">
+      <label>Алиас LLM</label>
+      <select
+        v-if="llmAliases.length"
+        :value="llmAlias"
+        @change="$emit('update:llmAlias', $event.target.value)"
+      >
+        <option v-for="alias in llmAliases" :key="alias" :value="alias">
+          {{ alias }}{{ alias === defaultLlmAlias ? ' (по умолчанию)' : '' }}
+        </option>
+      </select>
+      <p v-if="!llmAliases.length" class="llm-alias-hint llm-alias-hint--warn">
+        Алиасы LLM не настроены — добавьте их в <code>connections.json</code> (см. Настройки).
+      </p>
+      <p v-else-if="llmAliases.length > 1" class="llm-alias-hint">
+        Используется для AI-заполнения и автосопоставления полей в мастере маппинга.
+      </p>
+    </div>
+
     <label class="auto-validate-label">
       <input
         type="checkbox"
@@ -153,11 +172,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { formatMappings } from '../../utils/ruPlural'
 
 const props = defineProps({
   fillStrategy: { type: String, default: 'faker' },
+  llmAlias: { type: String, default: '' },
+  llmAliases: { type: Array, default: () => [] },
+  defaultLlmAlias: { type: String, default: '' },
   autoValidateAfterFill: { type: Boolean, default: true },
   isHybridStrategy: { type: Boolean, default: false },
   mappingPresetName: { type: String, default: '' },
@@ -169,8 +191,13 @@ const props = defineProps({
   mappingValidation: { type: Array, default: () => [] },
 })
 
+const usesLlmStrategy = computed(
+  () => props.fillStrategy === 'ai' || props.fillStrategy === 'hybrid_db_ai',
+)
+
 const emit = defineEmits([
   'update:fillStrategy',
+  'update:llmAlias',
   'update:autoValidateAfterFill',
   'update:mappingPresetName',
   'update:selectedMappingPresetNames',
@@ -224,6 +251,16 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.llm-alias-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.llm-alias-hint--warn {
+  color: var(--warning);
 }
 
 .auto-validate-label {

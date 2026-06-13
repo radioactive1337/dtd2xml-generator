@@ -81,3 +81,25 @@ def test_test_llm_failure_returns_ok_false(client: TestClient):
 def test_test_llm_rejects_empty_alias(client: TestClient):
     response = client.post("/api/config/test-llm", json={"alias": ""})
     assert response.status_code == 400
+
+
+def test_set_default_llm_success(client: TestClient):
+    with patch(
+        "app.api.routes.config.set_default_llm_alias",
+        return_value="PROD_LLM",
+    ):
+        response = client.put("/api/config/default-llm", json={"alias": "PROD_LLM"})
+
+    assert response.status_code == 200
+    assert response.json() == {"default_llm": "PROD_LLM"}
+
+
+def test_set_default_llm_rejects_invalid_alias(client: TestClient):
+    with patch(
+        "app.api.routes.config.set_default_llm_alias",
+        side_effect=ValueError("LLM alias 'missing' is not configured. Available: default"),
+    ):
+        response = client.put("/api/config/default-llm", json={"alias": "missing"})
+
+    assert response.status_code == 400
+    assert "missing" in response.json()["detail"]

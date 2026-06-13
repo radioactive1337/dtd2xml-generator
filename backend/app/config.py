@@ -203,3 +203,35 @@ def get_connection_aliases() -> dict[str, list[str] | str | None]:
         "llm": list(connections.llm.keys()),
         "default_llm": default_llm,
     }
+
+
+def set_default_llm_alias(alias: str) -> str:
+    """Persist app.default_llm_alias in connections.json."""
+    requested = alias.strip()
+    if not requested:
+        raise ValueError("LLM alias is required")
+
+    connections = load_connections()
+    if len(connections.llm) < 2:
+        raise ValueError(
+            "Default LLM alias can only be set when multiple LLM aliases are configured"
+        )
+
+    if requested not in connections.llm:
+        available = ", ".join(sorted(connections.llm)) or "(none)"
+        raise ValueError(
+            f"LLM alias '{requested}' is not configured. Available: {available}"
+        )
+
+    path = _find_connections_file()
+    if path is None:
+        raise ValueError("connections.json not found")
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    app = raw.setdefault("app", {})
+    app["default_llm_alias"] = requested
+    path.write_text(
+        json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return requested

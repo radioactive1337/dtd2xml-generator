@@ -18,6 +18,7 @@ from app.config import (
     get_oracle_client_lib_dir,
     load_connections,
     resolve_llm_alias,
+    set_default_llm_alias,
 )
 
 
@@ -133,3 +134,33 @@ def test_resolve_llm_alias_rejects_unknown_alias(connections_file: Path):
     with patch("app.config._find_connections_file", return_value=connections_file):
         with pytest.raises(ValueError, match="LLM alias 'missing' is not configured"):
             resolve_llm_alias("missing")
+
+
+def test_set_default_llm_alias_persists_in_connections_file(connections_file: Path):
+    config = json.loads(connections_file.read_text(encoding="utf-8"))
+    config["llm"] = {
+        "DEV_LLM": {
+            "base_url": "http://localhost:11434/v1",
+            "api_key": "dev",
+            "model": "gpt-4o-mini",
+        },
+        "PROD_LLM": {
+            "base_url": "http://prod.example/v1",
+            "api_key": "prod",
+            "model": "gpt-4o",
+        },
+    }
+    connections_file.write_text(json.dumps(config), encoding="utf-8")
+
+    with patch("app.config._find_connections_file", return_value=connections_file):
+        assert set_default_llm_alias("PROD_LLM") == "PROD_LLM"
+        assert get_default_llm_alias() == "PROD_LLM"
+
+    saved = json.loads(connections_file.read_text(encoding="utf-8"))
+    assert saved["app"]["default_llm_alias"] == "PROD_LLM"
+
+
+def test_set_default_llm_alias_requires_multiple_aliases(connections_file: Path):
+    with patch("app.config._find_connections_file", return_value=connections_file):
+        with pytest.raises(ValueError, match="multiple LLM aliases"):
+            set_default_llm_alias("default")

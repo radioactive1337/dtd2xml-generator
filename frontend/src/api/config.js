@@ -14,3 +14,8 @@ export async function testLlmConnection(alias) {
   const { data } = await client.post('/config/test-llm', { alias })
   return data
 }
+
+export async function setDefaultLlmAlias(alias) {
+  const { data } = await client.put('/config/default-llm', { alias })
+  return data
+}
