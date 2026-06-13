@@ -3,6 +3,20 @@
     <div class="editor-header">
       <div class="panel-title">XML Preview</div>
       <div class="editor-actions">
+        <input
+          ref="fileInput"
+          type="file"
+          accept=".xml,text/xml,application/xml"
+          style="display: none"
+          @change="onFileSelect"
+        />
+        <button
+          class="btn-secondary"
+          title="Load XML from a file"
+          @click="triggerImport"
+        >
+          Import .xml
+        </button>
         <button
           class="btn-secondary btn-format"
           :disabled="!modelValue"
@@ -19,6 +33,7 @@
         </button>
       </div>
     </div>
+    <p v-if="importError" class="import-error">{{ importError }}</p>
     <div ref="editorContainer" class="editor-container" />
   </div>
 </template>
@@ -34,10 +49,12 @@ const props = defineProps({
   validationErrors: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['content-change'])
+const emit = defineEmits(['content-change', 'import'])
 
 const editorContainer = ref(null)
+const fileInput = ref(null)
 const copied = ref(false)
+const importError = ref('')
 let editor = null
 let monaco = null
 let suppressEditorEvent = false
@@ -136,6 +153,38 @@ function downloadXml() {
   URL.revokeObjectURL(url)
 }
 
+function triggerImport() {
+  importError.value = ''
+  fileInput.value?.click()
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(new Error('Failed to read file'))
+    reader.readAsText(file, 'UTF-8')
+  })
+}
+
+async function onFileSelect(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''
+  if (!file) return
+
+  importError.value = ''
+  try {
+    const text = await readFileAsText(file)
+    if (!text.trim()) {
+      importError.value = 'File is empty'
+      return
+    }
+    emit('import', { text, fileName: file.name })
+  } catch (err) {
+    importError.value = err.message || 'Failed to import XML file'
+  }
+}
+
 async function formatDocument() {
   if (!editor) return
   await editor.getAction('editor.action.formatDocument')?.run()
@@ -186,6 +235,12 @@ defineExpose({ goToPosition, getValue, setValue })
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-weight: 600;
   margin-right: 4px;
+}
+
+.import-error {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--danger, #ef4444);
 }
 
 .editor-container {

@@ -283,6 +283,7 @@
         :filename="`${rootElement || 'generated'}.xml`"
         :validation-errors="validationResult?.valid === false ? validationResult.errors : []"
         @content-change="onEditorContentChange"
+        @import="onXmlFileImported"
       />
     </div>
   </div>
@@ -634,6 +635,15 @@ function onEditorContentChange(text) {
   liveXmlText.value = text || ''
   xmlText.value = text || ''
   scheduleXmlSync(text)
+}
+
+async function onXmlFileImported({ text }) {
+  validationResult.value = null
+  buildInfo.value = null
+  await setProgrammaticXml(text)
+  if (schemaId.value) {
+    await syncFromPastedXml(text)
+  }
 }
 
 async function waitForDtdTreeRef(maxAttempts = 5) {
