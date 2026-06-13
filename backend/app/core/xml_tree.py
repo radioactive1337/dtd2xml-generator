@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from lxml import etree
@@ -11,6 +12,38 @@ if TYPE_CHECKING:
 
 ElementPath = tuple[tuple[str, int], ...]
 ProtectedAttrs = frozenset[tuple[ElementPath, str]]
+
+
+def normalize_dot_path(path: str) -> str:
+    """Strip UI-only group-N segments so tree paths match element paths."""
+    return re.sub(r"\.group-\d+(?=\.|$)", "", path.strip())
+
+
+def find_elements_by_dot_path(
+    root: etree._Element,
+    path: str,
+) -> list[etree._Element]:
+    """Resolve a dot-separated element path (e.g. PayDoc.Body.client) to XML nodes."""
+    normalized = normalize_dot_path(path)
+    if not normalized:
+        return []
+
+    segments = normalized.split(".")
+    if root.tag != segments[0]:
+        return []
+
+    current: etree._Element = root
+    for segment in segments[1:]:
+        found: etree._Element | None = None
+        for child in current:
+            if child.tag == segment:
+                found = child
+                break
+        if found is None:
+            return []
+        current = found
+
+    return [current]
 
 
 def element_path(el: etree._Element) -> ElementPath:

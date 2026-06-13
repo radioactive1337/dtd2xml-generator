@@ -51,6 +51,7 @@ class FillRequest(BaseModel):
 class FillResponse(BaseModel):
     xml_text: str
     strategy: str
+    warnings: list[str] = Field(default_factory=list)
 
 
 async def _noop_progress(_step: str, _message: str, _percent: int) -> None:
@@ -98,13 +99,14 @@ async def execute_fill(
 
     xml = request.xml_text
     protected_attrs: ProtectedAttrs = frozenset()
+    fill_warnings: list[str] = []
 
     # ── Stage 1: DB overrides (hybrid strategies only) ───────────────────
     if request.strategy in _HYBRID:
         active_mappings = _validate_hybrid_mappings(request)
         await on_progress("db_query", "Querying database...", 10)
         try:
-            xml, protected_attrs = await apply_db_overrides(
+            xml, protected_attrs, fill_warnings = await apply_db_overrides(
                 xml,
                 request.sql_mappings,
             )
@@ -123,6 +125,8 @@ async def execute_fill(
                 detail=f"Database stage failed: {exc}",
             ) from exc
         await on_progress("db_done", "Database values applied", 35)
+        for warning in fill_warnings:
+            await on_progress("db_warning", warning, 35)
 
     # ── Stage 2: fallback engine for remaining empty fields ───────────────
     fill_empty_only = request.strategy in _HYBRID
@@ -193,14 +197,14 @@ async def execute_fill(
             detail=f"{stage} stage failed: {exc}",
         ) from exc
 
-    return result
+    return result, fill_warnings
 
 
 @router.post("", response_model=FillResponse)
 async def fill_xml(request: FillRequest) -> FillResponse:
     """Fill XML with test data using a two-stage hybrid pipeline."""
     try:
-        result = await execute_fill(request)
+        result, warnings = await execute_fill(request)
     except HTTPException:
         raise
     except Exception as exc:
@@ -212,7 +216,7 @@ async def fill_xml(request: FillRequest) -> FillResponse:
         )
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    return FillResponse(xml_text=result, strategy=request.strategy)
+    return FillResponse(xml_text=result, strategy=request.strategy, warnings=warnings)
 
 
 def _sse_event(payload: dict[str, object]) -> str:
@@ -229,8 +233,13 @@ async def fill_xml_stream(request: FillRequest) -> StreamingResponse:
 
     async def run_fill() -> None:
         try:
-            result = await execute_fill(request, on_progress)
-            await queue.put({"step": "complete", "xml_text": result, "percent": 100})
+            result, warnings = await execute_fill(request, on_progress)
+            await queue.put({
+                "step": "complete",
+                "xml_text": result,
+                "percent": 100,
+                "warnings": warnings,
+            })
         except HTTPException as exc:
             detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
             await queue.put({"step": "error", "message": detail, "status": exc.status_code})

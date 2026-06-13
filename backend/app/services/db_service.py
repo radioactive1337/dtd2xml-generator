@@ -17,7 +17,7 @@ from app.services.oracle_client import ensure_oracle_thick_mode, map_oracle_clie
 from app.services.sql_safety import validate_readonly_select
 from lxml import etree
 
-from app.core.xml_tree import ProtectedAttrs, element_path
+from app.core.xml_tree import ProtectedAttrs, element_path, find_elements_by_dot_path
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ class SqlMapping(BaseModel):
     target_element: str
     fields: dict[str, str]  # db_column -> xml_attribute (optionally prefixed with @)
     db_alias: str | None = None
+    target_path: str | None = None
 
 
 def _normalize_value(value: Any) -> Any:
@@ -324,16 +325,18 @@ class DBService:
         self,
         xml_text: str,
         sql_mappings: list[SqlMapping],
-    ) -> tuple[str, ProtectedAttrs]:
-        """Stage-1 pipeline: inject DB values into specific elements by tag name.
+    ) -> tuple[str, ProtectedAttrs, list[str]]:
+        """Stage-1 pipeline: inject DB values into specific elements by tag or path.
 
         For every mapping, the first row of the SQL result is fetched once and its
         columns are written to the declared XML attributes of every matching element
-        in the tree.  Returns the updated XML and the set of DB-filled attribute
-        slots that Stage 2 must preserve.
+        in the tree.  When ``target_path`` is set, only the element at that dot-path
+        is updated; otherwise all elements with ``target_element`` are matched.
+        Returns the updated XML, protected attribute slots, and non-fatal warnings.
         """
         root = etree.fromstring(xml_text.encode("utf-8"))
         protected: set[tuple[tuple[str, int], ...], str] = set()
+        warnings: list[str] = []
 
         for mapping in sql_mappings:
             if not mapping.query.strip() or not mapping.target_element:
@@ -346,20 +349,21 @@ class DBService:
                 rows = await self.run_query(mapping.db_alias, mapping.query)
             except Exception:
                 logger.exception(
-                    "DB override mapping failed [alias=%s element=%s fields=%s query=%s]",
+                    "DB override mapping failed [alias=%s element=%s path=%s fields=%s query=%s]",
                     mapping.db_alias,
                     mapping.target_element,
+                    mapping.target_path,
                     list(mapping.fields.keys()),
                     truncate(mapping.query),
                 )
                 raise
             if not rows:
-                logger.warning(
-                    "DB override returned no rows [alias=%s element=%s query=%s]",
-                    mapping.db_alias,
-                    mapping.target_element,
-                    truncate(mapping.query),
+                msg = (
+                    f"DB override returned no rows "
+                    f"[alias={mapping.db_alias} element={mapping.target_element}]"
                 )
+                logger.warning("%s query=%s", msg, truncate(mapping.query))
+                warnings.append(msg)
                 continue
 
             row = rows[0]
@@ -367,7 +371,20 @@ class DBService:
                 k.lower(): str(v) for k, v in row.items() if v is not None
             }
 
-            for el in root.iter(mapping.target_element):
+            if mapping.target_path and mapping.target_path.strip():
+                elements = find_elements_by_dot_path(root, mapping.target_path)
+                if not elements:
+                    msg = (
+                        f"target_path not found: {mapping.target_path} "
+                        f"(element={mapping.target_element})"
+                    )
+                    logger.warning(msg)
+                    warnings.append(msg)
+                    continue
+            else:
+                elements = list(root.iter(mapping.target_element))
+
+            for el in elements:
                 for db_col, xml_attr in mapping.fields.items():
                     value = lower_row.get(db_col.lower())
                     if value is None:
@@ -384,7 +401,7 @@ class DBService:
             encoding="UTF-8",
             xml_declaration=False,
         ).decode("UTF-8")
-        return xml_out, frozenset(protected)
+        return xml_out, frozenset(protected), warnings
 
 
 async def populate_with_db(
@@ -400,6 +417,6 @@ async def populate_with_db(
 async def apply_db_overrides(
     xml_text: str,
     sql_mappings: list[SqlMapping],
-) -> tuple[str, ProtectedAttrs]:
+) -> tuple[str, ProtectedAttrs, list[str]]:
     """Stage-1 of the hybrid pipeline: targeted DB injections before faker/LLM fallback."""
     return await DBService().apply_overrides(xml_text, sql_mappings)

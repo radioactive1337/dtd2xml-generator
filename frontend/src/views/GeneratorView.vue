@@ -152,6 +152,13 @@
               <div class="mapping-header-left">
                 <span class="mapping-title">Mapping {{ mi + 1 }}</span>
                 <span v-if="mapping._presetSource" class="mapping-preset-badge">{{ mapping._presetSource }}</span>
+                <span
+                  v-if="mappingPreview[mi] && !mappingPreview[mi].loading && mappingPreview[mi].columns?.length"
+                  class="preview-badge"
+                  :class="mappingPreview[mi].row === null ? 'warn' : 'ok'"
+                >
+                  {{ mappingPreview[mi].row === null ? '0 rows' : 'OK' }}
+                </span>
               </div>
               <div class="mapping-header-right">
                 <select v-model="mapping.db_alias" class="mapping-db-alias" title="DB alias">
@@ -167,6 +174,7 @@
               <input
                 v-model="mapping.target_element"
                 list="target-elements-list"
+                :readonly="!!mapping.target_path?.trim()"
                 placeholder="Element name (type or pick from list)"
                 @input="onTargetElementInput(mi, $event)"
                 @change="onTargetElementChange(mi, $event)"
@@ -177,12 +185,53 @@
             </div>
 
             <div class="field">
+              <label>
+                Target Path
+                <span class="label-hint">(optional)</span>
+              </label>
+              <input
+                v-model="mapping.target_path"
+                :list="`target-paths-list-${mi}`"
+                placeholder="PayDoc.Body.client (optional)"
+                @input="onTargetPathInput(mi)"
+              />
+              <p class="path-hint">
+                Without a path, all &lt;{{ mapping.target_element || 'element' }}&gt; tags in the document will be filled.
+              </p>
+            </div>
+
+            <div class="field">
               <label>SQL Query</label>
               <textarea
                 v-model="mapping.query"
                 rows="2"
                 placeholder="SELECT col1, col2 FROM schema.view WHERE col = N'value' AND ROWNUM = 1"
               />
+              <div class="query-actions">
+                <button
+                  class="btn-test-query"
+                  :disabled="!mapping.db_alias || !mapping.query?.trim() || mappingPreview[mi]?.loading"
+                  @click="testMappingQuery(mi)"
+                >
+                  {{ mappingPreview[mi]?.loading ? 'Testing...' : 'Test query' }}
+                </button>
+              </div>
+              <p v-if="mappingPreview[mi]?.error" class="mapping-inline-error">
+                {{ mappingPreview[mi].error }}
+              </p>
+              <div
+                v-else-if="mappingPreview[mi]?.row"
+                class="preview-table-wrap"
+              >
+                <table class="preview-table">
+                  <tbody>
+                    <tr v-for="col in mappingPreview[mi].columns" :key="col">
+                      <th>{{ col }}</th>
+                      <td>{{ formatPreviewValue(mappingPreview[mi].row[col]) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div class="field">
@@ -190,6 +239,22 @@
                 Field Mappings
                 <span class="label-hint">DB column → XML attribute</span>
               </label>
+              <div class="field-mapping-actions">
+                <button
+                  class="btn-add-field"
+                  :disabled="!canAutoMap(mi)"
+                  @click="autoMapFields(mi)"
+                >
+                  Auto-map
+                </button>
+                <button
+                  class="btn-add-field"
+                  :disabled="!mappingPreview[mi]?.columns?.length"
+                  @click="addAllColumns(mi)"
+                >
+                  Add all columns
+                </button>
+              </div>
               <div v-for="(field, fi) in mapping.fields" :key="fi" class="field-row">
                 <input
                   v-model="field.db_col"
@@ -222,10 +287,29 @@
               </div>
               <button class="btn-add-field" @click="addField(mi)">+ Add field</button>
             </div>
+
+            <ul v-if="mappingValidation[mi]?.errors?.length" class="mapping-errors">
+              <li v-for="(err, i) in mappingValidation[mi].errors" :key="'e' + i">{{ err }}</li>
+            </ul>
+            <ul v-if="mappingValidation[mi]?.warnings?.length" class="mapping-warnings">
+              <li v-for="(w, i) in mappingValidation[mi].warnings" :key="'w' + i">{{ w }}</li>
+            </ul>
           </div>
 
           <datalist id="target-elements-list">
             <option v-for="el in elements" :key="el" :value="el" />
+          </datalist>
+
+          <datalist
+            v-for="(mapping, mi) in sqlMappings"
+            :id="`target-paths-list-${mi}`"
+            :key="`target-paths-${mi}`"
+          >
+            <option
+              v-for="p in pathOptionsForMapping(mapping)"
+              :key="p"
+              :value="p"
+            />
           </datalist>
 
           <datalist
@@ -248,14 +332,27 @@
             <option v-for="col in mappingDbColumns[mi] || []" :key="col" :value="col" />
           </datalist>
 
-          <button class="btn-add-mapping" @click="addMapping">+ Add mapping</button>
+          <div class="mapping-add-row">
+            <button class="btn-add-mapping" @click="addMapping">+ Add mapping</button>
+            <button class="btn-add-mapping" @click="wizardOpen = true">Add mapping (wizard)</button>
+          </div>
         </div>
+
+        <MappingWizard
+          :open="wizardOpen"
+          :elements="elements"
+          :element-attributes="elementAttributes"
+          :db-aliases="dbAliases"
+          :available-paths="availableElementPaths"
+          @close="wizardOpen = false"
+          @finish="onWizardFinish"
+        />
 
         <div class="action-row">
           <button class="btn-primary" :disabled="!canGenerate || generating" @click="generate">
             {{ generating ? 'Generating...' : 'Generate XML' }}
           </button>
-          <button class="btn-secondary" :disabled="!xmlText || filling" @click="fill">
+          <button class="btn-secondary" :disabled="!xmlText || filling || hasMappingBlockers" @click="fill">
             {{ filling ? 'Filling...' : 'Fill Data' }}
           </button>
           <button class="btn-secondary" :disabled="!canValidate || validating" @click="validate">
@@ -323,11 +420,12 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import DtdUpload from '../components/DtdUpload.vue'
 import DtdTreeView from '../components/DtdTreeView.vue'
 import XmlEditor from '../components/XmlEditor.vue'
+import MappingWizard from '../components/MappingWizard.vue'
 import { generateXml } from '../api/generate'
 import { fillXmlStream } from '../api/fill'
 import { validateXml } from '../api/validate'
-import { fetchQueryColumns } from '../api/db'
-import { getConfigAliases, listElements } from '../api/dtd'
+import { fetchQueryColumns, fetchQueryPreview } from '../api/db'
+import { getConfigAliases, listElements, getElementTree } from '../api/dtd'
 import {
   listMappingPresets,
   saveMappingPreset as apiSaveMappingPreset,
@@ -335,6 +433,14 @@ import {
   deleteMappingPreset as apiDeleteMappingPreset,
 } from '../api/mappingPresets'
 import { extractXmlElementPaths } from '../utils/xmlPaths'
+import {
+  suggestFieldMappings,
+  getMappingValidationIssues,
+  lastPathSegment,
+  pathsEndingWithTag,
+  collectDtdElementPaths,
+  applyAutoSuggestToFields,
+} from '../utils/mappingUtils'
 
 const schemaId = ref('')
 const elements = ref([])
@@ -352,10 +458,14 @@ const selectedMappingPresetNames = ref([])
 const mappingPresets = ref([])
 const presetDropdownOpen = ref(false)
 const presetDropdownRef = ref(null)
+const wizardOpen = ref(false)
+const mappingPreview = ref({})
+const dtdElementPaths = ref([])
 
 function createEmptyMapping() {
   return {
     target_element: '',
+    target_path: '',
     query: '',
     fields: [{ db_col: '', xml_attr: '' }],
     db_alias: '',
@@ -398,6 +508,7 @@ function normalizeMappings(mappings, presetSource = null) {
   if (!mappings?.length) return []
   return mappings.map((m) => ({
     target_element: m.target_element || '',
+    target_path: m.target_path || '',
     query: m.query || '',
     fields: m.fields?.length
       ? m.fields.map((f) => ({ db_col: f.db_col || '', xml_attr: f.xml_attr || '' }))
@@ -473,6 +584,137 @@ function onTargetElementInput(mi, event) {
 function onTargetElementChange(mi, event) {
   resetMappingXmlAttrs(mi)
   blurAfterDatalistPick(event)
+}
+
+function onTargetPathInput(mi) {
+  const mapping = sqlMappings.value[mi]
+  const seg = lastPathSegment(mapping.target_path)
+  if (seg) mapping.target_element = seg
+}
+
+function pathOptionsForMapping(mapping) {
+  return pathsEndingWithTag(availableElementPaths.value, mapping.target_element)
+}
+
+const availableElementPaths = computed(() => {
+  const parsed = extractXmlElementPaths(xmlText.value)
+  if (parsed?.elementPaths?.length) return parsed.elementPaths
+  return dtdElementPaths.value
+})
+
+const mappingValidation = computed(() =>
+  sqlMappings.value.map((mapping, mi) =>
+    getMappingValidationIssues(mapping, {
+      elements: elements.value,
+      preview: mappingPreview.value[mi],
+    }),
+  ),
+)
+
+const hasMappingBlockers = computed(() => {
+  if (!isHybridStrategy.value) return false
+  return sqlMappings.value.some((mapping, mi) => {
+    if (!mapping.query?.trim() || !mapping.target_element?.trim()) return false
+    return mappingValidation.value[mi]?.errors?.length > 0
+  })
+})
+
+function formatPreviewValue(val) {
+  if (val === null || val === undefined) return '—'
+  return String(val)
+}
+
+function canAutoMap(mi) {
+  const mapping = sqlMappings.value[mi]
+  const preview = mappingPreview.value[mi]
+  return (
+    preview?.columns?.length
+    && mapping.target_element
+    && attributesForTarget(mapping.target_element).length
+  )
+}
+
+async function testMappingQuery(mi) {
+  const mapping = sqlMappings.value[mi]
+  mappingPreview.value = {
+    ...mappingPreview.value,
+    [mi]: { loading: true, columns: [], row: undefined, error: '' },
+  }
+  try {
+    const data = await fetchQueryPreview(mapping.db_alias, mapping.query.trim())
+    mappingPreview.value = {
+      ...mappingPreview.value,
+      [mi]: {
+        loading: false,
+        columns: data.columns || [],
+        row: data.row ?? null,
+        error: '',
+      },
+    }
+    if (data.columns?.length) {
+      mappingDbColumns.value = { ...mappingDbColumns.value, [mi]: data.columns }
+      sqlMappings.value[mi].fields = applyAutoSuggestToFields(
+        sqlMappings.value[mi].fields,
+        data.columns,
+        attributesForTarget(mapping.target_element),
+      )
+    }
+  } catch (e) {
+    mappingPreview.value = {
+      ...mappingPreview.value,
+      [mi]: {
+        loading: false,
+        columns: [],
+        row: undefined,
+        error: e.message || 'Query failed',
+      },
+    }
+  }
+}
+
+function autoMapFields(mi) {
+  const mapping = sqlMappings.value[mi]
+  const preview = mappingPreview.value[mi]
+  const suggestions = suggestFieldMappings(
+    preview?.columns || mappingDbColumns.value[mi] || [],
+    attributesForTarget(mapping.target_element),
+    mapping.fields.filter((f) => f.xml_attr),
+  )
+  if (suggestions.length) {
+    mapping.fields = suggestions
+  }
+}
+
+function addAllColumns(mi) {
+  const mapping = sqlMappings.value[mi]
+  const columns = mappingPreview.value[mi]?.columns || mappingDbColumns.value[mi] || []
+  const suggestions = suggestFieldMappings(
+    columns,
+    attributesForTarget(mapping.target_element),
+    [],
+  )
+  mapping.fields = suggestions.length ? suggestions : [{ db_col: '', xml_attr: '' }]
+}
+
+function onWizardFinish(mapping) {
+  sqlMappings.value.push(mapping)
+  wizardOpen.value = false
+}
+
+async function refreshDtdElementPaths() {
+  if (!schemaId.value || !rootElement.value) {
+    dtdElementPaths.value = []
+    return
+  }
+  try {
+    const data = await getElementTree(schemaId.value, rootElement.value)
+    dtdElementPaths.value = collectDtdElementPaths(
+      rootElement.value,
+      data.content_model,
+    )
+  } catch {
+    dtdElementPaths.value = []
+  }
 }
 
 const allAttributes = computed(() => {
@@ -722,6 +964,10 @@ watch(isHybridStrategy, (enabled) => {
   if (enabled) refreshMappingPresets()
 })
 
+watch([schemaId, rootElement], () => {
+  refreshDtdElementPaths()
+})
+
 watch(selectedMappingPresetNames, async (newNames, oldNames) => {
   const prev = oldNames || []
   const added = newNames.filter((n) => !prev.includes(n))
@@ -910,6 +1156,7 @@ async function fill() {
         .map((m) => ({
           query: m.query,
           target_element: m.target_element,
+          target_path: m.target_path?.trim() || null,
           fields: Object.fromEntries(
             m.fields.filter((f) => f.db_col && f.xml_attr).map((f) => [f.db_col, f.xml_attr]),
           ),
@@ -1586,5 +1833,113 @@ function stopResize() {
 .btn-add-mapping:hover {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+.mapping-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.path-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.query-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.btn-test-query {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 3px 10px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.btn-test-query:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn-test-query:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mapping-inline-error {
+  font-size: 12px;
+  color: var(--danger);
+  margin: 4px 0 0;
+}
+
+.field-mapping-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.preview-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.preview-badge.ok {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+}
+
+.preview-badge.warn {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+}
+
+.preview-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 4px;
+}
+
+.preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.preview-table th,
+.preview-table td {
+  padding: 3px 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.preview-table th {
+  color: var(--text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.mapping-errors {
+  font-size: 12px;
+  color: var(--danger);
+  margin: 0;
+  padding-left: 18px;
+}
+
+.mapping-warnings {
+  font-size: 12px;
+  color: var(--warning);
+  margin: 0;
+  padding-left: 18px;
 }
 </style>
