@@ -287,8 +287,15 @@
         </ul>
         <p v-if="buildInfo" class="build-info">
           {{ buildInfo.node_count }} nodes
-          <span v-if="buildInfo.warnings?.length"> · {{ buildInfo.warnings.length }} warnings</span>
         </p>
+        <template v-if="buildInfo?.warnings?.length">
+          <p class="build-warnings-heading">
+            {{ buildInfo.warnings.length }} warning{{ buildInfo.warnings.length === 1 ? '' : 's' }}:
+          </p>
+          <ul class="build-warnings">
+            <li v-for="(warning, i) in buildInfo.warnings" :key="i">{{ warning }}</li>
+          </ul>
+        </template>
       </div>
     </div>
 
@@ -1082,6 +1089,23 @@ function stopResize() {
 .build-info {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.build-warnings-heading {
+  font-size: 12px;
+  color: var(--warning);
+  margin-top: 4px;
+}
+
+.build-warnings {
+  font-size: 12px;
+  color: var(--warning);
+  margin-top: 2px;
+  padding-left: 18px;
+}
+
+.build-warnings li {
+  margin-bottom: 4px;
 }
 
 .validation-msg.valid {
