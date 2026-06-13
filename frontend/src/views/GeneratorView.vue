@@ -433,7 +433,7 @@
     <div class="generator-right">
       <XmlEditor
         ref="xmlEditorRef"
-        v-model="xmlText"
+        :model-value="xmlText"
         :filename="`${rootElement || 'generated'}.xml`"
         :validation-errors="validationResult?.valid === false ? validationResult.errors : []"
         @content-change="onEditorContentChange"
@@ -478,6 +478,7 @@ import {
   normalizeFieldName,
 } from '../utils/mappingUtils'
 import { pickPrimarySchema, schemaFileName } from '../utils/dtdSchema'
+import { extractXmlElementPaths } from '../utils/xmlPaths'
 
 const schemaId = ref('')
 const dtdMeta = ref({ fileName: '', elementCount: 0 })
@@ -695,8 +696,13 @@ function pathOptionsForMapping(mapping) {
 
 const availableElementPaths = computed(() => {
   const text = (liveXmlText.value || xmlText.value || '').trim()
-  const parsed = extractXmlElementPaths(text)
-  if (parsed?.elementPaths?.length) return parsed.elementPaths
+  if (!text) return dtdElementPaths.value
+  try {
+    const parsed = extractXmlElementPaths(text)
+    if (parsed?.elementPaths?.length) return parsed.elementPaths
+  } catch {
+    // malformed or partial XML in editor
+  }
   return dtdElementPaths.value
 })
 
@@ -989,22 +995,32 @@ function getEditorXmlText() {
   return xmlEditorRef.value?.getValue?.() ?? xmlText.value
 }
 
+async function setProgrammaticXml(text) {
+  clearTimeout(xmlSyncTimer)
+  xmlSyncTimer = null
+  ignoreNextXmlWatch = true
+  const xml = text || ''
+  liveXmlText.value = xml
+  xmlText.value = xml
+  await nextTick()
+  xmlEditorRef.value?.setValue?.(xml)
+  ignoreNextXmlWatch = false
+}
+
 function scheduleXmlSync(text, delay = 150) {
-  if (!schemaId.value) return
+  if (!schemaId.value || generating.value || filling.value || ignoreNextXmlWatch) return
   clearTimeout(xmlSyncTimer)
   const snapshot = text ?? getEditorXmlText()
   xmlSyncTimer = setTimeout(() => {
+    if (generating.value || filling.value || ignoreNextXmlWatch) return
     syncFromPastedXml(snapshot || getEditorXmlText())
   }, delay)
 }
 
 function onEditorContentChange(text) {
+  if (ignoreNextXmlWatch || generating.value || filling.value) return
   liveXmlText.value = text || ''
-  if (ignoreNextXmlWatch) {
-    ignoreNextXmlWatch = false
-    clearTimeout(xmlSyncTimer)
-    return
-  }
+  xmlText.value = text || ''
   scheduleXmlSync(text)
 }
 
@@ -1018,6 +1034,7 @@ async function waitForDtdTreeRef(maxAttempts = 5) {
 
 let ignoreNextXmlWatch = false
 let skipModeSync = false
+let generateRequestSeq = 0
 let xmlSyncTimer = null
 let columnsFetchTimer = null
 let fillElapsedTimer = null
@@ -1181,16 +1198,12 @@ async function onDtdUploaded(result) {
   await nextTick()
   const editorXml = getEditorXmlText()?.trim()
   if (editorXml) {
-    if (xmlText.value !== editorXml) {
-      ignoreNextXmlWatch = true
-      xmlText.value = editorXml
-    }
+    await setProgrammaticXml(editorXml)
     await syncFromPastedXml(editorXml)
     return
   }
 
-  ignoreNextXmlWatch = true
-  xmlText.value = ''
+  await setProgrammaticXml('')
 }
 
 async function applyXmlPathsFromEditor(text) {
@@ -1200,30 +1213,34 @@ async function applyXmlPathsFromEditor(text) {
     return
   }
 
-  const parsed = extractXmlElementPaths(trimmed)
-  if (!parsed) return
+  try {
+    const parsed = extractXmlElementPaths(trimmed)
+    if (!parsed) return
 
-  const { rootTag, elementPaths } = parsed
+    const { rootTag, elementPaths } = parsed
 
-  if (!rootTag) {
-    xmlSyncHint.value = 'XML has no root element — select a root element manually.'
-    return
-  }
+    if (!rootTag) {
+      xmlSyncHint.value = 'XML has no root element — select a root element manually.'
+      return
+    }
 
-  if (!elements.value.includes(rootTag)) {
-    xmlSyncHint.value = `Root element "${rootTag}" is not defined in the DTD schema.`
-    return
-  }
+    if (!elements.value.includes(rootTag)) {
+      xmlSyncHint.value = `Root element "${rootTag}" is not defined in the DTD schema.`
+      return
+    }
 
-  xmlSyncHint.value = ''
-  if (rootTag && rootElement.value !== rootTag) {
-    rootElement.value = rootTag
+    xmlSyncHint.value = ''
+    if (rootTag && rootElement.value !== rootTag) {
+      rootElement.value = rootTag
+      await nextTick()
+    }
+    await waitForDtdTreeRef()
+    await dtdTreeRef.value?.applyXmlElementPaths(elementPaths)
     await nextTick()
+    await dtdTreeRef.value?.applyXmlElementPaths(elementPaths)
+  } catch (e) {
+    xmlSyncHint.value = e.message || 'Failed to parse XML paths'
   }
-  await waitForDtdTreeRef()
-  await dtdTreeRef.value?.applyXmlElementPaths(elementPaths)
-  await nextTick()
-  await dtdTreeRef.value?.applyXmlElementPaths(elementPaths)
 }
 
 async function syncFromPastedXml(text) {
@@ -1233,33 +1250,40 @@ async function syncFromPastedXml(text) {
     return
   }
 
-  const parsed = extractXmlElementPaths(trimmed)
-  if (!parsed) return
+  try {
+    const parsed = extractXmlElementPaths(trimmed)
+    if (!parsed) return
 
-  const { rootTag } = parsed
+    const { rootTag } = parsed
 
-  if (!rootTag) {
-    xmlSyncHint.value = 'XML has no root element — select a root element manually.'
-    return
+    if (!rootTag) {
+      xmlSyncHint.value = 'XML has no root element — select a root element manually.'
+      return
+    }
+
+    if (!elements.value.includes(rootTag)) {
+      xmlSyncHint.value = `Root element "${rootTag}" is not defined in the DTD schema.`
+      return
+    }
+
+    xmlSyncHint.value = ''
+    skipModeSync = true
+    mode.value = 'custom'
+    await nextTick()
+    skipModeSync = false
+    await waitForDtdTreeRef()
+    await applyXmlPathsFromEditor(text)
+  } catch (e) {
+    xmlSyncHint.value = e.message || 'Failed to sync XML from editor'
   }
-
-  if (!elements.value.includes(rootTag)) {
-    xmlSyncHint.value = `Root element "${rootTag}" is not defined in the DTD schema.`
-    return
-  }
-
-  xmlSyncHint.value = ''
-  skipModeSync = true
-  mode.value = 'custom'
-  await nextTick()
-  skipModeSync = false
-  await waitForDtdTreeRef()
-  await applyXmlPathsFromEditor(text)
 }
 
 async function generate() {
+  const requestSeq = ++generateRequestSeq
   generating.value = true
   error.value = ''
+  clearTimeout(xmlSyncTimer)
+  xmlSyncTimer = null
   try {
     const config = {
       schema_id: schemaId.value,
@@ -1269,15 +1293,14 @@ async function generate() {
       custom_paths: mode.value === 'custom' ? customPaths.value : [],
     }
     const result = await generateXml(config)
-    ignoreNextXmlWatch = true
-    xmlText.value = result.xml_text
-    liveXmlText.value = result.xml_text
+    if (requestSeq !== generateRequestSeq) return
+    await setProgrammaticXml(result.xml_text)
     buildInfo.value = result
     validationResult.value = null
   } catch (e) {
-    error.value = e.message
+    if (requestSeq === generateRequestSeq) error.value = e.message
   } finally {
-    generating.value = false
+    if (requestSeq === generateRequestSeq) generating.value = false
   }
 }
 
@@ -1311,8 +1334,7 @@ async function fill() {
       if (message) fillStatusMessage.value = message
       if (typeof percent === 'number') fillPercent.value = percent
     })
-    ignoreNextXmlWatch = true
-    xmlText.value = result.xml_text
+    await setProgrammaticXml(result.xml_text)
     filled = true
   } catch (e) {
     error.value = e.message

@@ -24,7 +24,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import loader from '@monaco-editor/loader'
 import { registerXmlFormatter } from '../utils/formatXml'
 
@@ -34,24 +34,32 @@ const props = defineProps({
   validationErrors: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['update:modelValue', 'content-change'])
+const emit = defineEmits(['content-change'])
 
 const editorContainer = ref(null)
 const copied = ref(false)
 let editor = null
 let monaco = null
-let ignoreEditorSync = false
+let suppressEditorEvent = false
 let pasteFlushTimer = null
 
-function notifyContentChange() {
+function applyModelValue(val) {
   if (!editor) return
-  const value = editor.getValue()
-  ignoreEditorSync = true
-  emit('update:modelValue', value)
-  emit('content-change', value)
-  nextTick(() => {
-    ignoreEditorSync = false
-  })
+  const next = val || ''
+  if (editor.getValue() === next) return
+  suppressEditorEvent = true
+  editor.setValue(next)
+  suppressEditorEvent = false
+  editor.layout()
+}
+
+function notifyContentChange() {
+  if (suppressEditorEvent || !editor) return
+  emit('content-change', editor.getValue())
+}
+
+function setValue(val) {
+  applyModelValue(val || '')
 }
 
 function schedulePasteFlush() {
@@ -77,18 +85,10 @@ onMounted(async () => {
 
   editor.onDidChangeModelContent(notifyContentChange)
   editor.onDidPaste(schedulePasteFlush)
+  applyModelValue(props.modelValue)
 })
 
-watch(
-  () => props.modelValue,
-  (val) => {
-    if (ignoreEditorSync || !editor) return
-    const current = editor.getValue()
-    if (current !== val) {
-      editor.setValue(val || '')
-    }
-  },
-)
+watch(() => props.modelValue, applyModelValue)
 
 watch(
   () => props.validationErrors,
@@ -153,7 +153,7 @@ function getValue() {
   return editor?.getValue() ?? props.modelValue ?? ''
 }
 
-defineExpose({ goToPosition, getValue })
+defineExpose({ goToPosition, getValue, setValue })
 </script>
 
 <style scoped>
