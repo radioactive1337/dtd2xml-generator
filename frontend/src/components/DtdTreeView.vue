@@ -289,7 +289,7 @@ function buildNodeFromModel(name, model, path, depth, required, elementPath = nu
     _isChoiceGroup: model.kind === 'CHOICE',
   }
 
-  if (nodeRequired) checkedPaths.value.add(path)
+  if (nodeRequired && path === props.rootElement) checkedPaths.value.add(path)
 
   if (model.kind === 'REF') {
     if (name === model.ref) {
@@ -419,6 +419,23 @@ function collectDescendantPaths(node) {
   return paths
 }
 
+function removePathAndDescendants(path) {
+  checkedPaths.value.delete(path)
+  const normalizedPrefix = normalizeTreePath(path)
+  for (const p of [...checkedPaths.value]) {
+    const normalized = normalizeTreePath(p)
+    if (normalized !== normalizedPrefix && normalized.startsWith(`${normalizedPrefix}.`)) {
+      checkedPaths.value.delete(p)
+    }
+  }
+  const node = findNodeByPath(path)
+  if (node) {
+    for (const childPath of collectDescendantPaths(node)) {
+      checkedPaths.value.delete(childPath)
+    }
+  }
+}
+
 function skipGroupLabelParent(node) {
   let parent = findParentNode(node.path)
   while (parent?.isGroupLabel) {
@@ -431,26 +448,69 @@ function pruneOrphanPaths() {
   if (!treeRoot.value) return
   for (const path of [...checkedPaths.value]) {
     const node = findNodeByPath(path)
-    if (!node || node.required) continue
-    let current = node
-    while (true) {
-      const parent = skipGroupLabelParent(current)
-      if (!parent) break
-      if (!parent.required && !checkedPaths.value.has(parent.path)) {
-        checkedPaths.value.delete(path)
-        break
-      }
-      current = parent
+    if (!node || !isInActiveBranch(node)) {
+      checkedPaths.value.delete(path)
     }
+  }
+}
+
+function findChoiceGroupAncestor(node) {
+  let current = node
+  while (current) {
+    const parent = skipGroupLabelParent(current)
+    if (!parent) break
+    if (parent._isChoiceGroup) return parent
+    current = parent
+  }
+  return null
+}
+
+function findChoiceAlternative(choiceGroup, node) {
+  const nodeNorm = normalizeTreePath(node.path)
+  for (const alt of choiceGroup.children || []) {
+    const altNorm = normalizeTreePath(alt.path)
+    if (nodeNorm === altNorm || nodeNorm.startsWith(`${altNorm}.`)) {
+      return alt
+    }
+  }
+  return null
+}
+
+function isChoiceAlternativeSelected(choiceGroup, alt) {
+  const altNorm = normalizeTreePath(alt.path)
+  return [...checkedPaths.value].some((p) => {
+    const pNorm = normalizeTreePath(p)
+    return pNorm === altNorm || pNorm.startsWith(`${altNorm}.`)
+  })
+}
+
+/** Required nodes apply only when every ancestor branch is selected (incl. CHOICE alt). */
+function isInActiveBranch(node) {
+  if (!node) return false
+  let current = node
+  while (true) {
+    const parent = skipGroupLabelParent(current)
+    if (!parent) return true
+
+    if (parent._isChoiceGroup) {
+      const alt = findChoiceAlternative(parent, current)
+      if (alt && !isChoiceAlternativeSelected(parent, alt)) return false
+    }
+
+    if (!parent.required && !checkedPaths.value.has(parent.path)) {
+      return false
+    }
+
+    current = parent
   }
 }
 
 function enforceChoiceExclusivity(node = treeRoot.value) {
   if (!node) return
   if (node._isChoiceGroup) {
-    const selected = (node.children || []).filter((c) => checkedPaths.value.has(c.path))
+    const selected = (node.children || []).filter((c) => isChoiceAlternativeSelected(node, c))
     for (let i = 1; i < selected.length; i++) {
-      checkedPaths.value.delete(selected[i].path)
+      removePathAndDescendants(selected[i].path)
     }
   }
   for (const child of node.children || []) enforceChoiceExclusivity(child)
@@ -461,7 +521,13 @@ function syncCheckedFromPaths(node = treeRoot.value) {
   pruneOrphanPaths()
   enforceChoiceExclusivity()
   walkTree(node, (n) => {
-    n.checked = n.required || checkedPaths.value.has(n.path)
+    const active = isInActiveBranch(n)
+    if (active && n.required) {
+      checkedPaths.value.add(n.path)
+    } else if (!active) {
+      checkedPaths.value.delete(n.path)
+    }
+    n.checked = active && (n.required || checkedPaths.value.has(n.path))
   })
 }
 
@@ -527,25 +593,19 @@ function toggleCheck(path) {
   if (!node || node.required) return
 
   if (checkedPaths.value.has(node.path)) {
-    checkedPaths.value.delete(node.path)
-    for (const childPath of collectDescendantPaths(node)) {
-      checkedPaths.value.delete(childPath)
-    }
+    removePathAndDescendants(node.path)
   } else {
     checkedPaths.value.add(node.path)
     ensureAncestorPaths(path)
     if (node.isGroupLabel) {
       selectFirstGroupMember(node)
     }
-    const parent = findParentNode(path)
-    if (parent?._isChoiceGroup) {
-      for (const sibling of parent.children) {
-        if (sibling.path !== node.path) {
-          checkedPaths.value.delete(sibling.path)
-          for (const childPath of collectDescendantPaths(sibling)) {
-            checkedPaths.value.delete(childPath)
-          }
-        }
+    const choiceGroup = findChoiceGroupAncestor(node)
+    if (choiceGroup) {
+      const selectedAlt = findChoiceAlternative(choiceGroup, node)
+      for (const sibling of choiceGroup.children) {
+        if (selectedAlt && sibling.path === selectedAlt.path) continue
+        removePathAndDescendants(sibling.path)
       }
     }
   }
@@ -654,10 +714,6 @@ async function applyElementPathsToTree(elementPaths, seq = loadSeq) {
     if (isStale(seq)) return
 
     const nextChecked = new Set()
-    walkTree(treeRoot.value, (node) => {
-      if (node.required) nextChecked.add(node.path)
-    })
-
     walkTree(treeRoot.value, (node) => {
       if (node.isGroupLabel) return
 
@@ -817,6 +873,15 @@ defineExpose({ applyXmlElementPaths, revealElement })
 </script>
 
 <style scoped>
+.tree-view {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
 .tree-header {
   display: flex;
   align-items: center;
@@ -836,13 +901,26 @@ defineExpose({ applyXmlElementPaths, revealElement })
 .preset-select { width: 150px; }
 
 .scroller-wrap {
-  height: 360px;
+  flex: 1 1 auto;
+  min-height: 360px;
+  min-width: 0;
   position: relative;
 }
 
 .scroller {
   height: 100%;
-  overflow: auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.scroller :deep(.vue-recycle-scroller__item-wrapper) {
+  overflow: hidden;
+}
+
+.scroller :deep(.vue-recycle-scroller__item-view) {
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .scroller-hint {
@@ -874,6 +952,10 @@ defineExpose({ applyXmlElementPaths, revealElement })
   display: flex;
   align-items: center;
   gap: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   height: 32px;
   font-size: 13px;
   border-bottom: 1px solid var(--border);

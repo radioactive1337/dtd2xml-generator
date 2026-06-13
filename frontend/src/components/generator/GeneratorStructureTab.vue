@@ -114,7 +114,9 @@ defineExpose({ dtdTreeRef })
 
 .structure-tab {
   min-height: 0;
+  min-width: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 .field {
@@ -150,21 +152,26 @@ defineExpose({ dtdTreeRef })
 .structure-tree-host {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
 .structure-tree-host :deep(.tree-view) {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .structure-tree-host :deep(.scroller-wrap) {
-  flex: 1;
-  min-height: min(360px, 50vh);
-  height: auto;
+  flex: 1 1 0;
+  min-height: 0;
+  height: 0;
+  min-width: 0;
 }
 </style>
