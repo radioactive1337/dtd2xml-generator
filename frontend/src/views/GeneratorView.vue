@@ -312,6 +312,7 @@
         v-model="xmlText"
         :filename="`${rootElement || 'generated'}.xml`"
         :validation-errors="validationResult?.valid === false ? validationResult.errors : []"
+        @content-change="onEditorContentChange"
       />
     </div>
   </div>
@@ -625,7 +626,37 @@ function goToValidationError(err) {
   xmlEditorRef.value?.goToPosition(err.line, err.column)
 }
 
-let skipXmlSync = false
+function getEditorXmlText() {
+  return xmlEditorRef.value?.getValue?.() ?? xmlText.value
+}
+
+function scheduleXmlSync(text, delay = 150) {
+  if (!schemaId.value) return
+  clearTimeout(xmlSyncTimer)
+  const snapshot = text ?? getEditorXmlText()
+  xmlSyncTimer = setTimeout(() => {
+    syncFromPastedXml(snapshot || getEditorXmlText())
+  }, delay)
+}
+
+function onEditorContentChange(text) {
+  if (ignoreNextXmlWatch) {
+    ignoreNextXmlWatch = false
+    clearTimeout(xmlSyncTimer)
+    return
+  }
+  scheduleXmlSync(text)
+}
+
+async function waitForDtdTreeRef(maxAttempts = 5) {
+  for (let i = 0; i < maxAttempts; i += 1) {
+    if (dtdTreeRef.value) return dtdTreeRef.value
+    await nextTick()
+  }
+  return dtdTreeRef.value
+}
+
+let ignoreNextXmlWatch = false
 let skipModeSync = false
 let xmlSyncTimer = null
 let columnsFetchTimer = null
@@ -667,26 +698,13 @@ const dtdCollapsed = ref(false)
 watch(mode, async (val, oldVal) => {
   if (val === 'custom') {
     dtdCollapsed.value = true
-    if (!skipModeSync && oldVal !== 'custom' && xmlText.value?.trim()) {
+    if (!skipModeSync && oldVal !== 'custom' && getEditorXmlText()?.trim()) {
       await nextTick()
-      await applyXmlPathsFromEditor(xmlText.value)
+      await applyXmlPathsFromEditor(getEditorXmlText())
     }
   } else {
     dtdCollapsed.value = false
   }
-})
-
-watch(xmlText, (text) => {
-  if (skipXmlSync) {
-    skipXmlSync = false
-    return
-  }
-  if (!schemaId.value) return
-
-  clearTimeout(xmlSyncTimer)
-  xmlSyncTimer = setTimeout(() => {
-    syncFromPastedXml(text)
-  }, 400)
 })
 
 watch(
@@ -766,12 +784,24 @@ async function onDtdUploaded(result) {
   } catch {
     elementAttributes.value = {}
   }
-  skipXmlSync = true
-  xmlText.value = ''
   buildInfo.value = null
   validationResult.value = null
   error.value = ''
   xmlSyncHint.value = ''
+
+  await nextTick()
+  const editorXml = getEditorXmlText()?.trim()
+  if (editorXml) {
+    if (xmlText.value !== editorXml) {
+      ignoreNextXmlWatch = true
+      xmlText.value = editorXml
+    }
+    await syncFromPastedXml(editorXml)
+    return
+  }
+
+  ignoreNextXmlWatch = true
+  xmlText.value = ''
 }
 
 async function applyXmlPathsFromEditor(text) {
@@ -797,6 +827,13 @@ async function applyXmlPathsFromEditor(text) {
   }
 
   xmlSyncHint.value = ''
+  if (rootTag && rootElement.value !== rootTag) {
+    rootElement.value = rootTag
+    await nextTick()
+  }
+  await waitForDtdTreeRef()
+  await dtdTreeRef.value?.applyXmlElementPaths(elementPaths)
+  await nextTick()
   await dtdTreeRef.value?.applyXmlElementPaths(elementPaths)
 }
 
@@ -827,6 +864,7 @@ async function syncFromPastedXml(text) {
   mode.value = 'custom'
   await nextTick()
   skipModeSync = false
+  await waitForDtdTreeRef()
   await applyXmlPathsFromEditor(text)
 }
 
@@ -842,7 +880,7 @@ async function generate() {
       custom_paths: mode.value === 'custom' ? customPaths.value : [],
     }
     const result = await generateXml(config)
-    skipXmlSync = true
+    ignoreNextXmlWatch = true
     xmlText.value = result.xml_text
     buildInfo.value = result
     validationResult.value = null
@@ -882,7 +920,7 @@ async function fill() {
       if (message) fillStatusMessage.value = message
       if (typeof percent === 'number') fillPercent.value = percent
     })
-    skipXmlSync = true
+    ignoreNextXmlWatch = true
     xmlText.value = result.xml_text
     filled = true
   } catch (e) {

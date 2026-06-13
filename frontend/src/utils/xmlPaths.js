@@ -1,19 +1,24 @@
+import { formatXml } from './formatXml'
+
 function localTagName(el) {
   const raw = el.localName || el.tagName || ''
   return raw.replace(/^[^:]+:/, '')
 }
 
-/**
- * Parse XML text and return the document root tag plus dot-separated element paths.
- * Returns null when the text is empty or not well-formed XML.
- */
-export function extractXmlElementPaths(xmlText) {
-  const trimmed = xmlText?.trim()
+function normalizeXmlInput(xmlText) {
+  return xmlText?.trim()?.replace(/^\uFEFF/, '') ?? ''
+}
+
+function parseXmlDocument(xmlText) {
+  const trimmed = normalizeXmlInput(xmlText)
   if (!trimmed) return null
 
   const doc = new DOMParser().parseFromString(trimmed, 'application/xml')
   if (doc.querySelector('parsererror')) return null
+  return doc
+}
 
+function collectElementPaths(doc) {
   const root = doc.documentElement
   if (!root) return { rootTag: '', elementPaths: [] }
 
@@ -32,6 +37,23 @@ export function extractXmlElementPaths(xmlText) {
 
   walk(root, '')
   return { rootTag, elementPaths }
+}
+
+/**
+ * Parse XML text and return the document root tag plus dot-separated element paths.
+ * Returns null when the text is empty or not well-formed XML.
+ */
+export function extractXmlElementPaths(xmlText) {
+  const trimmed = normalizeXmlInput(xmlText)
+  if (!trimmed) return null
+
+  let doc = parseXmlDocument(trimmed)
+  if (!doc) {
+    doc = parseXmlDocument(formatXml(trimmed))
+  }
+  if (!doc) return null
+
+  return collectElementPaths(doc)
 }
 
 /** Strip UI-only group-N segments so tree paths match element paths. */
