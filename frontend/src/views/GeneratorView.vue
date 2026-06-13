@@ -1160,7 +1160,6 @@ onMounted(async () => {
   } catch {
     dbAliases.value = []
   }
-  await refreshMappingPresets()
 })
 
 onBeforeUnmount(() => {
@@ -1182,7 +1181,7 @@ async function onDtdUploaded(result) {
   rootElement.value = ''
   selectedMappingPresetNames.value = []
   sqlMappings.value = []
-  await refreshMappingPresets()
+  if (isHybridStrategy.value) await refreshMappingPresets()
   try {
     const summaries = await listElements(result.schema_id)
     elementAttributes.value = Object.fromEntries(summaries.map((s) => [s.name, s.attributes]))
