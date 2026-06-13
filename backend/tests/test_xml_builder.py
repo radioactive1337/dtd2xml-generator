@@ -93,6 +93,20 @@ def test_custom_build(schema):
     assert len(header.findall("Meta")) >= 1
 
 
+def test_custom_build_repeat_count(schema):
+    config = BuildConfig(
+        root_element="PayDoc",
+        mode="custom",
+        repeat_count=3,
+        custom_paths={"PayDoc.Header.Meta"},
+    )
+    result = build_xml(schema, config)
+    header = etree.fromstring(result.xml_text.encode("utf-8")).find("Header")
+
+    assert header is not None
+    assert len(header.findall("Meta")) == 3
+
+
 def test_pcdata_element(schema):
     config = BuildConfig(root_element="Title", mode="minimal")
     result = build_xml(schema, config)

@@ -50,7 +50,7 @@
           </div>
         </div>
 
-        <div v-if="mode === 'maximal'" class="field">
+        <div v-if="mode === 'maximal' || mode === 'custom'" class="field">
           <label>Repeat Count (+ / *)</label>
           <input v-model.number="repeatCount" type="number" min="1" max="100" />
         </div>

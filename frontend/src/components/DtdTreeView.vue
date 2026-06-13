@@ -555,6 +555,7 @@ async function savePreset() {
   })
   await refreshPresets()
   loadPresetName.value = presetName.value
+  presetName.value = ''
 }
 
 function inferRootFromPaths(paths) {
