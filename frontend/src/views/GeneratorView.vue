@@ -21,257 +21,116 @@
         </div>
       </div>
 
-      <div v-if="schemaId" class="card controls">
-        <div class="panel-title">Generation</div>
-
-        <div class="field">
-          <label>Root Element</label>
-          <input
-            v-model="rootElement"
-            :list="datalistListFor('root', 'root-elements-list')"
-            placeholder="Element name (type or pick from list)"
-            @focus="openDatalist('root')"
-            @blur="scheduleCloseDatalist('root')"
-            @change="onRootElementChange"
-            @keydown.enter="onDatalistEnter($event, 'root')"
+      <nav
+        v-if="schemaId"
+        class="left-tabs-bar"
+        role="tablist"
+        aria-label="Generation panels"
+      >
+        <button
+          v-for="tab in leftTabs"
+          :id="`left-tab-${tab.id}`"
+          :key="tab.id"
+          type="button"
+          role="tab"
+          class="left-tab-btn"
+          :class="{ active: activeTab === tab.id }"
+          :aria-selected="activeTab === tab.id"
+          :tabindex="activeTab === tab.id ? 0 : -1"
+          @click="activeTab = tab.id"
+          @keydown="onTabKeydown($event, tab.id)"
+        >
+          {{ tab.label }}
+          <span
+            v-if="tab.id === 'data' && showDataBadge"
+            class="left-tab-badge left-tab-badge--warn"
+            aria-label="Needs attention"
           />
-          <datalist id="root-elements-list">
-            <option v-for="el in elements" :key="el" :value="el" />
-          </datalist>
+          <span
+            v-if="tab.id === 'results' && resultsTabBadge"
+            class="left-tab-badge"
+            :class="`left-tab-badge--${resultsTabBadge}`"
+            :aria-label="resultsTabBadgeLabel"
+          />
+        </button>
+      </nav>
+
+      <div v-if="schemaId" class="card controls left-panel-body">
+        <div
+          class="left-tab-content"
+          role="tabpanel"
+          :aria-labelledby="`left-tab-${activeTab}`"
+        >
+          <GeneratorStructureTab
+            v-show="activeTab === 'structure'"
+            ref="structureTabRef"
+            :schema-id="schemaId"
+            :elements="elements"
+            v-model:root-element="rootElement"
+            v-model:mode="mode"
+            v-model:repeat-count="repeatCount"
+            v-model:custom-paths="customPaths"
+          />
+
+          <GeneratorDataTab
+            v-show="activeTab === 'data'"
+            v-model:fill-strategy="fillStrategy"
+            v-model:auto-validate-after-fill="autoValidateAfterFill"
+            v-model:mapping-preset-name="mappingPresetName"
+            v-model:selected-mapping-preset-names="selectedMappingPresetNames"
+            :is-hybrid-strategy="isHybridStrategy"
+            :mapping-presets="mappingPresets"
+            :preset-dropdown-label="presetDropdownLabel"
+            :sql-mappings="sqlMappings"
+            :mapping-preview="mappingPreview"
+            :mapping-validation="mappingValidation"
+            @save-mapping-preset="saveMappingPreset"
+            @open-mapping-wizard="openMappingWizard"
+            @remove-mapping="removeMapping"
+            @delete-mapping-preset="deleteMappingPreset"
+            @remove-selected-preset="removeSelectedPreset"
+          />
+
+          <GeneratorResultsTab
+            v-show="activeTab === 'results'"
+            :validation-result="validationResult"
+            :build-info="buildInfo"
+            :xml-sync-hint="xmlSyncHint"
+            @go-to-error="goToValidationError"
+          />
         </div>
 
-        <div class="field">
-          <label>Build Mode</label>
-          <div class="mode-group">
-            <label v-for="m in modes" :key="m.value" class="mode-label">
-              <input type="radio" v-model="mode" :value="m.value" />
-              {{ m.label }}
-            </label>
-          </div>
-        </div>
-
-        <div v-if="mode === 'maximal' || mode === 'custom'" class="field">
-          <label>Repeat Count (+ / *)</label>
-          <input v-model.number="repeatCount" type="number" min="1" max="100" />
-        </div>
-
-        <DtdTreeView
-          v-if="mode === 'custom'"
-          ref="dtdTreeRef"
-          :schema-id="schemaId"
-          :root-element="rootElement"
-          @update:paths="customPaths = $event"
-          @update:root-element="rootElement = $event"
+        <GeneratorActionFooter
+          :can-generate="canGenerate"
+          :generating="generating"
+          :xml-text="xmlText"
+          :filling="filling"
+          :has-mapping-blockers="hasMappingBlockers"
+          :can-validate="canValidate"
+          :validating="validating"
+          :fill-status-message="fillStatusMessage"
+          :fill-percent="fillPercent"
+          :fill-elapsed-label="fillElapsedLabel"
+          :validation-result="validationResult"
+          :error="error"
+          @generate="generate"
+          @fill="fill"
+          @validate="validate"
         />
-
-        <div class="field">
-          <label>Fill Strategy</label>
-          <select v-model="fillStrategy">
-            <option value="faker">Smart Faker (Fast &amp; Local)</option>
-            <option value="ai">AI / LLM (Smart Context)</option>
-            <option value="hybrid_db_faker">Hybrid: Database + Smart Faker</option>
-            <option value="hybrid_db_ai">Hybrid: Database + AI</option>
-          </select>
-        </div>
-
-        <label class="auto-validate-label">
-          <input v-model="autoValidateAfterFill" type="checkbox" />
-          Auto-validate after Fill
-        </label>
-
-        <div v-if="isHybridStrategy" class="db-overrides-panel">
-          <div class="overrides-header">
-            <div class="overrides-header-top">
-              <span class="overrides-title">Database Overrides</span>
-              <div class="mapping-preset-actions">
-                <input
-                  v-model="mappingPresetName"
-                  placeholder="Preset name"
-                  class="preset-input"
-                />
-                <button
-                  class="btn-secondary"
-                  :disabled="!mappingPresetName"
-                  @click="saveMappingPreset"
-                >
-                  Save
-                </button>
-                <div ref="presetDropdownRef" class="preset-dropdown">
-                  <button
-                    type="button"
-                    class="preset-dropdown-trigger"
-                    @click.stop="presetDropdownOpen = !presetDropdownOpen"
-                  >
-                    {{ presetDropdownLabel }}
-                    <span class="preset-dropdown-chevron" :class="{ open: presetDropdownOpen }">▾</span>
-                  </button>
-                  <div v-if="presetDropdownOpen" class="preset-dropdown-menu" @click.stop>
-                    <p v-if="!mappingPresets.length" class="preset-dropdown-empty">
-                      No saved presets
-                    </p>
-                    <label
-                      v-for="p in mappingPresets"
-                      :key="p.name"
-                      class="preset-dropdown-item"
-                    >
-                      <input
-                        v-model="selectedMappingPresetNames"
-                        type="checkbox"
-                        :value="p.name"
-                      />
-                      <span class="preset-dropdown-item-label">
-                        <span class="preset-dropdown-item-name">{{ p.name }}</span>
-                        <span class="preset-meta">
-                          {{ p.mapping_count }} mapping{{ p.mapping_count === 1 ? '' : 's' }}
-                        </span>
-                      </span>
-                      <button
-                        class="btn-icon-remove"
-                        title="Delete preset"
-                        @click.prevent="deleteMappingPreset(p.name)"
-                      >
-                        ×
-                      </button>
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div v-if="selectedMappingPresetNames.length" class="selected-presets-chips">
-              <span
-                v-for="name in selectedMappingPresetNames"
-                :key="name"
-                class="preset-chip"
-              >
-                {{ name }}
-                <button
-                  class="preset-chip-remove"
-                  title="Remove preset"
-                  @click="removeSelectedPreset(name)"
-                >
-                  ×
-                </button>
-              </span>
-            </div>
-            <span class="overrides-hint">Stage 1 — DB values fill first, Faker/AI fills the rest</span>
-          </div>
-
-          <div v-for="(mapping, mi) in sqlMappings" :key="mi" class="mapping-card">
-            <div class="mapping-header">
-              <div class="mapping-header-left">
-                <span class="mapping-title">Mapping {{ mi + 1 }}</span>
-                <span v-if="mapping._presetSource" class="mapping-preset-badge">{{ mapping._presetSource }}</span>
-                <span
-                  v-if="mappingPreview[mi] && !mappingPreview[mi].loading && mappingPreview[mi].columns?.length"
-                  class="preview-badge"
-                  :class="mappingPreview[mi].row === null ? 'warn' : 'ok'"
-                >
-                  {{ mappingPreview[mi].row === null ? '0 rows' : 'OK' }}
-                </span>
-              </div>
-              <div class="mapping-header-right">
-                <button class="btn-mapping-edit" @click="openMappingWizard(mi)">Edit</button>
-                <button class="btn-icon-remove" @click="removeMapping(mi)" title="Remove mapping">×</button>
-              </div>
-            </div>
-
-            <dl class="mapping-summary">
-              <dt>DB Alias</dt>
-              <dd>{{ mapping.db_alias || '—' }}</dd>
-              <dt>Target Element</dt>
-              <dd>{{ mapping.target_element || '—' }}</dd>
-              <dt>Target Path</dt>
-              <dd>{{ mapping.target_path || '(all matching tags)' }}</dd>
-              <dt>SQL Query</dt>
-              <dd class="mapping-summary-query">{{ mapping.query || '—' }}</dd>
-              <dt>Fields</dt>
-              <dd>
-                <ul v-if="filledMappingFields(mapping).length" class="mapping-summary-fields">
-                  <li v-for="f in filledMappingFields(mapping)" :key="f.db_col + f.xml_attr">
-                    {{ f.db_col }} → {{ f.xml_attr }}
-                  </li>
-                </ul>
-                <span v-else>—</span>
-              </dd>
-            </dl>
-
-            <ul v-if="mappingValidation[mi]?.errors?.length" class="mapping-errors">
-              <li v-for="(err, i) in mappingValidation[mi].errors" :key="'e' + i">{{ err }}</li>
-            </ul>
-            <ul v-if="mappingValidation[mi]?.warnings?.length" class="mapping-warnings">
-              <li v-for="(w, i) in mappingValidation[mi].warnings" :key="'w' + i">{{ w }}</li>
-            </ul>
-          </div>
-
-          <div class="mapping-add-row">
-            <button class="btn-add-mapping" @click="openMappingWizard()">+ Add mapping</button>
-          </div>
-        </div>
-
-        <MappingWizard
-          :open="wizardOpen"
-          :initial-mapping="wizardInitialMapping"
-          :schema-id="schemaId"
-          :xml-text="liveXmlText || xmlText"
-          :elements="elements"
-          :element-attributes="elementAttributes"
-          :db-aliases="dbAliases"
-          :available-paths="availableElementPaths"
-          @close="onWizardClose"
-          @finish="onWizardFinish"
-        />
-
-        <div class="action-row">
-          <button class="btn-primary" :disabled="!canGenerate || generating" @click="generate">
-            {{ generating ? 'Generating...' : 'Generate XML' }}
-          </button>
-          <button class="btn-secondary" :disabled="!xmlText || filling || hasMappingBlockers" @click="fill">
-            {{ filling ? 'Filling...' : 'Fill Data' }}
-          </button>
-          <button class="btn-secondary" :disabled="!canValidate || validating" @click="validate">
-            {{ validating ? 'Validating...' : 'Validate DTD' }}
-          </button>
-        </div>
-
-        <div v-if="filling" class="fill-progress" role="status" aria-live="polite">
-          <div class="fill-progress-header">
-            <span class="fill-spinner" aria-hidden="true" />
-            <span class="fill-status">{{ fillStatusMessage }}</span>
-            <span class="fill-elapsed">{{ fillElapsedLabel }}</span>
-          </div>
-          <div class="fill-progress-bar" aria-hidden="true">
-            <div class="fill-progress-fill" :style="{ width: fillPercent + '%' }" />
-          </div>
-        </div>
-
-        <p v-if="xmlSyncHint" class="error-msg">{{ xmlSyncHint }}</p>
-        <p v-if="error" class="error-msg">{{ error }}</p>
-        <p v-if="validationResult?.valid" class="validation-msg valid">XML is valid against DTD</p>
-        <ul v-else-if="validationResult?.errors?.length" class="validation-errors">
-          <li v-for="(err, i) in validationResult.errors" :key="i">
-            <button
-              v-if="err.line"
-              type="button"
-              class="validation-error-link"
-              @click="goToValidationError(err)"
-            >
-              Line {{ err.line }}, col {{ err.column }}: {{ err.message }}
-            </button>
-            <span v-else>{{ err.message }}</span>
-          </li>
-        </ul>
-        <p v-if="buildInfo" class="build-info">
-          {{ buildInfo.node_count }} nodes
-        </p>
-        <template v-if="buildInfo?.warnings?.length">
-          <p class="build-warnings-heading">
-            {{ buildInfo.warnings.length }} warning{{ buildInfo.warnings.length === 1 ? '' : 's' }}:
-          </p>
-          <ul class="build-warnings">
-            <li v-for="(warning, i) in buildInfo.warnings" :key="i">{{ warning }}</li>
-          </ul>
-        </template>
       </div>
+
+      <MappingWizard
+        :open="wizardOpen"
+        :initial-mapping="wizardInitialMapping"
+        :schema-id="schemaId"
+        :xml-text="liveXmlText || xmlText"
+        :elements="elements"
+        :element-attributes="elementAttributes"
+        :db-aliases="dbAliases"
+        :available-paths="availableElementPaths"
+        @close="onWizardClose"
+        @finish="onWizardFinish"
+      />
     </div>
 
     <div class="col-divider" @mousedown.prevent="startHResize" title="Drag to resize" />
@@ -292,9 +151,12 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import DtdUpload from '../components/DtdUpload.vue'
-import DtdTreeView from '../components/DtdTreeView.vue'
 import XmlEditor from '../components/XmlEditor.vue'
 import MappingWizard from '../components/MappingWizard.vue'
+import GeneratorStructureTab from '../components/generator/GeneratorStructureTab.vue'
+import GeneratorDataTab from '../components/generator/GeneratorDataTab.vue'
+import GeneratorResultsTab from '../components/generator/GeneratorResultsTab.vue'
+import GeneratorActionFooter from '../components/generator/GeneratorActionFooter.vue'
 import { generateXml } from '../api/generate'
 import { fillXmlStream } from '../api/fill'
 import { validateXml } from '../api/validate'
@@ -307,14 +169,7 @@ import {
   loadMappingPreset as apiLoadMappingPreset,
   deleteMappingPreset as apiDeleteMappingPreset,
 } from '../api/mappingPresets'
-import {
-  datalistListFor,
-  openDatalist,
-  scheduleCloseDatalist,
-  confirmDatalistPick,
-  clearAllDatalistState,
-  isOptionSelected,
-} from '../utils/datalistInput'
+import { clearAllDatalistState } from '../utils/datalistInput'
 import {
   getMappingValidationIssues,
   collectDtdElementPaths,
@@ -335,8 +190,6 @@ const dbAliases = ref([])
 const mappingPresetName = ref('')
 const selectedMappingPresetNames = ref([])
 const mappingPresets = ref([])
-const presetDropdownOpen = ref(false)
-const presetDropdownRef = ref(null)
 const wizardOpen = ref(false)
 const wizardEditIndex = ref(null)
 const mappingPreview = ref({})
@@ -387,10 +240,6 @@ function removeMapping(idx) {
   nextTick(() => {
     suppressPresetMappingSync.value = false
   })
-}
-
-function filledMappingFields(mapping) {
-  return (mapping.fields || []).filter((f) => f.db_col && f.xml_attr)
 }
 
 function normalizeMappings(mappings, presetSource = null) {
@@ -446,25 +295,6 @@ async function deleteMappingPreset(name) {
   selectedMappingPresetNames.value = selectedMappingPresetNames.value.filter((n) => n !== name)
   sqlMappings.value = sqlMappings.value.filter((m) => m._presetSource !== name)
   await refreshMappingPresets()
-}
-
-function onPresetDropdownOutsideClick(event) {
-  if (!presetDropdownOpen.value || !presetDropdownRef.value) return
-  if (!presetDropdownRef.value.contains(event.target)) {
-    presetDropdownOpen.value = false
-  }
-}
-
-function onDatalistEnter(event, key) {
-  confirmDatalistPick(key)
-  event.target.blur()
-}
-
-function onRootElementChange(event) {
-  const input = event.target
-  if (!input.value || isOptionSelected(input, elements.value)) {
-    confirmDatalistPick('root')
-  }
 }
 
 const availableElementPaths = computed(() => {
@@ -575,6 +405,69 @@ const validating = ref(false)
 const validationResult = ref(null)
 
 const AUTO_VALIDATE_KEY = 'xml-gen-auto-validate'
+const ACTIVE_TAB_KEY = 'xml-gen-left-tab'
+const TAB_ORDER = ['structure', 'data', 'results']
+
+function readActiveTab() {
+  try {
+    const stored = localStorage.getItem(ACTIVE_TAB_KEY)
+    if (TAB_ORDER.includes(stored)) return stored
+  } catch {
+    // ignore storage errors
+  }
+  return 'structure'
+}
+
+const activeTab = ref(readActiveTab())
+let hybridTabSwitched = false
+
+const leftTabs = [
+  { id: 'structure', label: 'Structure' },
+  { id: 'data', label: 'Data' },
+  { id: 'results', label: 'Results' },
+]
+
+watch(activeTab, (val) => {
+  try {
+    localStorage.setItem(ACTIVE_TAB_KEY, val)
+  } catch {
+    // ignore storage errors
+  }
+})
+
+const showDataBadge = computed(() => {
+  if (hasMappingBlockers.value) return true
+  if (isHybridStrategy.value && !sqlMappings.value.length) return true
+  return false
+})
+
+const resultsTabBadge = computed(() => {
+  if (validationResult.value?.valid === false && validationResult.value?.errors?.length) return 'error'
+  if (validationResult.value?.valid === true) return 'ok'
+  if (xmlSyncHint.value) return 'error'
+  if (buildInfo.value?.warnings?.length) return 'warn'
+  if (buildInfo.value && !buildInfo.value.warnings?.length) return 'ok'
+  return null
+})
+
+const resultsTabBadgeLabel = computed(() => {
+  if (resultsTabBadge.value === 'error') return 'Has errors'
+  if (resultsTabBadge.value === 'warn') return 'Has warnings'
+  if (resultsTabBadge.value === 'ok') return 'All clear'
+  return ''
+})
+
+function onTabKeydown(event, tabId) {
+  const idx = TAB_ORDER.indexOf(tabId)
+  if (idx < 0) return
+  if (event.key === 'ArrowLeft' && idx > 0) {
+    event.preventDefault()
+    activeTab.value = TAB_ORDER[idx - 1]
+  } else if (event.key === 'ArrowRight' && idx < TAB_ORDER.length - 1) {
+    event.preventDefault()
+    activeTab.value = TAB_ORDER[idx + 1]
+  }
+}
 
 function readAutoValidatePreference() {
   try {
@@ -597,7 +490,7 @@ watch(autoValidateAfterFill, (val) => {
 })
 const error = ref('')
 const xmlSyncHint = ref('')
-const dtdTreeRef = ref(null)
+const structureTabRef = ref(null)
 const xmlEditorRef = ref(null)
 
 function goToValidationError(err) {
@@ -649,10 +542,11 @@ async function onXmlFileImported({ text }) {
 
 async function waitForDtdTreeRef(maxAttempts = 5) {
   for (let i = 0; i < maxAttempts; i += 1) {
-    if (dtdTreeRef.value) return dtdTreeRef.value
+    const treeRef = structureTabRef.value?.dtdTreeRef
+    if (treeRef) return treeRef
     await nextTick()
   }
-  return dtdTreeRef.value
+  return structureTabRef.value?.dtdTreeRef
 }
 
 let ignoreNextXmlWatch = false
@@ -690,7 +584,7 @@ function resetFillProgress() {
 }
 
 const LEFT_MIN = 440
-const LEFT_MAX = 700
+const LEFT_MAX = 760
 
 const leftWidth = ref(LEFT_MIN)
 const dtdCollapsed = ref(false)
@@ -731,6 +625,13 @@ watch(isHybridStrategy, (enabled) => {
   if (enabled) refreshMappingPresets()
 })
 
+watch(fillStrategy, (val) => {
+  if ((val === 'hybrid_db_faker' || val === 'hybrid_db_ai') && !hybridTabSwitched) {
+    activeTab.value = 'data'
+    hybridTabSwitched = true
+  }
+})
+
 watch([schemaId, rootElement], () => {
   refreshDtdElementPaths()
 })
@@ -756,12 +657,6 @@ watch(selectedMappingPresetNames, async (newNames, oldNames) => {
   }
 })
 
-const modes = [
-  { value: 'minimal', label: 'Minimal' },
-  { value: 'maximal', label: 'Maximal' },
-  { value: 'custom', label: 'Custom' },
-]
-
 const canGenerate = computed(() => schemaId.value && rootElement.value)
 const canValidate = computed(() => schemaId.value && xmlText.value)
 
@@ -776,7 +671,6 @@ async function restoreSavedSchema() {
 }
 
 onMounted(async () => {
-  document.addEventListener('click', onPresetDropdownOutsideClick)
   await restoreSavedSchema()
   try {
     const aliases = await getConfigAliases()
@@ -787,7 +681,6 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', onPresetDropdownOutsideClick)
   clearTimeout(xmlSyncTimer)
   clearTimeout(columnsFetchTimer)
   stopFillProgressTimer()
@@ -817,6 +710,8 @@ async function onDtdUploaded(result) {
   error.value = ''
   xmlSyncHint.value = ''
   dtdCollapsed.value = true
+  activeTab.value = 'structure'
+  hybridTabSwitched = false
 
   await nextTick()
   const editorXml = getEditorXmlText()?.trim()
@@ -857,10 +752,10 @@ async function applyXmlPathsFromEditor(text) {
       rootElement.value = rootTag
       await nextTick()
     }
-    await waitForDtdTreeRef()
-    await dtdTreeRef.value?.applyXmlElementPaths(elementPaths)
+    const treeRef = await waitForDtdTreeRef()
+    await treeRef?.applyXmlElementPaths(elementPaths)
     await nextTick()
-    await dtdTreeRef.value?.applyXmlElementPaths(elementPaths)
+    await treeRef?.applyXmlElementPaths(elementPaths)
   } catch (e) {
     xmlSyncHint.value = e.message || 'Failed to parse XML paths'
   }
@@ -920,6 +815,9 @@ async function generate() {
     await setProgrammaticXml(result.xml_text)
     buildInfo.value = result
     validationResult.value = null
+    if (result.warnings?.length) {
+      activeTab.value = 'results'
+    }
   } catch (e) {
     if (requestSeq === generateRequestSeq) error.value = e.message
   } finally {
@@ -980,7 +878,12 @@ async function runValidation() {
   validating.value = true
   error.value = ''
   try {
-    validationResult.value = await validateXml(schemaId.value, xmlText.value)
+    validationResult.value = await validateXml(schemaId.value, getEditorXmlText() || xmlText.value)
+    if (validationResult.value?.valid === true) {
+      xmlSyncHint.value = ''
+    } else if (validationResult.value?.valid === false) {
+      activeTab.value = 'results'
+    }
   } catch (e) {
     error.value = e.message
     validationResult.value = null
@@ -1041,11 +944,87 @@ function stopResize() {
   flex-shrink: 0;
   min-width: 440px;
   height: 100%;
-  overflow-y: scroll;
+  overflow: hidden;
 }
 
 .dtd-wrapper {
-  /* height is controlled inline when Generation panel is present */
+  flex-shrink: 0;
+}
+
+.left-tabs-bar {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.left-tab-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.left-tab-btn:hover {
+  color: var(--text);
+}
+
+.left-tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.left-tab-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px 4px 0 0;
+}
+
+.left-tab-badge {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.left-tab-badge--warn {
+  background: var(--warning);
+}
+
+.left-tab-badge--error {
+  background: var(--danger);
+}
+
+.left-tab-badge--ok {
+  background: var(--success);
+}
+
+.left-panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin-top: 0;
+  container-type: inline-size;
+}
+
+.left-tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .dtd-collapse-header {
@@ -1129,169 +1108,8 @@ function stopResize() {
 .controls {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   margin-top: 0;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.mode-group {
-  display: flex;
-  gap: 12px;
-}
-
-.mode-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 14px;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.auto-validate-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  width: fit-content;
-  margin-bottom: 0;
-  font-size: 13px;
-  color: var(--text-muted);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.auto-validate-label input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  min-width: 14px;
-  padding: 0;
-  margin: 0;
-  flex-shrink: 0;
-  accent-color: var(--accent);
-}
-
-.action-row {
-  display: flex;
-  gap: 8px;
-}
-
-.fill-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-
-.fill-progress-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.fill-spinner {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  border: 2px solid color-mix(in srgb, var(--accent) 20%, var(--border));
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: fill-spin 0.75s linear infinite;
-}
-
-@keyframes fill-spin {
-  to { transform: rotate(360deg); }
-}
-
-.fill-status {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  color: var(--text);
-}
-
-.fill-elapsed {
-  flex-shrink: 0;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-}
-
-.fill-progress-bar {
-  height: 4px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 15%, var(--border));
-  overflow: hidden;
-}
-
-.fill-progress-fill {
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent);
-  transition: width 0.35s ease;
-}
-
-.build-info {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.build-warnings-heading {
-  font-size: 12px;
-  color: var(--warning);
-  margin-top: 4px;
-}
-
-.build-warnings {
-  font-size: 12px;
-  color: var(--warning);
-  margin-top: 2px;
-  padding-left: 18px;
-}
-
-.build-warnings li {
-  margin-bottom: 4px;
-}
-
-.validation-msg.valid {
-  font-size: 13px;
-  color: var(--success);
-}
-
-.validation-errors {
-  font-size: 12px;
-  color: var(--danger);
-  margin-top: 4px;
-  padding-left: 18px;
-}
-
-.validation-errors li {
-  margin-bottom: 4px;
-}
-
-.validation-error-link {
-  display: inline;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.validation-error-link:hover {
-  opacity: 0.85;
 }
 
 @media (max-width: 900px) {
@@ -1305,527 +1123,5 @@ function stopResize() {
     display: none;
   }
 }
-
-/* ── Database Overrides panel ─────────────────────────────────────── */
-.db-overrides-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px;
-  background: color-mix(in srgb, var(--border) 20%, transparent);
-}
-
-.overrides-header {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 2px;
-}
-
-.overrides-header-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.mapping-preset-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.preset-input {
-  width: 130px;
-}
-
-.preset-dropdown {
-  position: relative;
-}
-
-.preset-dropdown-trigger {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 150px;
-  padding: 6px 10px;
-  font-size: 13px;
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.preset-dropdown-trigger:hover {
-  border-color: color-mix(in srgb, var(--border) 60%, var(--text));
-}
-
-.preset-dropdown-chevron {
-  margin-left: auto;
-  font-size: 10px;
-  color: var(--text-muted);
-  transition: transform 0.15s;
-}
-
-.preset-dropdown-chevron.open {
-  transform: rotate(180deg);
-}
-
-.preset-dropdown-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
-  width: 260px;
-  max-height: 220px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
-}
-
-.preset-dropdown-empty {
-  font-size: 12px;
-  color: var(--text-muted);
-  padding: 6px 8px;
-  margin: 0;
-}
-
-.preset-dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-  margin-bottom: 0;
-  font-size: 12px;
-  color: var(--text);
-  cursor: pointer;
-  padding: 6px 8px;
-  border-radius: 4px;
-}
-
-.preset-dropdown-item:hover {
-  background: color-mix(in srgb, var(--border) 30%, transparent);
-}
-
-.preset-dropdown-item input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  min-width: 14px;
-  padding: 0;
-  margin: 0;
-  flex: 0 0 14px;
-  accent-color: var(--accent);
-}
-
-.preset-dropdown-item-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.preset-dropdown-item-name {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  line-height: 1.3;
-}
-
-.preset-dropdown-item .btn-icon-remove {
-  flex: 0 0 auto;
-  padding: 0 4px;
-  font-size: 14px;
-  line-height: 1.2;
-}
-
-.preset-meta {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-
-.selected-presets-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.preset-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--border) 35%, transparent);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 2px 8px;
-}
-
-.preset-chip-remove {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  padding: 0;
-}
-
-.preset-chip-remove:hover {
-  color: var(--danger);
-}
-
-.mapping-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.mapping-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.mapping-preset-badge {
-  font-size: 10px;
-  font-weight: 500;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--border) 40%, transparent);
-  border-radius: 3px;
-  padding: 1px 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 120px;
-}
-
-.overrides-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.overrides-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.mapping-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 10px;
-  background: color-mix(in srgb, var(--border) 10%, transparent);
-}
-
-.mapping-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.btn-mapping-edit {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 11px;
-  padding: 2px 8px;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.btn-mapping-edit:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.mapping-summary {
-  display: grid;
-  grid-template-columns: 100px 1fr;
-  gap: 4px 12px;
-  font-size: 12px;
-  margin: 0;
-}
-
-.mapping-summary dt {
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.mapping-summary dd {
-  margin: 0;
-  word-break: break-word;
-}
-
-.mapping-summary-query {
-  font-family: monospace;
-  font-size: 11px;
-  white-space: pre-wrap;
-}
-
-.mapping-summary-fields {
-  margin: 0;
-  padding-left: 16px;
-}
-
-.mapping-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.field-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.field-input {
-  flex: 1;
-  min-width: 0;
-}
-
-.field-arrow {
-  font-size: 13px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.label-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-weight: 400;
-  margin-left: 4px;
-}
-
-.btn-icon-remove {
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 15px;
-  line-height: 1;
-  padding: 1px 5px;
-  transition: color 0.15s, border-color 0.15s;
-  flex-shrink: 0;
-}
-
-.btn-icon-remove:hover {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-
-.btn-add-field {
-  background: none;
-  border: 1px dashed var(--border);
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 3px 8px;
-  margin-top: 2px;
-  transition: color 0.15s, border-color 0.15s;
-  align-self: flex-start;
-}
-
-.btn-add-field:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.btn-add-mapping {
-  background: none;
-  border: 1px dashed var(--border);
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 5px 10px;
-  transition: color 0.15s, border-color 0.15s;
-  align-self: flex-start;
-}
-
-.btn-add-mapping:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.mapping-add-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.path-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin: 0;
-}
-
-.path-hint-muted {
-  font-style: italic;
-}
-
-.path-suggestions {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
-  max-height: 120px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-}
-
-.path-suggestions li {
-  margin: 0;
-}
-
-.path-suggestion-btn {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 4px 8px;
-  border: none;
-  background: none;
-  font-size: 11px;
-  font-family: monospace;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.path-suggestion-btn:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
-}
-
-.query-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.btn-test-query {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 3px 10px;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.btn-test-query:hover:not(:disabled) {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.btn-test-query:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.mapping-inline-error {
-  font-size: 12px;
-  color: var(--danger);
-  margin: 4px 0 0;
-}
-
-.field-mapping-actions {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.auto-map-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin: 0 0 4px;
-}
-
-.preview-badge {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 8px;
-}
-
-.preview-badge.ok {
-  color: var(--success);
-  background: color-mix(in srgb, var(--success) 15%, transparent);
-}
-
-.preview-badge.warn {
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 15%, transparent);
-}
-
-.preview-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  margin-top: 4px;
-}
-
-.preview-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 11px;
-}
-
-.preview-table th,
-.preview-table td {
-  padding: 3px 6px;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-}
-
-.preview-table th {
-  color: var(--text-muted);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.mapping-errors {
-  font-size: 12px;
-  color: var(--danger);
-  margin: 0;
-  padding-left: 18px;
-}
-
-.mapping-warnings {
-  font-size: 12px;
-  color: var(--warning);
-  margin: 0;
-  padding-left: 18px;
-}
 </style>
+
