@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 
 import httpx
@@ -48,8 +47,8 @@ class LLMService:
         connections = load_connections()
         llm_cfg = connections.llm.get(alias)
 
-        self.base_url = (base_url or (llm_cfg.base_url if llm_cfg else None) or os.getenv("LLM_BASE_URL", "")).rstrip("/")
-        self.model = model or (llm_cfg.model if llm_cfg else None) or os.getenv("LLM_MODEL", "gpt-4o-mini")
+        self.base_url = (base_url or (llm_cfg.base_url if llm_cfg else "") or "").rstrip("/")
+        self.model = model or (llm_cfg.model if llm_cfg else "gpt-4o-mini")
         self.api_key = api_key or get_llm_api_key(alias)
         self.timeout = timeout
 
@@ -63,7 +62,7 @@ class LLMService:
     ) -> str:
         if not self.base_url:
             logger.error("LLM base URL is not configured")
-            raise ValueError("LLM base URL is not configured in connections.json or .env")
+            raise ValueError("LLM base URL is not configured in connections.json")
 
         metadata = self._extract_metadata(schema, xml_text)
         if fill_empty_only:

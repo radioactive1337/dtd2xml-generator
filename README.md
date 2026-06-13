@@ -22,7 +22,7 @@ npm install
 
 ### Configuration
 
-Copy `connections.json.example` to `connections.json` and `.env.example` to `.env` in the project root.
+Copy `backend/connections.json.example` to `connections.json` in the project root (or `backend/connections.json`).
 **Never commit real credentials.**
 
 ## Run

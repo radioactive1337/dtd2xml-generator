@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
+
+from app.config import get_app_settings
 
 
 def setup_logging() -> None:
@@ -13,7 +14,7 @@ def setup_logging() -> None:
     if root.handlers:
         return
 
-    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    level_name = get_app_settings().log_level.upper()
     level = getattr(logging, level_name, logging.INFO)
 
     handler = logging.StreamHandler(sys.stderr)

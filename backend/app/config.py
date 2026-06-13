@@ -1,13 +1,11 @@
-"""Application configuration loaded from local files only."""
+"""Application configuration loaded from connections.json only."""
 
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 # Project root: xml-generator/
@@ -15,28 +13,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _load_env_files() -> None:
-    """Load .env from cwd and known project locations."""
-    candidates = [
-        Path.cwd() / ".env",
-        PROJECT_ROOT / ".env",
-        BACKEND_ROOT / ".env",
-    ]
-    loaded: set[Path] = set()
-    for path in candidates:
-        resolved = path.resolve()
-        if resolved in loaded or not path.exists():
-            continue
-        load_dotenv(path, override=True)
-        loaded.add(resolved)
-
-
-_load_env_files()
-
-
 class AppSettings(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
+    log_level: str = "INFO"
 
 
 class LLMConfig(BaseModel):
@@ -73,13 +53,16 @@ def _find_connections_file() -> Path | None:
     return None
 
 
-def load_connections() -> ConnectionsConfig:
-    """Load connections.json; returns empty config if file is missing."""
+def _load_raw_connections() -> dict[str, Any]:
     path = _find_connections_file()
     if path is None:
-        return ConnectionsConfig()
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
 
-    raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+
+def load_connections() -> ConnectionsConfig:
+    """Load connections.json; returns empty config if file is missing."""
+    raw = _load_raw_connections()
 
     databases: dict[str, DatabaseConfig] = {}
     for alias, cfg in raw.get("databases", {}).items():
@@ -93,22 +76,14 @@ def load_connections() -> ConnectionsConfig:
 
 
 def get_llm_api_key(alias: str = "default") -> str:
-    """Return LLM API key from connections.json or .env (server-side only)."""
-    connections = load_connections()
-    if alias in connections.llm:
-        path = _find_connections_file()
-        if path:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            return raw.get("llm", {}).get(alias, {}).get("api_key", "")
-    return os.getenv("LLM_API_KEY", "")
+    """Return LLM API key from connections.json (server-side only)."""
+    raw = _load_raw_connections()
+    return raw.get("llm", {}).get(alias, {}).get("api_key", "")
 
 
 def get_db_password(alias: str) -> str:
     """Return DB password from connections.json (server-side only)."""
-    path = _find_connections_file()
-    if path is None:
-        return ""
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _load_raw_connections()
     return raw.get("databases", {}).get(alias, {}).get("password", "")
 
 
@@ -122,19 +97,14 @@ def has_oracle_databases() -> bool:
 
 
 def get_oracle_client_lib_dir() -> str | None:
-    """Return Oracle client library directory from .env, connections.json, or ORACLE_HOME."""
-    lib_dir = os.getenv("ORACLE_CLIENT_LIB_DIR", "").strip()
+    """Return Oracle client library directory from connections.json."""
+    raw = _load_raw_connections()
+
+    lib_dir = str(raw.get("oracle_client_lib_dir", "")).strip()
     if lib_dir:
         return lib_dir
 
-    path = _find_connections_file()
-    if path is not None:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        lib_dir = raw.get("oracle_client_lib_dir", "").strip()
-        if lib_dir:
-            return lib_dir
-
-    oracle_home = os.getenv("ORACLE_HOME", "").strip()
+    oracle_home = str(raw.get("oracle_home", "")).strip()
     if oracle_home:
         bin_dir = Path(oracle_home) / "bin"
         if (bin_dir / "oci.dll").is_file():
@@ -143,10 +113,23 @@ def get_oracle_client_lib_dir() -> str | None:
     return None
 
 
+def get_ora_tzfile() -> str | None:
+    """Return optional ORA_TZFILE value from connections.json."""
+    raw = _load_raw_connections()
+    value = raw.get("ora_tzfile")
+    if value is None:
+        return None
+    stripped = str(value).strip()
+    return stripped or None
+
+
 def get_app_settings() -> AppSettings:
+    raw = _load_raw_connections()
+    app = raw.get("app", {})
     return AppSettings(
-        host=os.getenv("APP_HOST", "0.0.0.0"),
-        port=int(os.getenv("APP_PORT", "8080")),
+        host=app.get("host", "0.0.0.0"),
+        port=int(app.get("port", 8080)),
+        log_level=str(app.get("log_level", "INFO")),
     )
 
 

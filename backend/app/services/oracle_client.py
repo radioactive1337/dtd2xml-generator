@@ -10,7 +10,7 @@ from pathlib import Path
 
 import oracledb
 
-from app.config import get_oracle_client_lib_dir, has_oracle_databases
+from app.config import get_ora_tzfile, get_oracle_client_lib_dir, has_oracle_databases
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def resolve_client_lib_dir(lib_dir: str) -> str:
     if path.name.lower() != "bin" and (path / "bin" / "oci.dll").is_file():
         return str(path / "bin")
     raise ValueError(
-        f"oci.dll was not found under ORACLE_CLIENT_LIB_DIR: {lib_dir}. "
+        f"oci.dll was not found under oracle_client_lib_dir: {lib_dir}. "
         "Point it to the folder that contains oci.dll, usually ...\\client_1\\bin."
     )
 
@@ -71,7 +71,7 @@ def resolve_ora_tzfile(oracle_home: Path, ora_tzfile: str | None) -> str | None:
 
     available = list_timezone_files(oracle_home)
     hint = (
-        "Remove ORA_TZFILE from .env to use the client default timezone file, "
+        "Remove ora_tzfile from connections.json to use the client default timezone file, "
         "or copy the file from the DB server into oracore\\zoneinfo."
     )
     if available:
@@ -87,7 +87,7 @@ def resolve_ora_tzfile(oracle_home: Path, ora_tzfile: str | None) -> str | None:
 def _missing_client_config_error() -> ValueError:
     return ValueError(
         "Oracle thick mode is required for Oracle 11g. "
-        "Set ORACLE_CLIENT_LIB_DIR in .env or oracle_client_lib_dir in connections.json."
+        "Set oracle_client_lib_dir in connections.json."
     )
 
 
@@ -112,7 +112,7 @@ def _apply_oracle_environment(lib_dir: str) -> str:
     if not oracle_home_path.is_dir():
         raise ValueError(f"ORACLE_HOME does not exist: {oracle_home}")
 
-    ora_tzfile = os.getenv("ORA_TZFILE", "").strip() or None
+    ora_tzfile = get_ora_tzfile()
     resolved_tzfile = resolve_ora_tzfile(oracle_home_path, ora_tzfile)
     if resolved_tzfile:
         os.environ["ORA_TZFILE"] = resolved_tzfile
@@ -146,7 +146,7 @@ def ensure_oracle_thick_mode(*, required: bool = False) -> None:
 
     lib_dir = get_oracle_client_lib_dir()
     if required and not lib_dir:
-        logger.error("Oracle thick mode required but ORACLE_CLIENT_LIB_DIR is not set")
+        logger.error("Oracle thick mode required but oracle_client_lib_dir is not set")
         raise _missing_client_config_error()
     if not lib_dir:
         return
@@ -168,7 +168,7 @@ def ensure_oracle_thick_mode(*, required: bool = False) -> None:
         )
         raise RuntimeError(
             "Oracle thick mode failed to initialize. "
-            f"Check ORACLE_CLIENT_LIB_DIR={lib_dir!r} and restart backend."
+            f"Check oracle_client_lib_dir={lib_dir!r} in connections.json and restart backend."
         )
 
 
@@ -192,7 +192,7 @@ def map_oracle_client_error(exc: Exception) -> ValueError | None:
         if oracledb.is_thin_mode():
             return ValueError(
                 "Oracle 11g requires thick mode. "
-                "Set ORACLE_CLIENT_LIB_DIR in .env or oracle_client_lib_dir in connections.json "
+                "Set oracle_client_lib_dir in connections.json "
                 "and restart backend. "
                 f"Original error: {message}"
             )
@@ -210,7 +210,7 @@ def map_oracle_client_error(exc: Exception) -> ValueError | None:
         return ValueError(
             "Oracle Client cannot load timezone files (ORA-01804). "
             f"ORACLE_HOME={oracle_home or '(not set)'}, ORA_TZFILE={ora_tzfile or '(not set)'}. "
-            "Try removing ORA_TZFILE from .env first."
+            "Try removing ora_tzfile from connections.json first."
             f"{available_hint} "
             f"Original error: {message}"
         )

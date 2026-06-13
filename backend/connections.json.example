@@ -1,6 +1,13 @@
 {
+  "app": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "log_level": "INFO"
+  },
   "oracle_thick_mode": true,
   "oracle_client_lib_dir": "C:\\Oracle\\client19_64\\bin",
+  "oracle_home": "C:\\Oracle\\client19_64",
+  "ora_tzfile": null,
   "databases": {
     "PGSQL_DB": {
       "driver": "postgresql",

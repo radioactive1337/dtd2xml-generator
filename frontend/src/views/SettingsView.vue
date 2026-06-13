@@ -3,7 +3,7 @@
     <div class="card">
       <div class="panel-title">Connection Aliases</div>
       <p class="hint">
-        Credentials are read from local <code>connections.json</code> and <code>.env</code> files.
+        Credentials are read from local <code>connections.json</code>.
         Only aliases are shown here — no secrets are exposed through the UI.
       </p>
 
@@ -35,9 +35,8 @@
         <section class="setup-hint card inner">
           <div class="panel-title">Setup</div>
           <ol>
-            <li>Copy <code>connections.json.example</code> to <code>connections.json</code></li>
-            <li>Copy <code>.env.example</code> to <code>.env</code></li>
-            <li>Fill in your DB and LLM credentials locally</li>
+            <li>Copy <code>backend/connections.json.example</code> to <code>connections.json</code></li>
+            <li>Fill in your DB, LLM, and Oracle credentials locally</li>
             <li>Never commit these files to version control</li>
           </ol>
         </section>
