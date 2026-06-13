@@ -44,31 +44,24 @@
           <label>Target Path <span class="label-hint">(optional)</span></label>
           <input
             v-model="draft.target_path"
-            :list="pathOptions.length ? 'wizard-paths-list' : undefined"
+            :list="datalistListFor('wizard-path', 'wizard-paths-list')"
             placeholder="PayDoc.client.contact[0] (optional)"
             @input="onPathChange"
+            @focus="openDatalist('wizard-path')"
+            @blur="scheduleCloseDatalist('wizard-path')"
             @change="onPathDatalistChange"
+            @keydown.enter="onDatalistEnter($event, 'wizard-path')"
           />
-          <ul v-if="pathOptions.length" class="path-suggestions">
-            <li v-for="p in pathOptions" :key="p">
-              <button type="button" class="path-suggestion-btn" @click="selectWizardPath(p)">
-                {{ p }}
-              </button>
-            </li>
-          </ul>
-          <p v-else-if="draft.target_element && props.xmlText?.trim()" class="wizard-hint wizard-hint-warn">
+          <p v-if="!pathOptions.length && draft.target_element && props.xmlText?.trim()" class="wizard-hint wizard-hint-warn">
             No paths for &lt;{{ draft.target_element }}&gt; in the current XML.
           </p>
-          <p v-else-if="draft.target_element" class="wizard-hint wizard-hint-warn">
-            Generate or paste XML first to see path suggestions.
+          <p v-else-if="pathOptions.length > 1" class="wizard-hint wizard-hint-warn">
+            Without a path, all &lt;{{ draft.target_element }}&gt; tags in the document will be filled.
+            Duplicate siblings: <code>contact[0]</code>, <code>contact[1]</code>.
           </p>
           <datalist id="wizard-paths-list">
             <option v-for="p in pathOptions" :key="p" :value="p" />
           </datalist>
-          <p class="wizard-hint">
-            Without a path, all &lt;{{ draft.target_element || 'element' }}&gt; tags in the document will be filled.
-            Duplicate siblings: <code>contact[0]</code>, <code>contact[1]</code>.
-          </p>
         </div>
 
         <!-- Step 2: SQL -->
@@ -347,13 +340,12 @@ function onPathChange() {
   if (seg) draft.value.target_element = seg
 }
 
-function onPathDatalistChange() {
+function onPathDatalistChange(event) {
   onPathChange()
-}
-
-function selectWizardPath(path) {
-  draft.value.target_path = path
-  onPathChange()
+  const input = event.target
+  if (!input.value || isOptionSelected(input, pathOptions.value)) {
+    confirmDatalistPick('wizard-path')
+  }
 }
 
 function formatPreviewValue(val) {
@@ -684,38 +676,6 @@ function finish() {
 
 .wizard-hint-warn {
   color: var(--warning);
-}
-
-.path-suggestions {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
-  max-height: 120px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-}
-
-.path-suggestions li {
-  margin: 0;
-}
-
-.path-suggestion-btn {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 4px 8px;
-  border: none;
-  background: none;
-  font-size: 11px;
-  font-family: monospace;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.path-suggestion-btn:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
 }
 
 .field-row {
