@@ -25,18 +25,38 @@ function collectElementPaths(doc) {
   const rootTag = localTagName(root)
   const elementPaths = []
 
-  function walk(el, path) {
+  function childSegment(tag, index, totalWithTag) {
+    if (totalWithTag > 1) return `${tag}[${index}]`
+    return tag
+  }
+
+  function walk(el, currentPath) {
     const tag = localTagName(el)
     if (!tag) return
-    const currentPath = path ? `${path}.${tag}` : tag
-    elementPaths.push(currentPath)
-    for (const child of el.children) {
-      walk(child, currentPath)
+    const pathToEl = currentPath || tag
+    elementPaths.push(pathToEl)
+
+    const children = [...el.children]
+    const tagCounts = {}
+    for (const child of children) {
+      const childTag = localTagName(child)
+      if (!childTag) continue
+      tagCounts[childTag] = (tagCounts[childTag] || 0) + 1
+    }
+
+    const tagIndices = {}
+    for (const child of children) {
+      const childTag = localTagName(child)
+      if (!childTag) continue
+      const idx = tagIndices[childTag] || 0
+      tagIndices[childTag] = idx + 1
+      const segment = childSegment(childTag, idx, tagCounts[childTag])
+      walk(child, `${pathToEl}.${segment}`)
     }
   }
 
   walk(root, '')
-  return { rootTag, elementPaths }
+  return { rootTag, elementPaths: [...new Set(elementPaths)] }
 }
 
 /**
@@ -59,6 +79,11 @@ export function extractXmlElementPaths(xmlText) {
 /** Strip UI-only group-N segments so tree paths match element paths. */
 export function normalizeTreePath(path) {
   return path.replace(/\.group-\d+(?=\.|$)/g, '')
+}
+
+/** Strip a trailing [N] sibling index from a path segment or full path's last segment. */
+export function stripPathIndex(segment) {
+  return (segment || '').replace(/\[\d+\]$/, '')
 }
 
 export function inferRootFromElementPaths(paths) {

@@ -1,4 +1,4 @@
-import { normalizeTreePath } from './xmlPaths'
+import { normalizeTreePath, stripPathIndex } from './xmlPaths'
 
 /** Normalize a field/column name for fuzzy matching. */
 export function normalizeFieldName(name) {
@@ -10,13 +10,15 @@ export function lastPathSegment(path) {
   const normalized = normalizeTreePath((path || '').trim())
   if (!normalized) return ''
   const parts = normalized.split('.')
-  return parts[parts.length - 1] || ''
+  const last = parts[parts.length - 1] || ''
+  return stripPathIndex(last)
 }
 
-/** Filter dot-paths whose last segment equals the given tag. */
+/** Filter dot-paths whose last segment equals the given tag (case-insensitive). */
 export function pathsEndingWithTag(paths, tag) {
   if (!tag || !paths?.length) return []
-  return paths.filter((p) => lastPathSegment(p) === tag)
+  const normTag = tag.trim().toLowerCase()
+  return paths.filter((p) => lastPathSegment(p).toLowerCase() === normTag)
 }
 
 /**

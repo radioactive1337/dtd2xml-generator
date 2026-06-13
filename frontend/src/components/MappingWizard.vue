@@ -25,9 +25,13 @@
           <label>Target Element</label>
           <input
             v-model="draft.target_element"
-            list="wizard-elements-list"
+            :list="datalistListFor('wizard-el', 'wizard-elements-list')"
             placeholder="Search or type element name"
-            @input="onElementChange"
+            @input="onElementInput"
+            @focus="openDatalist('wizard-el')"
+            @blur="scheduleCloseDatalist('wizard-el')"
+            @change="onElementDatalistChange"
+            @keydown.enter="onDatalistEnter($event, 'wizard-el')"
           />
           <datalist id="wizard-elements-list">
             <option v-for="el in filteredElements" :key="el" :value="el" />
@@ -40,15 +44,30 @@
           <label>Target Path <span class="label-hint">(optional)</span></label>
           <input
             v-model="draft.target_path"
-            list="wizard-paths-list"
-            placeholder="PayDoc.Body.client (optional)"
+            :list="pathOptions.length ? 'wizard-paths-list' : undefined"
+            placeholder="PayDoc.client.contact[0] (optional)"
             @input="onPathChange"
+            @change="onPathDatalistChange"
           />
+          <ul v-if="pathOptions.length" class="path-suggestions">
+            <li v-for="p in pathOptions" :key="p">
+              <button type="button" class="path-suggestion-btn" @click="selectWizardPath(p)">
+                {{ p }}
+              </button>
+            </li>
+          </ul>
+          <p v-else-if="draft.target_element && props.xmlText?.trim()" class="wizard-hint wizard-hint-warn">
+            No paths for &lt;{{ draft.target_element }}&gt; in the current XML.
+          </p>
+          <p v-else-if="draft.target_element" class="wizard-hint wizard-hint-warn">
+            Generate or paste XML first to see path suggestions.
+          </p>
           <datalist id="wizard-paths-list">
             <option v-for="p in pathOptions" :key="p" :value="p" />
           </datalist>
           <p class="wizard-hint">
             Without a path, all &lt;{{ draft.target_element || 'element' }}&gt; tags in the document will be filled.
+            Duplicate siblings: <code>contact[0]</code>, <code>contact[1]</code>.
           </p>
         </div>
 
@@ -187,10 +206,19 @@ import {
   mappingsToFields,
   normalizeFieldName,
 } from '../utils/mappingUtils'
+import { extractXmlElementPaths } from '../utils/xmlPaths'
+import {
+  datalistListFor,
+  openDatalist,
+  scheduleCloseDatalist,
+  confirmDatalistPick,
+  isOptionSelected,
+} from '../utils/datalistInput'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   schemaId: { type: String, default: '' },
+  xmlText: { type: String, default: '' },
   elements: { type: Array, default: () => [] },
   elementAttributes: { type: Object, default: () => ({}) },
   dbAliases: { type: Array, default: () => [] },
@@ -224,9 +252,20 @@ const filteredElements = computed(() => {
   return props.elements.filter((el) => el.toLowerCase().includes(q))
 })
 
-const pathOptions = computed(() =>
-  pathsEndingWithTag(props.availablePaths, draft.value.target_element),
-)
+const pathOptions = computed(() => {
+  const tag = draft.value.target_element?.trim()
+  if (!tag) return []
+
+  const text = props.xmlText?.trim()
+  if (text) {
+    const parsed = extractXmlElementPaths(text)
+    if (parsed?.elementPaths?.length) {
+      return pathsEndingWithTag(parsed.elementPaths, tag)
+    }
+  }
+
+  return pathsEndingWithTag(props.availablePaths, tag)
+})
 
 const xmlAttrs = computed(() => {
   const el = draft.value.target_element
@@ -281,7 +320,12 @@ watch(
   },
 )
 
-function onElementChange(event) {
+function onDatalistEnter(event, key) {
+  confirmDatalistPick(key)
+  event.target.blur()
+}
+
+function onElementInput(event) {
   elementFilter.value = event.target.value
   if (draft.value.target_path) {
     const seg = lastPathSegment(draft.value.target_path)
@@ -291,9 +335,25 @@ function onElementChange(event) {
   }
 }
 
+function onElementDatalistChange(event) {
+  const input = event.target
+  if (!input.value || isOptionSelected(input, props.elements)) {
+    confirmDatalistPick('wizard-el')
+  }
+}
+
 function onPathChange() {
   const seg = lastPathSegment(draft.value.target_path)
   if (seg) draft.value.target_element = seg
+}
+
+function onPathDatalistChange() {
+  onPathChange()
+}
+
+function selectWizardPath(path) {
+  draft.value.target_path = path
+  onPathChange()
 }
 
 function formatPreviewValue(val) {
@@ -620,6 +680,42 @@ function finish() {
   color: var(--warning);
   margin: 4px 0 0;
   padding-left: 18px;
+}
+
+.wizard-hint-warn {
+  color: var(--warning);
+}
+
+.path-suggestions {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 120px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.path-suggestions li {
+  margin: 0;
+}
+
+.path-suggestion-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.path-suggestion-btn:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
 }
 
 .field-row {

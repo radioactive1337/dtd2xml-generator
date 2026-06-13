@@ -28,6 +28,13 @@ def test_normalize_dot_path_strips_group_segments():
 
 def test_find_elements_by_dot_path_exact():
     root = _parse()
+    matches = find_elements_by_dot_path(root, "PayDoc.Body[0].client[0]")
+    assert len(matches) == 1
+    assert matches[0].get("inn") == "1"
+
+
+def test_find_elements_by_dot_path_unindexed_picks_first_sibling():
+    root = _parse()
     matches = find_elements_by_dot_path(root, "PayDoc.Body.client")
     assert len(matches) == 1
     assert matches[0].get("inn") == "1"
@@ -35,15 +42,27 @@ def test_find_elements_by_dot_path_exact():
 
 def test_find_elements_by_dot_path_second_body():
     root = _parse()
-    matches = find_elements_by_dot_path(root, "PayDoc.Body.client")
-    # First Body's first client
-    assert matches[0].get("name") == "A"
+    matches = find_elements_by_dot_path(root, "PayDoc.Body[1].client[0]")
+    assert len(matches) == 1
+    assert matches[0].get("inn") == "3"
 
-    # Walk to second Body manually to verify path resolution picks first match
-    bodies = list(root.findall("Body"))
-    second_client = bodies[1].find("client")
-    assert second_client is not None
-    assert second_client.get("inn") == "3"
+
+def test_find_elements_by_dot_path_duplicate_contacts():
+    xml = """\
+<PayDoc>
+  <client>
+    <contact type="a"/>
+    <contact type="b"/>
+  </client>
+</PayDoc>
+"""
+    root = _parse(xml)
+    first = find_elements_by_dot_path(root, "PayDoc.client.contact[0]")
+    second = find_elements_by_dot_path(root, "PayDoc.client.contact[1]")
+    assert len(first) == 1
+    assert len(second) == 1
+    assert first[0].get("type") == "a"
+    assert second[0].get("type") == "b"
 
 
 def test_find_elements_by_dot_path_not_found():

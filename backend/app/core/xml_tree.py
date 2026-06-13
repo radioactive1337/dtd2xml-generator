@@ -19,11 +19,42 @@ def normalize_dot_path(path: str) -> str:
     return re.sub(r"\.group-\d+(?=\.|$)", "", path.strip())
 
 
+_ELEMENT_INDEX = re.compile(r"^(.+)\[(\d+)\]$")
+
+
+def _parse_path_segment(segment: str) -> tuple[str, int | None]:
+    match = _ELEMENT_INDEX.match(segment)
+    if match:
+        return match.group(1), int(match.group(2))
+    return segment, None
+
+
+def _child_by_tag_and_index(
+    parent: etree._Element,
+    tag: str,
+    index: int | None,
+) -> etree._Element | None:
+    matches = [child for child in parent if child.tag == tag]
+    if not matches:
+        return None
+    if index is not None:
+        if index < 0 or index >= len(matches):
+            return None
+        return matches[index]
+    if len(matches) == 1:
+        return matches[0]
+    return matches[0]
+
+
 def find_elements_by_dot_path(
     root: etree._Element,
     path: str,
 ) -> list[etree._Element]:
-    """Resolve a dot-separated element path (e.g. PayDoc.Body.client) to XML nodes."""
+    """Resolve a dot-separated element path to XML nodes.
+
+    Supports sibling indices: ``PayDoc.client.contact[0]``, ``Body[1].client``.
+    When multiple same-tag siblings exist and no index is given, the first match is used.
+    """
     normalized = normalize_dot_path(path)
     if not normalized:
         return []
@@ -34,11 +65,8 @@ def find_elements_by_dot_path(
 
     current: etree._Element = root
     for segment in segments[1:]:
-        found: etree._Element | None = None
-        for child in current:
-            if child.tag == segment:
-                found = child
-                break
+        tag, index = _parse_path_segment(segment)
+        found = _child_by_tag_and_index(current, tag, index)
         if found is None:
             return []
         current = found

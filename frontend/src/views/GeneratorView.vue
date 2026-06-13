@@ -18,13 +18,12 @@
           <label>Root Element</label>
           <input
             v-model="rootElement"
-            list="root-elements-list"
+            :list="datalistListFor('root', 'root-elements-list')"
             placeholder="Element name (type or pick from list)"
-            @input="blurAfterDatalistPick"
-            @change="blurAfterDatalistPick"
-            @keydown.enter="dismissDatalistInput"
-            @focus="restoreDatalistPopup"
-            @blur="closeDatalistPopup"
+            @focus="openDatalist('root')"
+            @blur="scheduleCloseDatalist('root')"
+            @change="onRootElementChange"
+            @keydown.enter="onDatalistEnter($event, 'root')"
           />
           <datalist id="root-elements-list">
             <option v-for="el in elements" :key="el" :value="el" />
@@ -173,14 +172,13 @@
               <label>Target Element</label>
               <input
                 v-model="mapping.target_element"
-                list="target-elements-list"
+                :list="datalistListFor(datalistKey('target-el', mi), 'target-elements-list')"
                 :readonly="!!mapping.target_path?.trim()"
                 placeholder="Element name (type or pick from list)"
-                @input="onTargetElementInput(mi, $event)"
+                @focus="onTargetElementFocus(mi)"
+                @blur="scheduleCloseDatalist(datalistKey('target-el', mi))"
                 @change="onTargetElementChange(mi, $event)"
-                @keydown.enter="dismissDatalistInput"
-                @focus="restoreDatalistPopup"
-                @blur="closeDatalistPopup"
+                @keydown.enter="onDatalistEnter($event, datalistKey('target-el', mi))"
               />
             </div>
 
@@ -191,12 +189,30 @@
               </label>
               <input
                 v-model="mapping.target_path"
-                :list="`target-paths-list-${mi}`"
-                placeholder="PayDoc.Body.client (optional)"
+                :list="pathOptionsForMapping(mapping).length ? `target-paths-list-${mi}` : undefined"
+                placeholder="PayDoc.client.contact[0] (optional)"
                 @input="onTargetPathInput(mi)"
+                @change="onTargetPathChange(mi, $event)"
               />
+              <ul
+                v-if="pathOptionsForMapping(mapping).length"
+                class="path-suggestions"
+              >
+                <li
+                  v-for="p in pathOptionsForMapping(mapping)"
+                  :key="p"
+                >
+                  <button type="button" class="path-suggestion-btn" @click="selectTargetPath(mi, p)">
+                    {{ p }}
+                  </button>
+                </li>
+              </ul>
+              <p v-else-if="mapping.target_element && xmlText?.trim()" class="path-hint path-hint-muted">
+                No matching paths in current XML — type a path manually or generate XML first.
+              </p>
               <p class="path-hint">
                 Without a path, all &lt;{{ mapping.target_element || 'element' }}&gt; tags in the document will be filled.
+                Duplicate siblings use index syntax: <code>contact[0]</code>, <code>contact[1]</code>.
               </p>
             </div>
 
@@ -260,25 +276,23 @@
                 <input
                   v-model="field.db_col"
                   class="field-input"
-                  :list="`db-cols-list-${mi}`"
+                  :list="datalistListFor(datalistKey('db-col', mi, fi), `db-cols-list-${mi}`)"
                   placeholder="DB column (type or pick from list)"
-                  @input="blurAfterDatalistPick"
-                  @change="blurAfterDatalistPick"
-                  @keydown.enter="dismissDatalistInput"
-                  @focus="onDbColFocus(mi, $event)"
-                  @blur="closeDatalistPopup"
+                  @focus="onDbColFocus(mi, fi)"
+                  @blur="scheduleCloseDatalist(datalistKey('db-col', mi, fi))"
+                  @change="onDbColChange(mi, fi, $event)"
+                  @keydown.enter="onDatalistEnter($event, datalistKey('db-col', mi, fi))"
                 />
                 <span class="field-arrow">→</span>
                 <input
                   v-model="field.xml_attr"
                   class="field-input"
-                  :list="`xml-attrs-list-${mi}`"
+                  :list="datalistListFor(datalistKey('xml-attr', mi, fi), `xml-attrs-list-${mi}`)"
                   placeholder="XML attr (type or pick from list)"
-                  @input="blurAfterDatalistPick"
-                  @change="blurAfterDatalistPick"
-                  @keydown.enter="dismissDatalistInput"
-                  @focus="restoreDatalistPopup"
-                  @blur="closeDatalistPopup"
+                  @focus="openDatalist(datalistKey('xml-attr', mi, fi))"
+                  @blur="scheduleCloseDatalist(datalistKey('xml-attr', mi, fi))"
+                  @change="onXmlAttrChange(mi, fi, $event)"
+                  @keydown.enter="onDatalistEnter($event, datalistKey('xml-attr', mi, fi))"
                 />
                 <button
                   class="btn-icon-remove"
@@ -342,6 +356,7 @@
         <MappingWizard
           :open="wizardOpen"
           :schema-id="schemaId"
+          :xml-text="liveXmlText || xmlText"
           :elements="elements"
           :element-attributes="elementAttributes"
           :db-aliases="dbAliases"
@@ -434,7 +449,15 @@ import {
   loadMappingPreset as apiLoadMappingPreset,
   deleteMappingPreset as apiDeleteMappingPreset,
 } from '../api/mappingPresets'
-import { extractXmlElementPaths } from '../utils/xmlPaths'
+import {
+  datalistKey,
+  datalistListFor,
+  openDatalist,
+  scheduleCloseDatalist,
+  confirmDatalistPick,
+  clearAllDatalistState,
+  isOptionSelected,
+} from '../utils/datalistInput'
 import {
   getMappingValidationIssues,
   lastPathSegment,
@@ -465,6 +488,7 @@ const wizardOpen = ref(false)
 const mappingPreview = ref({})
 const autoMapLoading = ref({})
 const autoMapHint = ref({})
+const lastTargetElement = ref({})
 const dtdElementPaths = ref([])
 
 function createEmptyMapping() {
@@ -492,11 +516,18 @@ const presetDropdownLabel = computed(() => {
 })
 
 function addMapping() {
+  const mi = sqlMappings.value.length
   sqlMappings.value.push(createEmptyMapping())
+  lastTargetElement.value = { ...lastTargetElement.value, [mi]: '' }
 }
 
 function removeMapping(idx) {
   sqlMappings.value.splice(idx, 1)
+  const next = {}
+  sqlMappings.value.forEach((m, mi) => {
+    next[mi] = lastTargetElement.value[mi] ?? m.target_element ?? ''
+  })
+  lastTargetElement.value = next
 }
 
 function addField(mi) {
@@ -521,6 +552,14 @@ function normalizeMappings(mappings, presetSource = null) {
     db_alias: m.db_alias || '',
     _presetSource: presetSource,
   }))
+}
+
+function syncLastTargetElements() {
+  const next = { ...lastTargetElement.value }
+  sqlMappings.value.forEach((m, mi) => {
+    if (next[mi] === undefined) next[mi] = m.target_element || ''
+  })
+  lastTargetElement.value = next
 }
 
 function mappingDbAlias(mapping) {
@@ -552,6 +591,7 @@ async function addMappingsFromPreset(name) {
   const newMappings = normalizeMappings(preset.mappings, name)
   sqlMappings.value.push(...newMappings)
   mappingDbColumns.value = {}
+  syncLastTargetElements()
 }
 
 function removeSelectedPreset(name) {
@@ -578,23 +618,63 @@ function resetMappingXmlAttrs(mi) {
   }
 }
 
-function onTargetElementInput(mi, event) {
-  blurAfterDatalistPick(event)
-  const { inputType } = event
-  if (!inputType || inputType === 'insertReplacementText') {
-    resetMappingXmlAttrs(mi)
+function onDatalistEnter(event, key) {
+  confirmDatalistPick(key)
+  event.target.blur()
+}
+
+function onRootElementChange(event) {
+  const input = event.target
+  if (!input.value || isOptionSelected(input, elements.value)) {
+    confirmDatalistPick('root')
   }
 }
 
+function onTargetElementFocus(mi) {
+  if (sqlMappings.value[mi]?.target_path?.trim()) return
+  openDatalist(datalistKey('target-el', mi))
+}
+
 function onTargetElementChange(mi, event) {
-  resetMappingXmlAttrs(mi)
-  blurAfterDatalistPick(event)
+  const input = event.target
+  const value = input.value.trim()
+  const prev = lastTargetElement.value[mi] ?? ''
+
+  if (value !== prev) {
+    resetMappingXmlAttrs(mi)
+    lastTargetElement.value = { ...lastTargetElement.value, [mi]: value }
+  }
+
+  if (!value || isOptionSelected(input, elements.value)) {
+    confirmDatalistPick(datalistKey('target-el', mi))
+  }
 }
 
 function onTargetPathInput(mi) {
   const mapping = sqlMappings.value[mi]
   const seg = lastPathSegment(mapping.target_path)
-  if (seg) mapping.target_element = seg
+  if (!seg || seg === mapping.target_element) return
+
+  mapping.target_element = seg
+  const prev = lastTargetElement.value[mi] ?? ''
+  if (seg !== prev) {
+    resetMappingXmlAttrs(mi)
+    lastTargetElement.value = { ...lastTargetElement.value, [mi]: seg }
+  }
+}
+
+function onTargetPathChange(mi, event) {
+  onTargetPathInput(mi)
+  const input = event.target
+  const paths = pathOptionsForMapping(sqlMappings.value[mi])
+  if (!input.value || paths.includes(input.value)) {
+    return
+  }
+}
+
+function selectTargetPath(mi, path) {
+  sqlMappings.value[mi].target_path = path
+  onTargetPathInput(mi)
 }
 
 function pathOptionsForMapping(mapping) {
@@ -602,7 +682,8 @@ function pathOptionsForMapping(mapping) {
 }
 
 const availableElementPaths = computed(() => {
-  const parsed = extractXmlElementPaths(xmlText.value)
+  const text = (liveXmlText.value || xmlText.value || '').trim()
+  const parsed = extractXmlElementPaths(text)
   if (parsed?.elementPaths?.length) return parsed.elementPaths
   return dtdElementPaths.value
 })
@@ -801,33 +882,26 @@ function attributesForTarget(targetElement) {
   return attrs?.length ? attrs : allAttributes.value
 }
 
-function getDatalistOptions(input) {
-  const listId = input.dataset.datalistId || input.getAttribute('list')
-  if (!listId) return []
-  if (listId === 'root-elements-list' || listId === 'target-elements-list') {
-    return elements.value
-  }
-  const attrMatch = listId.match(/^xml-attrs-list-(\d+)$/)
-  if (attrMatch) {
-    const mapping = sqlMappings.value[Number(attrMatch[1])]
-    return mapping ? attributesForTarget(mapping.target_element) : allAttributes.value
-  }
-  const dbColMatch = listId.match(/^db-cols-list-(\d+)$/)
-  if (dbColMatch) {
-    return mappingDbColumns.value[Number(dbColMatch[1])] || []
-  }
-  return []
+function onDbColFocus(mi, fi) {
+  openDatalist(datalistKey('db-col', mi, fi))
+  refreshMappingColumns(mi)
 }
 
-function isDatalistValueSelected(input) {
-  const listId = input.dataset.datalistId || input.getAttribute('list')
-  const options = getDatalistOptions(input)
-  const value = input.value
-  if (listId?.startsWith('db-cols-list-')) {
-    const lower = value.toLowerCase()
-    return options.some((col) => col.toLowerCase() === lower)
+function onDbColChange(mi, fi, event) {
+  const cols = mappingDbColumns.value[mi] || []
+  const input = event.target
+  if (!input.value || isOptionSelected(input, cols, { caseInsensitive: true })) {
+    confirmDatalistPick(datalistKey('db-col', mi, fi))
   }
-  return options.includes(value)
+}
+
+function onXmlAttrChange(mi, fi, event) {
+  const mapping = sqlMappings.value[mi]
+  const attrs = attributesForTarget(mapping.target_element)
+  const input = event.target
+  if (!input.value || isOptionSelected(input, attrs)) {
+    confirmDatalistPick(datalistKey('xml-attr', mi, fi))
+  }
 }
 
 async function refreshMappingColumns(mi) {
@@ -857,48 +931,8 @@ async function refreshMappingColumns(mi) {
   }
 }
 
-function onDbColFocus(mi, event) {
-  restoreDatalistPopup(event)
-  refreshMappingColumns(mi)
-}
-
-function restoreDatalistPopup(event) {
-  const input = event.target
-  const listId = input.dataset.datalistId || input.getAttribute('list')
-  if (!listId) return
-  input.dataset.datalistId = listId
-  input.setAttribute('list', listId)
-}
-
-function closeDatalistPopup(event) {
-  const input = event.target
-  const listId = input.getAttribute('list') || input.dataset.datalistId
-  if (!listId) return
-
-  input.dataset.datalistId = listId
-  input.removeAttribute('list')
-}
-
-function dismissDatalistInput(event) {
-  const input = event.target
-  closeDatalistPopup(event)
-  input.blur()
-}
-
-function blurAfterDatalistPick(event) {
-  const input = event.target
-  const { inputType } = event
-  const pickedFromList = event.type === 'change' || !inputType || inputType === 'insertReplacementText'
-  if (!pickedFromList) return
-
-  requestAnimationFrame(() => {
-    if (!isDatalistValueSelected(input)) return
-    closeDatalistPopup(event)
-    input.blur()
-  })
-}
-
 const xmlText = ref('')
+const liveXmlText = ref('')
 const buildInfo = ref(null)
 const generating = ref(false)
 const filling = ref(false)
@@ -953,6 +987,7 @@ function scheduleXmlSync(text, delay = 150) {
 }
 
 function onEditorContentChange(text) {
+  liveXmlText.value = text || ''
   if (ignoreNextXmlWatch) {
     ignoreNextXmlWatch = false
     clearTimeout(xmlSyncTimer)
@@ -1023,6 +1058,7 @@ watch(mode, async (val, oldVal) => {
 watch(
   sqlMappings,
   () => {
+    syncLastTargetElements()
     clearTimeout(columnsFetchTimer)
     columnsFetchTimer = setTimeout(() => {
       sqlMappings.value.forEach((_, mi) => refreshMappingColumns(mi))
@@ -1030,6 +1066,13 @@ watch(
   },
   { deep: true },
 )
+
+watch(wizardOpen, async (isOpen) => {
+  if (isOpen) {
+    await nextTick()
+    liveXmlText.value = getEditorXmlText() || xmlText.value || ''
+  }
+})
 
 watch(isHybridStrategy, (enabled) => {
   if (enabled) refreshMappingPresets()
@@ -1086,6 +1129,7 @@ onBeforeUnmount(() => {
   clearTimeout(columnsFetchTimer)
   stopFillProgressTimer()
   stopResize()
+  clearAllDatalistState()
 })
 
 async function onDtdUploaded(result) {
@@ -1199,6 +1243,7 @@ async function generate() {
     const result = await generateXml(config)
     ignoreNextXmlWatch = true
     xmlText.value = result.xml_text
+    liveXmlText.value = result.xml_text
     buildInfo.value = result
     validationResult.value = null
   } catch (e) {
@@ -1916,6 +1961,42 @@ function stopResize() {
   font-size: 11px;
   color: var(--text-muted);
   margin: 0;
+}
+
+.path-hint-muted {
+  font-style: italic;
+}
+
+.path-suggestions {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 120px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.path-suggestions li {
+  margin: 0;
+}
+
+.path-suggestion-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.path-suggestion-btn:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
 }
 
 .query-actions {
