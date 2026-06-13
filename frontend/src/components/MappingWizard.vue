@@ -23,19 +23,12 @@
         <!-- Step 0: Element -->
         <div v-if="step === 0" class="wizard-panel">
           <label>Целевой элемент</label>
-          <input
+          <ElementPicker
             v-model="draft.target_element"
-            :list="datalistListFor('wizard-el', 'wizard-elements-list')"
+            :elements="elements"
             placeholder="Имя элемента (введите или выберите из списка)"
-            @input="onElementInput"
-            @focus="openDatalist('wizard-el')"
-            @blur="scheduleCloseDatalist('wizard-el')"
-            @change="onElementDatalistChange"
-            @keydown.enter="onDatalistEnter($event, 'wizard-el')"
+            @update:model-value="onTargetElementChange"
           />
-          <datalist id="wizard-elements-list">
-            <option v-for="el in filteredElements" :key="el" :value="el" />
-          </datalist>
           <p class="wizard-hint">Выберите XML-элемент, атрибуты которого будут заполнены из SQL.</p>
         </div>
 
@@ -207,6 +200,7 @@ import {
   confirmDatalistPick,
   isOptionSelected,
 } from '../utils/datalistInput'
+import ElementPicker from './ElementPicker.vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -226,7 +220,6 @@ const emit = defineEmits(['close', 'finish'])
 
 const stepLabels = ['Элемент', 'Путь', 'SQL', 'Поля', 'Обзор']
 const step = ref(0)
-const elementFilter = ref('')
 
 const draft = ref(createEmptyDraft())
 const preview = ref({ loading: false, columns: [], row: undefined, error: '' })
@@ -242,12 +235,6 @@ function createEmptyDraft() {
     db_alias: '',
   }
 }
-
-const filteredElements = computed(() => {
-  const q = elementFilter.value.toLowerCase()
-  if (!q) return props.elements
-  return props.elements.filter((el) => el.toLowerCase().includes(q))
-})
 
 const pathOptions = computed(() => {
   const tag = draft.value.target_element?.trim()
@@ -325,7 +312,6 @@ watch(
     draft.value = draftFromMapping(initialMapping)
     preview.value = { loading: false, columns: [], row: undefined, error: '' }
     autoMapHint.value = ''
-    elementFilter.value = ''
     if (initialMapping?.db_alias?.trim() && initialMapping?.query?.trim()) {
       testQuery()
     }
@@ -337,20 +323,12 @@ function onDatalistEnter(event, key) {
   event.target.blur()
 }
 
-function onElementInput(event) {
-  elementFilter.value = event.target.value
+function onTargetElementChange(value) {
   if (draft.value.target_path) {
     const seg = lastPathSegment(draft.value.target_path)
-    if (seg !== draft.value.target_element) {
+    if (seg !== value) {
       draft.value.target_path = ''
     }
-  }
-}
-
-function onElementDatalistChange(event) {
-  const input = event.target
-  if (!input.value || isOptionSelected(input, props.elements)) {
-    confirmDatalistPick('wizard-el')
   }
 }
 

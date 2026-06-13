@@ -2,19 +2,12 @@
   <div class="tab-pane structure-tab">
     <div class="field">
       <label>Корневой элемент</label>
-      <input
-        :value="rootElement"
-        :list="datalistListFor('root', 'root-elements-list')"
+      <ElementPicker
+        :model-value="rootElement"
+        :elements="elements"
         placeholder="Имя элемента (введите или выберите из списка)"
-        @input="$emit('update:rootElement', $event.target.value)"
-        @focus="openDatalist('root')"
-        @blur="scheduleCloseDatalist('root')"
-        @change="onRootElementChange"
-        @keydown.enter="onDatalistEnter($event, 'root')"
+        @update:model-value="$emit('update:rootElement', $event)"
       />
-      <datalist id="root-elements-list">
-        <option v-for="el in elements" :key="el" :value="el" />
-      </datalist>
     </div>
 
     <div class="field">
@@ -43,6 +36,16 @@
     </div>
 
     <div v-if="mode === 'custom'" class="structure-tree-host">
+      <div class="field tree-search-field">
+        <label>Найти элемент</label>
+        <ElementPicker
+          v-model="treeSearchQuery"
+          :elements="elements"
+          placeholder="Имя элемента (введите или выберите из списка)"
+          @confirm="onTreeSearch"
+        />
+        <p v-if="treeSearchError" class="tree-search-error">{{ treeSearchError }}</p>
+      </div>
       <DtdTreeView
         ref="dtdTreeRef"
         :schema-id="schemaId"
@@ -55,15 +58,10 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import DtdTreeView from '../DtdTreeView.vue'
-import {
-  datalistListFor,
-  openDatalist,
-  scheduleCloseDatalist,
-  confirmDatalistPick,
-  isOptionSelected,
-} from '../../utils/datalistInput'
+import ElementPicker from '../ElementPicker.vue'
+import { resolveElementName } from '../../utils/elementFilter'
 
 const props = defineProps({
   schemaId: { type: String, required: true },
@@ -82,19 +80,29 @@ const modes = [
 ]
 
 const dtdTreeRef = ref(null)
-defineExpose({ dtdTreeRef })
+const treeSearchQuery = ref('')
+const treeSearchError = ref('')
 
-function onDatalistEnter(event, key) {
-  confirmDatalistPick(key)
-  event.target.blur()
-}
+watch(
+  () => [props.schemaId, props.rootElement],
+  () => {
+    treeSearchQuery.value = ''
+    treeSearchError.value = ''
+  },
+)
 
-function onRootElementChange(event) {
-  const input = event.target
-  if (!input.value || isOptionSelected(input, props.elements)) {
-    confirmDatalistPick('root')
+async function onTreeSearch(name) {
+  treeSearchError.value = ''
+  const target = resolveElementName(name, props.elements)
+  if (!target) return
+
+  const result = await dtdTreeRef.value?.revealElement(target)
+  if (!result?.ok) {
+    treeSearchError.value = result?.error || 'Элемент не найден в дереве'
   }
 }
+
+defineExpose({ dtdTreeRef })
 </script>
 
 <style scoped>
@@ -129,11 +137,22 @@ function onRootElementChange(event) {
   cursor: pointer;
 }
 
+.tree-search-field {
+  flex-shrink: 0;
+}
+
+.tree-search-error {
+  font-size: 11px;
+  color: var(--danger);
+  margin: 0;
+}
+
 .structure-tree-host {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  gap: 8px;
 }
 
 .structure-tree-host :deep(.tree-view) {

@@ -14,6 +14,7 @@
 
     <div class="scroller-wrap">
       <RecycleScroller
+        ref="scrollerRef"
         v-show="flatNodes.length && !loading"
         class="scroller"
         :items="flatNodes"
@@ -21,7 +22,11 @@
         key-field="id"
         v-slot="{ item }"
       >
-        <div class="tree-row" :key="item.id">
+        <div
+          class="tree-row"
+          :class="{ 'search-highlight': item.path === highlightedPath }"
+          :key="item.id"
+        >
           <span class="indent" :style="{ width: `${item.depth * 20}px` }" />
           <button v-if="item.hasChildren" class="expand-btn" @click="toggleExpand(item)">
             {{ item.expanded ? '▼' : '▶' }}
@@ -63,11 +68,12 @@
 </template>
 
 <script setup>
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { getElementTree } from '../api/dtd'
 import { listPresets, savePreset as apiSavePreset, loadPreset as apiLoadPreset } from '../api/presets'
 import { inferRootFromElementPaths, normalizeTreePath } from '../utils/xmlPaths'
+import { findPathsToElement } from '../utils/dtdTreeNavigation'
 
 const props = defineProps({
   schemaId: { type: String, required: true },
@@ -78,6 +84,8 @@ const emit = defineEmits(['update:paths', 'update:rootElement'])
 
 const treeRoot = ref(null)
 const flatNodes = ref([])
+const scrollerRef = ref(null)
+const highlightedPath = ref(null)
 const checkedPaths = ref(new Set())
 const loading = ref(false)
 const loadingMessage = ref('Загрузка дерева…')
@@ -89,6 +97,7 @@ const pendingXmlPaths = ref(null)
 const applyingPresetRoot = ref(false)
 let nodeIdCounter = 0
 let loadSeq = 0
+let highlightTimer = null
 
 function isStale(seq) {
   return seq !== loadSeq
@@ -110,6 +119,7 @@ function endLoad(seq) {
 
 onBeforeUnmount(() => {
   cancelPendingLoads()
+  if (highlightTimer) clearTimeout(highlightTimer)
 })
 
 watch(
@@ -138,9 +148,11 @@ watch(
     if (!props.schemaId || !props.rootElement) {
       treeRoot.value = null
       flatNodes.value = []
+      clearSearchHighlight()
       endLoad(seq)
       return
     }
+    clearSearchHighlight()
     treeRoot.value = null
     flatNodes.value = []
     const preservedPreset = pendingPresetPaths.value
@@ -692,7 +704,116 @@ async function applyXmlElementPaths(elementPaths) {
   if (!isStale(seq)) pendingXmlPaths.value = null
 }
 
-defineExpose({ applyXmlElementPaths })
+function clearSearchHighlight() {
+  highlightedPath.value = null
+  if (highlightTimer) {
+    clearTimeout(highlightTimer)
+    highlightTimer = null
+  }
+}
+
+function flashSearchHighlight(path) {
+  clearSearchHighlight()
+  highlightedPath.value = path
+  highlightTimer = setTimeout(() => {
+    highlightedPath.value = null
+    highlightTimer = null
+  }, 2000)
+}
+
+function scrollToTreePath(path) {
+  const index = flatNodes.value.findIndex((n) => n.path === path)
+  if (index < 0) return
+  const scroller = scrollerRef.value
+  if (scroller?.scrollToItem) {
+    scroller.scrollToItem(index)
+  }
+}
+
+async function loadNodeBranch(node, seq) {
+  if (!node?._refName || node._loaded) return true
+  const data = await getElementTree(props.schemaId, node._refName)
+  if (seq !== loadSeq) return false
+  node.children = buildChildrenFromModel(data.content_model, node.path, node.depth + 1)
+  node._loaded = true
+  node.hasChildren = node.children.length > 0
+  return true
+}
+
+async function revealPath(path) {
+  if (!treeRoot.value || !path?.trim()) return false
+
+  const seq = loadSeq
+  const parts = path.split('.')
+  if (parts[0] !== treeRoot.value.name) return false
+
+  beginLoad('Поиск в дереве…')
+  try {
+    let currentPath = treeRoot.value.path
+
+    for (let i = 1; i < parts.length; i++) {
+      const parent = findNodeByPath(currentPath)
+      if (!parent) return false
+
+      const loaded = await loadNodeBranch(parent, seq)
+      if (!loaded || seq !== loadSeq) return false
+
+      parent.expanded = true
+
+      const nextPath = parts.slice(0, i + 1).join('.')
+      const nextNode = findNodeByPath(nextPath)
+      if (!nextNode) return false
+      currentPath = nextPath
+    }
+
+    if (seq !== loadSeq) return false
+
+    refreshFlat()
+    await nextTick()
+    scrollToTreePath(path)
+    flashSearchHighlight(path)
+    return true
+  } finally {
+    endLoad(seq)
+  }
+}
+
+async function revealElement(name) {
+  const target = name?.trim()
+  if (!target) {
+    return { ok: false, error: 'Укажите имя элемента' }
+  }
+  if (!props.schemaId || !props.rootElement) {
+    return { ok: false, error: 'Выберите корневой элемент' }
+  }
+  if (!treeRoot.value) {
+    return { ok: false, error: 'Дерево ещё не загружено' }
+  }
+
+  clearSearchHighlight()
+
+  const path = await findPathsToElement(
+    props.rootElement,
+    target,
+    (elementName) => getElementTree(props.schemaId, elementName),
+  )
+
+  if (!path) {
+    return {
+      ok: false,
+      error: `Элемент «${target}» не достижим от корня «${props.rootElement}»`,
+    }
+  }
+
+  const revealed = await revealPath(path)
+  if (!revealed) {
+    return { ok: false, error: 'Не удалось раскрыть путь в дереве' }
+  }
+
+  return { ok: true, path }
+}
+
+defineExpose({ applyXmlElementPaths, revealElement })
 </script>
 
 <style scoped>
@@ -758,6 +879,16 @@ defineExpose({ applyXmlElementPaths })
   border-bottom: 1px solid var(--border);
   padding-left: 8px;
   overflow: hidden;
+}
+
+.tree-row.search-highlight {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  animation: search-highlight-fade 2s ease-out;
+}
+
+@keyframes search-highlight-fade {
+  0% { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+  100% { background: color-mix(in srgb, var(--accent) 28%, transparent); }
 }
 
 .indent {
