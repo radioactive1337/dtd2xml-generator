@@ -10,10 +10,9 @@
       </select>
     </div>
 
-    <div v-if="usesLlmStrategy" class="field">
+    <div v-if="usesLlmStrategy && llmAliases.length > 1" class="field">
       <label>Алиас LLM</label>
       <select
-        v-if="llmAliases.length"
         :value="llmAlias"
         @change="$emit('update:llmAlias', $event.target.value)"
       >
@@ -21,13 +20,13 @@
           {{ alias }}{{ alias === defaultLlmAlias ? ' (по умолчанию)' : '' }}
         </option>
       </select>
-      <p v-if="!llmAliases.length" class="llm-alias-hint llm-alias-hint--warn">
-        Алиасы LLM не настроены — добавьте их в <code>connections.json</code> (см. Настройки).
-      </p>
-      <p v-else-if="llmAliases.length > 1" class="llm-alias-hint">
+      <p class="llm-alias-hint">
         Используется для AI-заполнения и автосопоставления полей в мастере маппинга.
       </p>
     </div>
+    <p v-else-if="usesLlmStrategy && !llmAliases.length" class="llm-alias-hint llm-alias-hint--warn">
+      Алиасы LLM не настроены — добавьте их в <code>connections.json</code> (см. Настройки).
+    </p>
 
     <label class="auto-validate-label">
       <input
