@@ -587,7 +587,7 @@ function resetFillProgress() {
   fillElapsedSeconds.value = 0
 }
 
-const LEFT_MIN = 440
+const LEFT_MIN = 480
 const LEFT_MAX = 760
 
 const leftWidth = ref(LEFT_MIN)
@@ -948,7 +948,7 @@ function stopResize() {
   flex-direction: column;
   gap: 0;
   flex-shrink: 0;
-  min-width: 440px;
+  min-width: 480px;
   height: 100%;
   overflow: hidden;
 }
