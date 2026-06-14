@@ -114,7 +114,6 @@
           :fill-status-message="fillStatusMessage"
           :fill-percent="fillPercent"
           :fill-elapsed-label="fillElapsedLabel"
-          :validation-result="validationResult"
           :error="error"
           @generate="generate"
           @fill="fill"
