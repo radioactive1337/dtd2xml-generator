@@ -242,7 +242,9 @@ const pathOptions = computed(() => {
 
   const text = props.xmlText?.trim()
   if (text) {
-    const parsed = extractXmlElementPaths(text)
+    // skipFormat: xmlText comes from liveXmlText which may be mid-edit;
+    // xml-formatter cannot recover structurally invalid XML anyway.
+    const parsed = extractXmlElementPaths(text, { skipFormat: true })
     if (parsed?.elementPaths?.length) {
       return pathsEndingWithTag(parsed.elementPaths, tag)
     }

@@ -62,13 +62,18 @@ function collectElementPaths(doc) {
 /**
  * Parse XML text and return the document root tag plus dot-separated element paths.
  * Returns null when the text is empty or not well-formed XML.
+ *
+ * @param {string} xmlText
+ * @param {{ skipFormat?: boolean }} [options]
+ *   skipFormat — skip the xml-formatter fallback pass (use for live editor input
+ *   where malformed XML is expected during typing and re-formatting never helps).
  */
-export function extractXmlElementPaths(xmlText) {
+export function extractXmlElementPaths(xmlText, { skipFormat = false } = {}) {
   const trimmed = normalizeXmlInput(xmlText)
   if (!trimmed) return null
 
   let doc = parseXmlDocument(trimmed)
-  if (!doc) {
+  if (!doc && !skipFormat) {
     doc = parseXmlDocument(formatXml(trimmed))
   }
   if (!doc) return null

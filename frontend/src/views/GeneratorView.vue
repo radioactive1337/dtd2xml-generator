@@ -353,7 +353,9 @@ const availableElementPaths = computed(() => {
   const text = (liveXmlText.value || xmlText.value || '').trim()
   if (!text) return dtdElementPaths.value
   try {
-    const parsed = extractXmlElementPaths(text)
+    // skipFormat: during live editing XML is often partial/malformed; the
+    // xml-formatter fallback never repairs structural invalidity, only whitespace.
+    const parsed = extractXmlElementPaths(text, { skipFormat: true })
     if (parsed?.elementPaths?.length) return parsed.elementPaths
   } catch {
     // malformed or partial XML in editor
