@@ -55,6 +55,16 @@
             >
               Сохранить
             </button>
+            <button class="btn-secondary" @click="triggerImport">
+              Импорт
+            </button>
+            <input
+              ref="importFileInputRef"
+              type="file"
+              accept=".json,application/json"
+              class="preset-import-input"
+              @change="onImportFileSelect"
+            />
             <div ref="presetDropdownRef" class="preset-dropdown">
               <button
                 type="button"
@@ -85,6 +95,13 @@
                       {{ formatMappings(p.mapping_count) }}
                     </span>
                   </span>
+                  <button
+                    class="btn-icon-action"
+                    title="Экспорт JSON"
+                    @click.prevent="$emit('export-mapping-preset', p.name)"
+                  >
+                    ↓
+                  </button>
                   <button
                     class="btn-icon-remove"
                     title="Удалить пресет"
@@ -201,6 +218,8 @@ const emit = defineEmits([
   'update:mappingPresetName',
   'update:selectedMappingPresetNames',
   'save-mapping-preset',
+  'import-mapping-preset',
+  'export-mapping-preset',
   'open-mapping-wizard',
   'remove-mapping',
   'delete-mapping-preset',
@@ -209,6 +228,7 @@ const emit = defineEmits([
 
 const presetDropdownOpen = ref(false)
 const presetDropdownRef = ref(null)
+const importFileInputRef = ref(null)
 
 function filledMappingFields(mapping) {
   return (mapping.fields || []).filter((f) => f.db_col && f.xml_attr)
@@ -221,6 +241,17 @@ function onPresetCheckboxChange(name, checked) {
   } else if (!checked) {
     emit('update:selectedMappingPresetNames', current.filter((n) => n !== name))
   }
+}
+
+function triggerImport() {
+  importFileInputRef.value?.click()
+}
+
+function onImportFileSelect(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  emit('import-mapping-preset', file)
 }
 
 function onPresetDropdownOutsideClick(event) {
@@ -338,6 +369,10 @@ onBeforeUnmount(() => {
   width: 130px;
 }
 
+.preset-import-input {
+  display: none;
+}
+
 .preset-dropdown {
   position: relative;
 }
@@ -443,11 +478,26 @@ onBeforeUnmount(() => {
   line-height: 1.3;
 }
 
+.preset-dropdown-item .btn-icon-action,
 .preset-dropdown-item .btn-icon-remove {
   flex: 0 0 auto;
   padding: 0 4px;
   font-size: 14px;
   line-height: 1.2;
+}
+
+.preset-dropdown-item .btn-icon-action {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.preset-dropdown-item .btn-icon-action:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .preset-meta {

@@ -88,6 +88,8 @@
             :mapping-preview="mappingPreview"
             :mapping-validation="mappingValidation"
             @save-mapping-preset="saveMappingPreset"
+            @import-mapping-preset="importMappingPreset"
+            @export-mapping-preset="exportMappingPreset"
             @open-mapping-wizard="openMappingWizard"
             @remove-mapping="removeMapping"
             @delete-mapping-preset="deleteMappingPreset"
@@ -171,6 +173,8 @@ import {
   saveMappingPreset as apiSaveMappingPreset,
   loadMappingPreset as apiLoadMappingPreset,
   deleteMappingPreset as apiDeleteMappingPreset,
+  exportMappingPreset as apiExportMappingPreset,
+  parseMappingPresetFile,
 } from '../api/mappingPresets'
 import { clearAllDatalistState } from '../utils/datalistInput'
 import {
@@ -313,6 +317,30 @@ async function deleteMappingPreset(name) {
   selectedMappingPresetNames.value = selectedMappingPresetNames.value.filter((n) => n !== name)
   sqlMappings.value = sqlMappings.value.filter((m) => m._presetSource !== name)
   await refreshMappingPresets()
+}
+
+async function exportMappingPreset(name) {
+  error.value = ''
+  try {
+    await apiExportMappingPreset(name)
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function importMappingPreset(file) {
+  error.value = ''
+  try {
+    const text = await file.text()
+    const preset = parseMappingPresetFile(text)
+    await apiSaveMappingPreset(preset)
+    await refreshMappingPresets()
+    if (!selectedMappingPresetNames.value.includes(preset.name)) {
+      selectedMappingPresetNames.value = [...selectedMappingPresetNames.value, preset.name]
+    }
+  } catch (e) {
+    error.value = e.message
+  }
 }
 
 const availableElementPaths = computed(() => {
