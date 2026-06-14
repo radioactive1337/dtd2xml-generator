@@ -14,6 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.routes import config, db, dtd, export, fill, generate, mapping_presets, presets, validate
 from app.config import PROJECT_ROOT, get_app_settings, get_connection_aliases
 from app.core.logging_config import setup_logging
+from app.services.db_service import close_db_pools
 from app.services.oracle_client import bootstrap_oracle_client
 
 setup_logging()
@@ -27,6 +28,7 @@ async def lifespan(_app: FastAPI):
     loaded = dtd.initialize_schema_registry()
     logger.info("DTD schema registry initialized [loaded=%d]", loaded)
     yield
+    await close_db_pools()
 
 
 app = FastAPI(

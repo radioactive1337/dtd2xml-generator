@@ -45,17 +45,21 @@ async def test_run_query_oracle_returns_normalized_rows():
     with patch("app.services.db_service.load_connections", return_value=connections):
         with patch("app.services.db_service.get_db_password", return_value="secret"):
             with patch(
-                "app.services.db_service._oracle_query_sync",
-                return_value=expected,
-            ) as oracle_query:
+                "app.services.db_service._get_oracle_pool",
+                return_value=object(),
+            ):
                 with patch(
-                    "app.services.db_service.asyncio.to_thread",
-                    new=fake_to_thread,
-                ):
-                    rows = await DBService().run_query(
-                        "ORACLE_DB",
-                        "SELECT inn, name FROM company WHERE rownum = 1",
-                    )
+                    "app.services.db_service._oracle_query_sync",
+                    return_value=expected,
+                ) as oracle_query:
+                    with patch(
+                        "app.services.db_service.asyncio.to_thread",
+                        new=fake_to_thread,
+                    ):
+                        rows = await DBService().run_query(
+                            "ORACLE_DB",
+                            "SELECT inn, name FROM company WHERE rownum = 1",
+                        )
 
     oracle_query.assert_called_once()
     assert rows == expected
@@ -82,17 +86,21 @@ async def test_get_query_columns_oracle_returns_description_columns():
     with patch("app.services.db_service.load_connections", return_value=connections):
         with patch("app.services.db_service.get_db_password", return_value="secret"):
             with patch(
-                "app.services.db_service._oracle_columns_sync",
-                return_value=["inn", "name"],
-            ) as oracle_columns:
+                "app.services.db_service._get_oracle_pool",
+                return_value=object(),
+            ):
                 with patch(
-                    "app.services.db_service.asyncio.to_thread",
-                    new=fake_to_thread,
-                ):
-                    columns = await DBService().get_query_columns(
-                        "ORACLE_DB",
-                        "SELECT inn, name FROM company WHERE rownum = 1",
-                    )
+                    "app.services.db_service._oracle_columns_sync",
+                    return_value=["inn", "name"],
+                ) as oracle_columns:
+                    with patch(
+                        "app.services.db_service.asyncio.to_thread",
+                        new=fake_to_thread,
+                    ):
+                        columns = await DBService().get_query_columns(
+                            "ORACLE_DB",
+                            "SELECT inn, name FROM company WHERE rownum = 1",
+                        )
 
     oracle_columns.assert_called_once()
     assert columns == ["inn", "name"]

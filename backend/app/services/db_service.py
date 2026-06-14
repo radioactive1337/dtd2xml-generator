@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from typing import Any
 
 import asyncpg
@@ -20,6 +21,88 @@ from lxml import etree
 from app.core.xml_tree import ProtectedAttrs, element_path, find_elements_by_dot_path
 
 logger = logging.getLogger(__name__)
+
+_POOL_MIN_SIZE = 1
+_POOL_MAX_SIZE = 10
+
+_pg_pools: dict[str, asyncpg.Pool] = {}
+_pg_pool_lock = asyncio.Lock()
+_oracle_pools: dict[str, oracledb.ConnectionPool] = {}
+_oracle_pool_lock = threading.Lock()
+
+
+async def _get_pg_pool(
+    alias: str,
+    cfg: DatabaseConfig,
+    password: str,
+) -> asyncpg.Pool:
+    pool = _pg_pools.get(alias)
+    if pool is not None:
+        return pool
+
+    async with _pg_pool_lock:
+        pool = _pg_pools.get(alias)
+        if pool is not None:
+            return pool
+
+        pool = await asyncpg.create_pool(
+            host=cfg.host,
+            port=cfg.port,
+            user=cfg.user,
+            password=password,
+            database=cfg.database,
+            min_size=_POOL_MIN_SIZE,
+            max_size=_POOL_MAX_SIZE,
+        )
+        _pg_pools[alias] = pool
+        logger.debug("Created PostgreSQL pool [alias=%s max_size=%d]", alias, _POOL_MAX_SIZE)
+        return pool
+
+
+def _get_oracle_pool(
+    alias: str,
+    cfg: DatabaseConfig,
+    password: str,
+) -> oracledb.ConnectionPool:
+    pool = _oracle_pools.get(alias)
+    if pool is not None:
+        return pool
+
+    with _oracle_pool_lock:
+        pool = _oracle_pools.get(alias)
+        if pool is not None:
+            return pool
+
+        ensure_oracle_thick_mode(required=True)
+        if oracledb.is_thin_mode():
+            raise RuntimeError(
+                "Oracle thick mode is required but the driver is still in thin mode."
+            )
+
+        pool = oracledb.create_pool(
+            user=cfg.user,
+            password=password,
+            dsn=_oracle_dsn(cfg),
+            min=_POOL_MIN_SIZE,
+            max=_POOL_MAX_SIZE,
+            increment=1,
+        )
+        _oracle_pools[alias] = pool
+        logger.debug("Created Oracle pool [alias=%s max=%d]", alias, _POOL_MAX_SIZE)
+        return pool
+
+
+async def close_db_pools() -> None:
+    """Close all database connection pools. Called on application shutdown."""
+    for alias, pool in list(_pg_pools.items()):
+        await pool.close()
+        logger.debug("Closed PostgreSQL pool [alias=%s]", alias)
+    _pg_pools.clear()
+
+    for alias, pool in list(_oracle_pools.items()):
+        pool.close()
+        logger.debug("Closed Oracle pool [alias=%s]", alias)
+    _oracle_pools.clear()
 
 
 class SqlMapping(BaseModel):
@@ -55,19 +138,8 @@ def _oracle_dsn(cfg: DatabaseConfig) -> str:
     return oracledb.makedsn(cfg.host, cfg.port, service_name=cfg.database)
 
 
-def _oracle_columns_sync(
-    user: str,
-    password: str,
-    dsn: str,
-    sql: str,
-) -> list[str]:
-    ensure_oracle_thick_mode(required=True)
-    if oracledb.is_thin_mode():
-        raise RuntimeError(
-            "Oracle thick mode is required but the driver is still in thin mode."
-        )
-
-    conn = oracledb.connect(user=user, password=password, dsn=dsn)
+def _oracle_columns_sync(pool: oracledb.ConnectionPool, sql: str) -> list[str]:
+    conn = pool.acquire()
     try:
         with conn.cursor() as cursor:
             cursor.execute(sql)
@@ -75,44 +147,30 @@ def _oracle_columns_sync(
                 return []
             return [col[0].lower() for col in cursor.description]
     finally:
-        conn.close()
+        pool.release(conn)
 
 
-def _oracle_ping_sync(user: str, password: str, dsn: str) -> None:
-    ensure_oracle_thick_mode(required=True)
-    if oracledb.is_thin_mode():
-        raise RuntimeError(
-            "Oracle thick mode is required but the driver is still in thin mode."
-        )
-
-    conn = oracledb.connect(user=user, password=password, dsn=dsn)
+def _oracle_ping_sync(pool: oracledb.ConnectionPool) -> None:
+    conn = pool.acquire()
     try:
         with conn.cursor() as cursor:
             cursor.execute("SELECT 1 FROM DUAL")
             cursor.fetchone()
     finally:
-        conn.close()
+        pool.release(conn)
 
 
 def _oracle_query_sync(
-    user: str,
-    password: str,
-    dsn: str,
+    pool: oracledb.ConnectionPool,
     sql: str,
 ) -> list[dict[str, Any]]:
-    """Run Oracle SQL via synchronous thick-mode connection.
+    """Run Oracle SQL via synchronous thick-mode connection pool.
 
     ``connect_async`` can still attempt thin mode on some Windows setups even after
     ``init_oracle_client()``, so thick mode queries use the sync driver in a worker
     thread instead.
     """
-    ensure_oracle_thick_mode(required=True)
-    if oracledb.is_thin_mode():
-        raise RuntimeError(
-            "Oracle thick mode is required but the driver is still in thin mode."
-        )
-
-    conn = oracledb.connect(user=user, password=password, dsn=dsn)
+    conn = pool.acquire()
     try:
         with conn.cursor() as cursor:
             cursor.arraysize = 1
@@ -126,7 +184,7 @@ def _oracle_query_sync(
                 return []
             return _rows_to_dicts(columns, [row])
     finally:
-        conn.close()
+        pool.release(conn)
 
 
 class DBService:
@@ -145,10 +203,10 @@ class DBService:
 
         try:
             if driver == "postgresql":
-                await self._test_postgresql(cfg, password)
+                await self._test_postgresql(alias, cfg, password)
                 return f"Connected ({driver})"
             if driver in {"oracle", "oracledb"}:
-                await self._test_oracle(cfg, password)
+                await self._test_oracle(alias, cfg, password)
                 return f"Connected ({driver})"
         except Exception:
             logger.exception(
@@ -164,27 +222,25 @@ class DBService:
         logger.error("Unsupported database driver [alias=%s driver=%s]", alias, cfg.driver)
         raise ValueError(f"Unsupported database driver: {cfg.driver}")
 
-    async def _test_postgresql(self, cfg: DatabaseConfig, password: str) -> None:
-        conn = await asyncpg.connect(
-            host=cfg.host,
-            port=cfg.port,
-            user=cfg.user,
-            password=password,
-            database=cfg.database,
-        )
-        try:
+    async def _test_postgresql(
+        self,
+        alias: str,
+        cfg: DatabaseConfig,
+        password: str,
+    ) -> None:
+        pool = await _get_pg_pool(alias, cfg, password)
+        async with pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
-        finally:
-            await conn.close()
 
-    async def _test_oracle(self, cfg: DatabaseConfig, password: str) -> None:
+    async def _test_oracle(
+        self,
+        alias: str,
+        cfg: DatabaseConfig,
+        password: str,
+    ) -> None:
+        pool = _get_oracle_pool(alias, cfg, password)
         try:
-            await asyncio.to_thread(
-                _oracle_ping_sync,
-                cfg.user,
-                password,
-                _oracle_dsn(cfg),
-            )
+            await asyncio.to_thread(_oracle_ping_sync, pool)
         except oracledb.Error as exc:
             mapped = map_oracle_client_error(exc)
             if mapped is not None:
@@ -204,9 +260,9 @@ class DBService:
 
         try:
             if driver == "postgresql":
-                return await self._query_postgresql(cfg, password, validated_sql)
+                return await self._query_postgresql(alias, cfg, password, validated_sql)
             if driver in {"oracle", "oracledb"}:
-                return await self._query_oracle(cfg, password, validated_sql)
+                return await self._query_oracle(alias, cfg, password, validated_sql)
         except Exception:
             logger.exception(
                 "SQL query failed [alias=%s driver=%s host=%s:%s db=%s query=%s]",
@@ -235,9 +291,9 @@ class DBService:
 
         try:
             if driver == "postgresql":
-                return await self._query_columns_postgresql(cfg, password, validated_sql)
+                return await self._query_columns_postgresql(alias, cfg, password, validated_sql)
             if driver in {"oracle", "oracledb"}:
-                return await self._query_columns_oracle(cfg, password, validated_sql)
+                return await self._query_columns_oracle(alias, cfg, password, validated_sql)
         except Exception:
             logger.exception(
                 "SQL column introspection failed [alias=%s driver=%s host=%s:%s query=%s]",
@@ -254,40 +310,29 @@ class DBService:
 
     async def _query_columns_postgresql(
         self,
+        alias: str,
         cfg: DatabaseConfig,
         password: str,
         sql: str,
     ) -> list[str]:
-        conn = await asyncpg.connect(
-            host=cfg.host,
-            port=cfg.port,
-            user=cfg.user,
-            password=password,
-            database=cfg.database,
-        )
-        try:
+        pool = await _get_pg_pool(alias, cfg, password)
+        async with pool.acquire() as conn:
             await conn.execute(
                 "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
             )
             prepared = await conn.prepare(sql)
             return [attr.name.lower() for attr in prepared.get_attributes()]
-        finally:
-            await conn.close()
 
     async def _query_columns_oracle(
         self,
+        alias: str,
         cfg: DatabaseConfig,
         password: str,
         sql: str,
     ) -> list[str]:
+        pool = _get_oracle_pool(alias, cfg, password)
         try:
-            return await asyncio.to_thread(
-                _oracle_columns_sync,
-                cfg.user,
-                password,
-                _oracle_dsn(cfg),
-                sql,
-            )
+            return await asyncio.to_thread(_oracle_columns_sync, pool, sql)
         except oracledb.Error as exc:
             mapped = map_oracle_client_error(exc)
             if mapped is not None:
@@ -296,18 +341,13 @@ class DBService:
 
     async def _query_postgresql(
         self,
+        alias: str,
         cfg: DatabaseConfig,
         password: str,
         sql: str,
     ) -> list[dict[str, Any]]:
-        conn = await asyncpg.connect(
-            host=cfg.host,
-            port=cfg.port,
-            user=cfg.user,
-            password=password,
-            database=cfg.database,
-        )
-        try:
+        pool = await _get_pg_pool(alias, cfg, password)
+        async with pool.acquire() as conn:
             await conn.execute(
                 "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
             )
@@ -315,23 +355,17 @@ class DBService:
             if row is None:
                 return []
             return [{k.lower(): v for k, v in dict(row).items()}]
-        finally:
-            await conn.close()
 
     async def _query_oracle(
         self,
+        alias: str,
         cfg: DatabaseConfig,
         password: str,
         sql: str,
     ) -> list[dict[str, Any]]:
+        pool = _get_oracle_pool(alias, cfg, password)
         try:
-            return await asyncio.to_thread(
-                _oracle_query_sync,
-                cfg.user,
-                password,
-                _oracle_dsn(cfg),
-                sql,
-            )
+            return await asyncio.to_thread(_oracle_query_sync, pool, sql)
         except oracledb.Error as exc:
             mapped = map_oracle_client_error(exc)
             if mapped is not None:
@@ -413,15 +447,18 @@ class DBService:
         protected: set[tuple[tuple[str, int], ...], str] = set()
         warnings: list[str] = []
 
-        for mapping in sql_mappings:
-            if not mapping.query.strip() or not mapping.target_element:
-                continue
+        active_mappings = [
+            mapping
+            for mapping in sql_mappings
+            if mapping.query.strip() and mapping.target_element and mapping.db_alias
+        ]
 
-            if not mapping.db_alias:
-                continue
-
+        async def _fetch_mapping_rows(mapping: SqlMapping) -> list[dict[str, Any]]:
+            db_alias = mapping.db_alias
+            if not db_alias:
+                raise ValueError("db_alias is required for active mappings")
             try:
-                rows = await self.run_query(mapping.db_alias, mapping.query)
+                return await self.run_query(db_alias, mapping.query)
             except Exception:
                 logger.exception(
                     "DB override mapping failed [alias=%s element=%s path=%s fields=%s query=%s]",
@@ -432,6 +469,12 @@ class DBService:
                     truncate(mapping.query),
                 )
                 raise
+
+        rows_by_mapping = await asyncio.gather(
+            *[_fetch_mapping_rows(mapping) for mapping in active_mappings]
+        )
+
+        for mapping, rows in zip(active_mappings, rows_by_mapping, strict=True):
             if not rows:
                 msg = (
                     f"DB override returned no rows "
