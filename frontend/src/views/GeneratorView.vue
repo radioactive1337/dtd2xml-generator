@@ -842,6 +842,9 @@ async function generate() {
     await setProgrammaticXml(result.xml_text)
     buildInfo.value = result
     validationResult.value = null
+    if (mode.value === 'custom') {
+      await syncFromPastedXml(result.xml_text)
+    }
     if (result.warnings?.length) {
       activeTab.value = 'results'
     }

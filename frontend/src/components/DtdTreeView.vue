@@ -35,8 +35,8 @@
           <button
             type="button"
             class="tree-checkbox"
-            :class="{ checked: item.checked, disabled: item.required }"
-            :disabled="item.required"
+            :class="{ checked: item.checked, disabled: item.locked }"
+            :disabled="item.locked"
             :aria-checked="item.checked"
             role="checkbox"
             @click="toggleCheck(item.path)"
@@ -170,6 +170,9 @@ watch(
       applyCheckedToTree(treeRoot.value)
       refreshFlat()
       endLoad(seq)
+    } else {
+      refreshFlat()
+      emitPaths()
     }
   },
   { immediate: true },
@@ -196,16 +199,16 @@ async function buildInitialTree(seq) {
   try {
     const data = await getElementTree(props.schemaId, props.rootElement)
     if (isStale(seq)) return false
+    const model = normalizeContentModelForTree(data.content_model)
     treeRoot.value = buildNodeFromModel(
       props.rootElement,
-      data.content_model,
+      model,
       props.rootElement,
       0,
       true,
     )
     treeRoot.value.expanded = true
-    refreshFlat()
-    emitPaths()
+    flatNodes.value = flattenVisible()
     return true
   } catch {
     if (!isStale(seq)) {
@@ -280,6 +283,7 @@ function buildNodeFromModel(name, model, path, depth, required, elementPath = nu
     depth,
     quantifier,
     required: nodeRequired,
+    locked: false,
     checked: nodeRequired,
     expanded: false,
     hasChildren: false,
@@ -371,6 +375,27 @@ function buildChildrenFromModel(model, parentPath, depth) {
   return []
 }
 
+/** Unwrap SEQUENCE(CHOICE) so the REF parent becomes the CHOICE container. */
+function normalizeContentModelForTree(model) {
+  if (
+    model?.kind === 'SEQUENCE'
+    && model.children?.length === 1
+    && model.children[0].kind === 'CHOICE'
+  ) {
+    return model.children[0]
+  }
+  return model
+}
+
+/** Apply lazy-loaded content model; mark REF parent as CHOICE container when needed. */
+function applyLoadedChildren(node, contentModel) {
+  const model = normalizeContentModelForTree(contentModel)
+  node.children = buildChildrenFromModel(model, node.path, node.depth + 1)
+  node._loaded = true
+  node.hasChildren = node.children.length > 0
+  node._isChoiceGroup = model.kind === 'CHOICE'
+}
+
 function findNodeByPath(path, node = treeRoot.value) {
   if (!node) return null
   if (node.path === path) return node
@@ -421,10 +446,8 @@ function collectDescendantPaths(node) {
 
 function removePathAndDescendants(path) {
   checkedPaths.value.delete(path)
-  const normalizedPrefix = normalizeTreePath(path)
   for (const p of [...checkedPaths.value]) {
-    const normalized = normalizeTreePath(p)
-    if (normalized !== normalizedPrefix && normalized.startsWith(`${normalizedPrefix}.`)) {
+    if (p !== path && p.startsWith(`${path}.`)) {
       checkedPaths.value.delete(p)
     }
   }
@@ -438,7 +461,8 @@ function removePathAndDescendants(path) {
 
 function skipGroupLabelParent(node) {
   let parent = findParentNode(node.path)
-  while (parent?.isGroupLabel) {
+  // SEQUENCE group labels are UI-only; CHOICE group labels are real branch containers.
+  while (parent?.isGroupLabel && !parent._isChoiceGroup) {
     parent = findParentNode(parent.path)
   }
   return parent
@@ -466,10 +490,9 @@ function findChoiceGroupAncestor(node) {
 }
 
 function findChoiceAlternative(choiceGroup, node) {
-  const nodeNorm = normalizeTreePath(node.path)
+  const nodePath = node.path
   for (const alt of choiceGroup.children || []) {
-    const altNorm = normalizeTreePath(alt.path)
-    if (nodeNorm === altNorm || nodeNorm.startsWith(`${altNorm}.`)) {
+    if (nodePath === alt.path || nodePath.startsWith(`${alt.path}.`)) {
       return alt
     }
   }
@@ -477,11 +500,9 @@ function findChoiceAlternative(choiceGroup, node) {
 }
 
 function isChoiceAlternativeSelected(choiceGroup, alt) {
-  const altNorm = normalizeTreePath(alt.path)
-  return [...checkedPaths.value].some((p) => {
-    const pNorm = normalizeTreePath(p)
-    return pNorm === altNorm || pNorm.startsWith(`${altNorm}.`)
-  })
+  return [...checkedPaths.value].some(
+    (p) => p === alt.path || p.startsWith(`${alt.path}.`),
+  )
 }
 
 /** Required nodes apply only when every ancestor branch is selected (incl. CHOICE alt). */
@@ -494,11 +515,14 @@ function isInActiveBranch(node) {
 
     if (parent._isChoiceGroup) {
       const alt = findChoiceAlternative(parent, current)
-      if (alt && !isChoiceAlternativeSelected(parent, alt)) return false
+      if (!alt || !isChoiceAlternativeSelected(parent, alt)) return false
     }
 
     if (!parent.required && !checkedPaths.value.has(parent.path)) {
-      return false
+      const hasCheckedDescendant = [...checkedPaths.value].some(
+        (p) => p !== parent.path && p.startsWith(`${parent.path}.`),
+      )
+      if (!hasCheckedDescendant) return false
     }
 
     current = parent
@@ -516,10 +540,39 @@ function enforceChoiceExclusivity(node = treeRoot.value) {
   for (const child of node.children || []) enforceChoiceExclusivity(child)
 }
 
+/** Drop checked paths that belong to non-selected CHOICE alternatives. */
+function pruneInactiveChoiceBranches(node = treeRoot.value) {
+  if (!node) return
+  if (node._isChoiceGroup) {
+    for (const alt of node.children || []) {
+      if (isChoiceAlternativeSelected(node, alt)) continue
+      for (const p of [...checkedPaths.value]) {
+        if (p === alt.path || p.startsWith(`${alt.path}.`)) {
+          checkedPaths.value.delete(p)
+        }
+      }
+    }
+  }
+  for (const child of node.children || []) pruneInactiveChoiceBranches(child)
+}
+
+function hasCheckedDescendant(node) {
+  const prefix = `${node.path}.`
+  return [...checkedPaths.value].some((p) => p.startsWith(prefix))
+}
+
+function addImpliedAncestorPaths(node = treeRoot.value) {
+  walkTree(node, (n) => {
+    if (n.isGroupLabel || n.required || !isInActiveBranch(n)) return
+    if (hasCheckedDescendant(n)) checkedPaths.value.add(n.path)
+  })
+}
+
 function syncCheckedFromPaths(node = treeRoot.value) {
   if (!node) return
   pruneOrphanPaths()
   enforceChoiceExclusivity()
+  pruneInactiveChoiceBranches(node)
   walkTree(node, (n) => {
     const active = isInActiveBranch(n)
     if (active && n.required) {
@@ -527,6 +580,13 @@ function syncCheckedFromPaths(node = treeRoot.value) {
     } else if (!active) {
       checkedPaths.value.delete(n.path)
     }
+  })
+  addImpliedAncestorPaths(node)
+  enforceChoiceExclusivity()
+  pruneInactiveChoiceBranches(node)
+  walkTree(node, (n) => {
+    const active = isInActiveBranch(n)
+    n.locked = active && n.required
     n.checked = active && (n.required || checkedPaths.value.has(n.path))
   })
 }
@@ -546,9 +606,7 @@ async function toggleExpand(item) {
     try {
       const data = await getElementTree(props.schemaId, node._refName)
       if (seq !== loadSeq) return
-      node.children = buildChildrenFromModel(data.content_model, node.path, node.depth + 1)
-      node._loaded = true
-      node.hasChildren = node.children.length > 0
+      applyLoadedChildren(node, data.content_model)
       syncCheckedFromPaths()
     } catch {
       if (seq === loadSeq) node.hasChildren = false
@@ -583,14 +641,14 @@ function findFirstSelectableMember(node) {
 
 function selectFirstGroupMember(groupNode) {
   const first = findFirstSelectableMember(groupNode)
-  if (!first || first.required) return
-  checkedPaths.value.add(first.path)
+  if (!first) return
+  if (!first.required) checkedPaths.value.add(first.path)
   ensureAncestorPaths(first.path)
 }
 
 function toggleCheck(path) {
   const node = findNodeByPath(path)
-  if (!node || node.required) return
+  if (!node || node.locked) return
 
   if (checkedPaths.value.has(node.path)) {
     removePathAndDescendants(node.path)
@@ -677,6 +735,124 @@ function expandAncestorsOfChecked() {
   }
 }
 
+function addCheckedAncestors(targetSet, node) {
+  let current = node
+  while (current) {
+    const parent = findParentNode(current.path)
+    if (!parent) break
+    if (!parent.required) targetSet.add(parent.path)
+    current = parent
+  }
+}
+
+function countElPathsUnderAlternative(altNode, elPathSet) {
+  const matched = new Set()
+  walkTree(altNode, (n) => {
+    if (n.isGroupLabel) return
+    const el = normalizeTreePath(n.path)
+    if (elPathSet.has(el)) matched.add(el)
+  })
+  // REF/SEQUENCE alts: match element paths by prefix (e.g. user.employee.*)
+  if (!altNode.isGroupLabel) {
+    const normBase = normalizeTreePath(altNode.path)
+    for (const elPath of elPathSet) {
+      if (elPath === normBase || elPath.startsWith(`${normBase}.`)) matched.add(elPath)
+    }
+  }
+  return matched.size
+}
+
+function resolveChoiceSelectionsFromXml(node, elPathSet, selections = new Map()) {
+  if (!node) return selections
+  if (node._isChoiceGroup) {
+    let bestAlt = null
+    let bestScore = 0
+    for (const alt of node.children || []) {
+      const score = countElPathsUnderAlternative(alt, elPathSet)
+      if (score > bestScore) {
+        bestScore = score
+        bestAlt = alt
+      }
+    }
+    if (bestAlt && bestScore > 0) {
+      selections.set(node.path, bestAlt.path)
+      resolveChoiceSelectionsFromXml(bestAlt, elPathSet, selections)
+    }
+    return selections
+  }
+  for (const child of node.children || []) {
+    resolveChoiceSelectionsFromXml(child, elPathSet, selections)
+  }
+  return selections
+}
+
+function isNodeUnderChoiceSelections(node, selections) {
+  let current = node
+  while (current) {
+    const parent = findParentNode(current.path)
+    if (!parent) break
+    if (parent._isChoiceGroup) {
+      const selectedAltPath = selections.get(parent.path)
+      if (selectedAltPath) {
+        const alt = findChoiceAlternative(parent, current)
+        if (!alt || alt.path !== selectedAltPath) return false
+      }
+    }
+    current = parent
+  }
+  return true
+}
+
+function findNodesForElementPath(elPath, node = treeRoot.value, results = []) {
+  if (!node) return results
+  if (!node.isGroupLabel && normalizeTreePath(node.path) === elPath) {
+    results.push(node)
+  }
+  for (const child of node.children || []) {
+    findNodesForElementPath(elPath, child, results)
+  }
+  return results
+}
+
+function pickNodeForElementPath(candidates, selections) {
+  if (!candidates.length) return null
+  if (candidates.length === 1) return candidates[0]
+  const filtered = candidates.filter((n) => isNodeUnderChoiceSelections(n, selections))
+  return filtered[0] || null
+}
+
+async function loadNodeIfNeeded(node, seq) {
+  if (!node?._refName || node._loaded || isStale(seq)) return
+  const data = await getElementTree(props.schemaId, node._refName)
+  if (isStale(seq)) return
+  applyLoadedChildren(node, data.content_model)
+}
+
+async function ensureElementPathLoaded(elPath, seq, selections) {
+  async function walk(node) {
+    if (isStale(seq) || !node) return null
+    if (!node.isGroupLabel && normalizeTreePath(node.path) === elPath) return node
+
+    await loadNodeIfNeeded(node, seq)
+
+    for (const child of node.children || []) {
+      if (node._isChoiceGroup) {
+        const selectedAltPath = selections.get(node.path)
+        if (selectedAltPath && child.path !== selectedAltPath) continue
+      }
+      const found = await walk(child)
+      if (found) return found
+    }
+    return null
+  }
+
+  const found = await walk(treeRoot.value)
+  if (found) return found
+
+  const candidates = findNodesForElementPath(elPath)
+  return pickNodeForElementPath(candidates, selections)
+}
+
 async function ensureTreeLoadedForElementPaths(elementPaths, seq) {
   if (!treeRoot.value || isStale(seq)) return
   const pathSet = new Set(elementPaths)
@@ -691,9 +867,7 @@ async function ensureTreeLoadedForElementPaths(elementPaths, seq) {
     if (subtreeNeeded(node) && node._refName && !node._loaded) {
       const data = await getElementTree(props.schemaId, node._refName)
       if (isStale(seq)) return
-      node.children = buildChildrenFromModel(data.content_model, node.path, node.depth + 1)
-      node._loaded = true
-      node.hasChildren = node.children.length > 0
+      applyLoadedChildren(node, data.content_model)
       node.expanded = true
     }
     for (const child of node.children || []) {
@@ -713,22 +887,32 @@ async function applyElementPathsToTree(elementPaths, seq = loadSeq) {
     await ensureTreeLoadedForElementPaths(elementPaths, seq)
     if (isStale(seq)) return
 
+    let choiceSelections = resolveChoiceSelectionsFromXml(treeRoot.value, elPathSet)
+
+    const sortedPaths = [...elPathSet].sort(
+      (a, b) => a.split('.').length - b.split('.').length,
+    )
+    for (const elPath of sortedPaths) {
+      await ensureElementPathLoaded(elPath, seq, choiceSelections)
+      choiceSelections = resolveChoiceSelectionsFromXml(treeRoot.value, elPathSet)
+    }
+    if (isStale(seq)) return
+
+    choiceSelections = resolveChoiceSelectionsFromXml(treeRoot.value, elPathSet)
+
     const nextChecked = new Set()
-    walkTree(treeRoot.value, (node) => {
-      if (node.isGroupLabel) return
-
-      const elPath = normalizeTreePath(node.path)
-      if (!elPathSet.has(elPath)) return
+    for (const elPath of elPathSet) {
+      const node = await ensureElementPathLoaded(elPath, seq, choiceSelections)
+      if (!node || !isNodeUnderChoiceSelections(node, choiceSelections)) continue
       nextChecked.add(node.path)
+      addCheckedAncestors(nextChecked, node)
+    }
 
-      let current = node
-      while (current) {
-        const parent = skipGroupLabelParent(current)
-        if (!parent) break
-        if (!parent.required) nextChecked.add(parent.path)
-        current = parent
-      }
-    })
+    for (const altPath of choiceSelections.values()) {
+      nextChecked.add(altPath)
+      const altNode = findNodeByPath(altPath)
+      if (altNode) addCheckedAncestors(nextChecked, altNode)
+    }
 
     checkedPaths.value = nextChecked
     enforceChoiceExclusivity()
@@ -790,9 +974,7 @@ async function loadNodeBranch(node, seq) {
   if (!node?._refName || node._loaded) return true
   const data = await getElementTree(props.schemaId, node._refName)
   if (seq !== loadSeq) return false
-  node.children = buildChildrenFromModel(data.content_model, node.path, node.depth + 1)
-  node._loaded = true
-  node.hasChildren = node.children.length > 0
+  applyLoadedChildren(node, data.content_model)
   return true
 }
 
