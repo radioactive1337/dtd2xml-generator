@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -31,7 +32,7 @@ async def generate_xml(config: BuildConfig) -> BuildResult:
         )
 
     try:
-        result = build_xml(schema, config)
+        result = await asyncio.to_thread(build_xml, schema, config)
     except ValueError as exc:
         logger.exception(
             "XML generation failed [schema_id=%s root=%s]",

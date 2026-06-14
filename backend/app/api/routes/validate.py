@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -24,4 +26,4 @@ async def validate_xml_against_dtd(request: ValidateRequest) -> ValidationResult
         raise HTTPException(status_code=404, detail=f"Schema '{request.schema_id}' not found")
 
     schema = registry[request.schema_id]
-    return validate_xml(request.xml_text, schema)
+    return await asyncio.to_thread(validate_xml, request.xml_text, schema)

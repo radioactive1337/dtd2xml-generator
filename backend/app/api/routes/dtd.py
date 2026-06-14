@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import uuid
@@ -250,7 +251,8 @@ async def upload_dtd(file: UploadFile = File(...)) -> SchemaResponse:
         await f.write(content)
 
     try:
-        schema_id = _parse_and_register(
+        schema_id = await asyncio.to_thread(
+            _parse_and_register,
             saved_path,
             schema_id=_read_schema_id(saved_path),
         )
@@ -324,7 +326,8 @@ async def upload_dtd_jar(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     try:
-        schema_id = _parse_and_register(
+        schema_id = await asyncio.to_thread(
+            _parse_and_register,
             entry_path,
             schema_id=_read_schema_id(entry_path),
         )

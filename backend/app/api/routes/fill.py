@@ -168,7 +168,8 @@ async def execute_fill(
                 "Generating test data with Smart Faker...",
                 percent,
             )
-            result = populate_with_faker(
+            result = await asyncio.to_thread(
+                populate_with_faker,
                 xml,
                 schema,
                 locale=request.faker_locale,
@@ -200,7 +201,8 @@ async def execute_fill(
                 "Filling remaining fields with Smart Faker...",
                 90,
             )
-            result = populate_with_faker(
+            result = await asyncio.to_thread(
+                populate_with_faker,
                 result,
                 schema,
                 locale=request.faker_locale,
