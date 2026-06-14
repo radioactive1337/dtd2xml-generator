@@ -169,9 +169,8 @@ defineExpose({ dtdTreeRef })
 }
 
 .structure-tree-host :deep(.scroller-wrap) {
-  flex: 1 1 0;
-  min-height: 0;
-  height: 0;
+  flex: 1 1 auto;
+  min-height: 240px;
   min-width: 0;
 }
 </style>

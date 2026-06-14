@@ -127,13 +127,18 @@ class XMLBuilder:
             self._expand_node(parent_el, node, parent_path, ancestry)
             return
         if node.kind == "SEQUENCE":
-            for child in node.children:
-                self._expand_node(parent_el, child, parent_path, ancestry)
+            for idx, child in enumerate(node.children):
+                struct_path = self._child_path(parent_path, child, idx)
+                expand_path = parent_path if child.kind == "REF" else struct_path
+                self._expand_node(parent_el, child, expand_path, ancestry)
             return
         if node.kind == "CHOICE":
             options = self._select_choice_children(node, parent_path)
-            for child in options:
-                self._expand_node(parent_el, child, parent_path, ancestry)
+            for idx, child in enumerate(node.children):
+                if child not in options:
+                    continue
+                child_path = self._child_path(parent_path, child, idx)
+                self._expand_node(parent_el, child, child_path, ancestry)
 
     def _expand_node(
         self,
@@ -210,14 +215,27 @@ class XMLBuilder:
         return re.sub(r"\.group-\d+(?=\.|$)", "", path)
 
     def _is_path_selected(self, path: str) -> bool:
-        if path in self.config.custom_paths:
-            return True
-        if any(p.startswith(path + ".") for p in self.config.custom_paths):
-            return True
-        normalized = {self._normalize_custom_path(p) for p in self.config.custom_paths}
-        if path in normalized:
-            return True
-        return any(p.startswith(path + ".") for p in normalized)
+        return self._choice_branch_score(path) > 0
+
+    def _choice_branch_score(self, branch_path: str) -> int:
+        """Count custom_paths that fall under branch_path (UI group-N aware)."""
+        if branch_path in self.config.custom_paths:
+            return 10
+        prefix = branch_path + "."
+        score = 0
+        for p in self.config.custom_paths:
+            if p.startswith(prefix):
+                score += 1
+        if score:
+            return score
+        normalized_branch = self._normalize_custom_path(branch_path)
+        if normalized_branch in {self._normalize_custom_path(p) for p in self.config.custom_paths}:
+            return 1
+        norm_prefix = normalized_branch + "."
+        for p in self.config.custom_paths:
+            if self._normalize_custom_path(p).startswith(norm_prefix):
+                score += 1
+        return score
 
     def _should_include_element(
         self,
@@ -250,13 +268,22 @@ class XMLBuilder:
                     return [child]
             return []
 
-        # custom: only explicitly selected branches; optional choice may stay empty
-        selected: list[ContentNode] = []
+        # custom: pick the best-matching branch (CHOICE is exclusive)
+        best_child: ContentNode | None = None
+        best_score = 0
+        best_path_len = -1
         for idx, child in enumerate(node.children):
-            if self._is_path_selected(self._child_path(parent_path, child, idx)):
-                selected.append(child)
-        if selected:
-            return selected
+            child_path = self._child_path(parent_path, child, idx)
+            score = self._choice_branch_score(child_path)
+            path_len = len(child_path)
+            if score > best_score or (
+                score == best_score and score > 0 and path_len > best_path_len
+            ):
+                best_score = score
+                best_path_len = path_len
+                best_child = child
+        if best_child is not None and best_score > 0:
+            return [best_child]
 
         if node.quantifier in ("?", "*"):
             return []

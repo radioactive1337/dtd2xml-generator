@@ -68,7 +68,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { getElementTree } from '../api/dtd'
 import { listPresets, savePreset as apiSavePreset, loadPreset as apiLoadPreset } from '../api/presets'
@@ -98,6 +98,25 @@ const applyingPresetRoot = ref(false)
 let nodeIdCounter = 0
 let loadSeq = 0
 let highlightTimer = null
+let scrollerResizeObserver = null
+
+function refreshScrollerLayout() {
+  nextTick(() => {
+    const scroller = scrollerRef.value
+    if (!scroller) return
+    scroller.scrollToItem?.(0)
+    scroller.updateVisibleItems?.(true)
+    window.dispatchEvent(new Event('resize'))
+  })
+}
+
+onMounted(() => {
+  const wrap = scrollerRef.value?.$el?.parentElement
+  if (wrap && typeof ResizeObserver !== 'undefined') {
+    scrollerResizeObserver = new ResizeObserver(() => refreshScrollerLayout())
+    scrollerResizeObserver.observe(wrap)
+  }
+})
 
 function isStale(seq) {
   return seq !== loadSeq
@@ -114,12 +133,16 @@ function beginLoad(message = 'Загрузка дерева…') {
 }
 
 function endLoad(seq) {
-  if (!isStale(seq)) loading.value = false
+  if (!isStale(seq)) {
+    loading.value = false
+    refreshScrollerLayout()
+  }
 }
 
 onBeforeUnmount(() => {
   cancelPendingLoads()
   if (highlightTimer) clearTimeout(highlightTimer)
+  scrollerResizeObserver?.disconnect()
 })
 
 watch(
@@ -209,6 +232,7 @@ async function buildInitialTree(seq) {
     )
     treeRoot.value.expanded = true
     flatNodes.value = flattenVisible()
+    refreshScrollerLayout()
     return true
   } catch {
     if (!isStale(seq)) {
@@ -258,7 +282,7 @@ function nodeDisplayName(name, model) {
 function resolveChildPaths(parentPath, elementPath, parentKind, child, idx) {
   const childName = child.kind === 'REF' ? child.ref : `group-${idx}`
   if (parentKind === 'CHOICE' && child.kind === 'REF') {
-    const childPath = `${elementPath}.${child.ref}`
+    const childPath = `${parentPath}.${child.ref}`
     return { childPath, elementPath: childPath }
   }
   const childPath = `${parentPath}.${childName}`
@@ -594,6 +618,7 @@ function syncCheckedFromPaths(node = treeRoot.value) {
 function refreshFlat() {
   syncCheckedFromPaths()
   flatNodes.value = flattenVisible()
+  refreshScrollerLayout()
 }
 
 async function toggleExpand(item) {
@@ -632,20 +657,6 @@ function ensureAncestorPaths(path) {
   }
 }
 
-function findFirstSelectableMember(node) {
-  if (!node) return null
-  if (!node.isGroupLabel) return node
-  if (!node.children?.length) return null
-  return findFirstSelectableMember(node.children[0])
-}
-
-function selectFirstGroupMember(groupNode) {
-  const first = findFirstSelectableMember(groupNode)
-  if (!first) return
-  if (!first.required) checkedPaths.value.add(first.path)
-  ensureAncestorPaths(first.path)
-}
-
 function toggleCheck(path) {
   const node = findNodeByPath(path)
   if (!node || node.locked) return
@@ -655,9 +666,6 @@ function toggleCheck(path) {
   } else {
     checkedPaths.value.add(node.path)
     ensureAncestorPaths(path)
-    if (node.isGroupLabel) {
-      selectFirstGroupMember(node)
-    }
     const choiceGroup = findChoiceGroupAncestor(node)
     if (choiceGroup) {
       const selectedAlt = findChoiceAlternative(choiceGroup, node)
@@ -745,7 +753,7 @@ function addCheckedAncestors(targetSet, node) {
   }
 }
 
-function countElPathsUnderAlternative(altNode, elPathSet) {
+function matchedElPathsUnderAlternative(altNode, elPathSet) {
   const matched = new Set()
   walkTree(altNode, (n) => {
     if (n.isGroupLabel) return
@@ -759,29 +767,63 @@ function countElPathsUnderAlternative(altNode, elPathSet) {
       if (elPath === normBase || elPath.startsWith(`${normBase}.`)) matched.add(elPath)
     }
   }
-  return matched.size
+  return matched
 }
 
-function resolveChoiceSelectionsFromXml(node, elPathSet, selections = new Map()) {
+function scoreAlternativeForXml(altNode, siblingAlts, elPathSet) {
+  const matched = matchedElPathsUnderAlternative(altNode, elPathSet)
+  if (!matched.size) return 0
+
+  const siblingMatched = new Set()
+  for (const sib of siblingAlts) {
+    if (sib === altNode) continue
+    matchedElPathsUnderAlternative(sib, elPathSet).forEach((p) => siblingMatched.add(p))
+  }
+
+  let score = 0
+  for (const p of matched) {
+    score += siblingMatched.has(p) ? 1 : 100
+  }
+  return score
+}
+
+function isAlternativePreferredByPaths(alt, preferPaths) {
+  if (!preferPaths?.size) return false
+  return [...preferPaths].some((p) => p === alt.path || p.startsWith(`${alt.path}.`))
+}
+
+function resolveChoiceSelectionsFromXml(
+  node,
+  elPathSet,
+  selections = new Map(),
+  preferPaths = null,
+) {
   if (!node) return selections
   if (node._isChoiceGroup) {
+    const alts = node.children || []
     let bestAlt = null
     let bestScore = 0
-    for (const alt of node.children || []) {
-      const score = countElPathsUnderAlternative(alt, elPathSet)
-      if (score > bestScore) {
+    let bestPreferred = false
+    for (const alt of alts) {
+      const score = scoreAlternativeForXml(alt, alts, elPathSet)
+      const preferred = isAlternativePreferredByPaths(alt, preferPaths)
+      if (
+        score > bestScore
+        || (score === bestScore && score > 0 && preferred && !bestPreferred)
+      ) {
         bestScore = score
         bestAlt = alt
+        bestPreferred = preferred
       }
     }
     if (bestAlt && bestScore > 0) {
       selections.set(node.path, bestAlt.path)
-      resolveChoiceSelectionsFromXml(bestAlt, elPathSet, selections)
+      resolveChoiceSelectionsFromXml(bestAlt, elPathSet, selections, preferPaths)
     }
     return selections
   }
   for (const child of node.children || []) {
-    resolveChoiceSelectionsFromXml(child, elPathSet, selections)
+    resolveChoiceSelectionsFromXml(child, elPathSet, selections, preferPaths)
   }
   return selections
 }
@@ -884,21 +926,37 @@ async function applyElementPathsToTree(elementPaths, seq = loadSeq) {
   beginLoad('Синхронизация выбора из XML…')
   try {
     const elPathSet = new Set(elementPaths)
+    const preferPaths = new Set(checkedPaths.value)
     await ensureTreeLoadedForElementPaths(elementPaths, seq)
     if (isStale(seq)) return
 
-    let choiceSelections = resolveChoiceSelectionsFromXml(treeRoot.value, elPathSet)
+    let choiceSelections = resolveChoiceSelectionsFromXml(
+      treeRoot.value,
+      elPathSet,
+      new Map(),
+      preferPaths,
+    )
 
     const sortedPaths = [...elPathSet].sort(
       (a, b) => a.split('.').length - b.split('.').length,
     )
     for (const elPath of sortedPaths) {
       await ensureElementPathLoaded(elPath, seq, choiceSelections)
-      choiceSelections = resolveChoiceSelectionsFromXml(treeRoot.value, elPathSet)
+      choiceSelections = resolveChoiceSelectionsFromXml(
+        treeRoot.value,
+        elPathSet,
+        new Map(),
+        preferPaths,
+      )
     }
     if (isStale(seq)) return
 
-    choiceSelections = resolveChoiceSelectionsFromXml(treeRoot.value, elPathSet)
+    choiceSelections = resolveChoiceSelectionsFromXml(
+      treeRoot.value,
+      elPathSet,
+      new Map(),
+      preferPaths,
+    )
 
     const nextChecked = new Set()
     for (const elPath of elPathSet) {

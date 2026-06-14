@@ -207,6 +207,46 @@ def test_maximal_optional_choice_validates(aux_auth_schema):
     assert validate_xml(result.xml_text, aux_auth_schema).valid
 
 
+EMPLOYEE_CHOICE_DTD = """
+<!ELEMENT root (worker)>
+<!ELEMENT worker (((person, mgr?) | (idcard?, token?, mgr)), note?)>
+<!ELEMENT person EMPTY>
+<!ELEMENT mgr EMPTY>
+<!ELEMENT idcard EMPTY>
+<!ELEMENT token EMPTY>
+<!ELEMENT note EMPTY>
+"""
+
+
+@pytest.fixture
+def employee_choice_schema():
+    return DTDParser().parse_string(EMPLOYEE_CHOICE_DTD)
+
+
+def test_custom_nested_choice_picks_identity_branch(employee_choice_schema):
+    """UI paths like root.worker.group-0.group-1 must not match the sibling group-0 branch."""
+    config = BuildConfig(
+        root_element="root",
+        mode="custom",
+        custom_paths={
+            "root.worker.group-0.group-1",
+            "root.worker.group-0.group-1.idcard",
+            "root.worker.group-0.group-1.token",
+            "root.worker.group-0.group-1.mgr",
+        },
+    )
+    result = build_xml(employee_choice_schema, config)
+    worker = etree.fromstring(result.xml_text.encode("utf-8")).find("worker")
+
+    assert worker is not None
+    assert worker.find("person") is None
+    tags = [c.tag for c in worker]
+    assert "idcard" in tags
+    assert "token" in tags
+    assert "mgr" in tags
+    assert "person" not in tags
+
+
 def test_maximal_build_validates_against_dtd(schema):
     config = BuildConfig(root_element="PayDoc", mode="maximal", repeat_count=2)
     result = build_xml(schema, config)

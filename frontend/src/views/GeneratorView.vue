@@ -842,9 +842,8 @@ async function generate() {
     await setProgrammaticXml(result.xml_text)
     buildInfo.value = result
     validationResult.value = null
-    if (mode.value === 'custom') {
-      await syncFromPastedXml(result.xml_text)
-    }
+    // In custom mode the tree drives generation; syncing back from XML
+    // mis-resolves CHOICE branches that share element names (e.g. employer).
     if (result.warnings?.length) {
       activeTab.value = 'results'
     }

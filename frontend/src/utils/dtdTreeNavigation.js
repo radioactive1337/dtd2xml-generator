@@ -5,7 +5,7 @@
 export function resolveChildTreePaths(parentPath, elementPath, parentKind, child, idx) {
   const childName = child.kind === 'REF' ? child.ref : `group-${idx}`
   if (parentKind === 'CHOICE' && child.kind === 'REF') {
-    const childPath = `${elementPath}.${child.ref}`
+    const childPath = `${parentPath}.${child.ref}`
     return { childPath, elementPath: childPath }
   }
   const childPath = `${parentPath}.${childName}`
