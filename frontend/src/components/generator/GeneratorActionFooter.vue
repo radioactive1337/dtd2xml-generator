@@ -27,7 +27,6 @@
       </div>
     </div>
 
-    <p v-if="validationResult?.valid" class="validation-msg valid">XML соответствует DTD</p>
     <p v-if="error" class="error-msg">{{ error }}</p>
   </div>
 </template>
@@ -44,7 +43,6 @@ defineProps({
   fillStatusMessage: { type: String, default: '' },
   fillPercent: { type: Number, default: 0 },
   fillElapsedLabel: { type: String, default: '' },
-  validationResult: { type: Object, default: null },
   error: { type: String, default: '' },
 })
 
@@ -124,12 +122,6 @@ defineEmits(['generate', 'fill', 'validate'])
   border-radius: inherit;
   background: var(--accent);
   transition: width 0.35s ease;
-}
-
-.validation-msg.valid {
-  font-size: 13px;
-  color: var(--success);
-  margin: 0;
 }
 
 .error-msg {

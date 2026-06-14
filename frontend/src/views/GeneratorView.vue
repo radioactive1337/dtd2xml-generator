@@ -114,7 +114,6 @@
           :fill-status-message="fillStatusMessage"
           :fill-percent="fillPercent"
           :fill-elapsed-label="fillElapsedLabel"
-          :validation-result="validationResult"
           :error="error"
           @generate="generate"
           @fill="fill"
@@ -604,10 +603,31 @@ function resetFillProgress() {
   fillElapsedSeconds.value = 0
 }
 
+const LEFT_PANEL_WIDTH_KEY = 'xml-gen-left-panel-width'
 const LEFT_MIN = 480
-const LEFT_MAX = 760
+const LEFT_MAX = 960
 
-const leftWidth = ref(LEFT_MIN)
+function readLeftPanelWidth() {
+  try {
+    const stored = parseInt(localStorage.getItem(LEFT_PANEL_WIDTH_KEY), 10)
+    if (!Number.isNaN(stored)) {
+      return Math.max(LEFT_MIN, Math.min(LEFT_MAX, stored))
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return LEFT_MIN
+}
+
+const leftWidth = ref(readLeftPanelWidth())
+
+watch(leftWidth, (val) => {
+  try {
+    localStorage.setItem(LEFT_PANEL_WIDTH_KEY, String(val))
+  } catch {
+    // ignore storage errors
+  }
+})
 const dtdCollapsed = ref(false)
 
 watch(mode, async (val, oldVal) => {
