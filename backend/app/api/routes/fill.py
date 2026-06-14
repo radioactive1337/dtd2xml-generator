@@ -62,6 +62,11 @@ class FillResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class XmlCacheRequest(BaseModel):
+    schema_id: str
+    xml_text: str
+
+
 class FieldMappingPair(BaseModel):
     db_col: str = ""
     xml_attr: str = ""
@@ -189,12 +194,19 @@ async def execute_fill(
                 "Waiting for LLM response...",
                 llm_percent,
             )
+
+            async def llm_progress(step: str, message: str, percent: int) -> None:
+                await on_progress(step, message, percent)
+
             result = await populate_with_llm(
                 xml,
                 schema,
                 alias=request.llm_alias,
                 fill_empty_only=fill_empty_only,
                 protected_attrs=protected_attrs,
+                on_progress=llm_progress,
+                progress_base=llm_percent,
+                progress_span=50 if request.strategy == "hybrid_db_ai" else 75,
             )
             if request.strategy == "hybrid_db_ai":
                 await on_progress(
@@ -304,8 +316,34 @@ async def fill_xml(request: FillRequest) -> FillResponse:
     return FillResponse(xml_text=result, strategy=request.strategy, warnings=warnings)
 
 
+@router.put("/xml-cache")
+async def stage_xml_cache(request: XmlCacheRequest) -> dict[str, str]:
+    """Stage edited XML on the server so /fill/stream can start without a large body."""
+    registry = get_schema_registry()
+    if request.schema_id not in registry:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Schema '{request.schema_id}' not found",
+        )
+
+    xml = request.xml_text.strip()
+    if not xml:
+        raise HTTPException(status_code=400, detail="xml_text cannot be empty")
+
+    set_last_generated(request.schema_id, xml)
+    logger.debug(
+        "Staged XML cache [schema_id=%s chars=%d]",
+        request.schema_id,
+        len(xml),
+    )
+    return {"status": "ok"}
+
+
 def _sse_event(payload: dict[str, object]) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+_SSE_KEEPALIVE_SEC = 2.0
 
 
 @router.post("/stream")
@@ -346,12 +384,19 @@ async def fill_xml_stream(request: FillRequest) -> StreamingResponse:
 
     async def event_stream():
         yield ": connected\n\n"
+        await asyncio.sleep(0)
         try:
             while True:
-                event = await queue.get()
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=_SSE_KEEPALIVE_SEC)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    await asyncio.sleep(0)
+                    continue
                 if event is None:
                     break
                 yield _sse_event(event)
+                await asyncio.sleep(0)
         finally:
             await task
 
@@ -359,7 +404,7 @@ async def fill_xml_stream(request: FillRequest) -> StreamingResponse:
         event_stream(),
         media_type="text/event-stream; charset=utf-8",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },

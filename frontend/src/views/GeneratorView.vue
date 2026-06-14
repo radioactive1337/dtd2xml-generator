@@ -169,7 +169,7 @@ import GeneratorResultsTab from '../components/generator/GeneratorResultsTab.vue
 import GeneratorActionFooter from '../components/generator/GeneratorActionFooter.vue'
 import { useGenerationHistory } from '../composables/useGenerationHistory'
 import { generateXml } from '../api/generate'
-import { fillXmlStream } from '../api/fill'
+import { fillXmlStream, stageFillXml } from '../api/fill'
 import { validateXml } from '../api/validate'
 import { fetchQueryPreview } from '../api/db'
 import { getConfigAliases } from '../api/config'
@@ -951,12 +951,15 @@ async function fill() {
   startFillProgressTimer()
   let filled = false
   try {
+    if (xmlDirty.value) {
+      fillStatusMessage.value = 'Загрузка XML…'
+      await stageFillXml(schemaId.value, getEditorXmlText() || xmlText.value)
+      xmlDirty.value = false
+    }
+
     const request = {
       schema_id: schemaId.value,
       strategy: fillStrategy.value,
-    }
-    if (xmlDirty.value) {
-      request.xml_text = getEditorXmlText() || xmlText.value
     }
     if (llmAlias.value) {
       request.llm_alias = llmAlias.value

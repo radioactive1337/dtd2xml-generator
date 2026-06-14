@@ -7,6 +7,13 @@ export async function fillXml(request) {
   return data
 }
 
+export async function stageFillXml(schemaId, xmlText) {
+  await client.put('/fill/xml-cache', {
+    schema_id: schemaId,
+    xml_text: xmlText,
+  })
+}
+
 export async function suggestFieldMappingsAi({
   schemaId,
   targetElement,
@@ -52,12 +59,6 @@ function parseSseChunk(buffer) {
  * Resolves with { xml_text, strategy } on success.
  */
 export async function fillXmlStream(request, onProgress) {
-  onProgress?.({
-    step: 'started',
-    message: translateFillStep('started'),
-    percent: 0,
-  })
-
   const response = await fetch('/api/fill/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

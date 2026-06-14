@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 _LLM_BATCH_SIZE = 12
 _LLM_MAX_CONCURRENT = 4
+
+LlmProgressCallback = Callable[[str, str, int], Awaitable[None]]
 
 _FILL_SYSTEM_PROMPT = (
     "You are a test data generator for QA automation. "
@@ -100,12 +103,16 @@ class LLMService:
         *,
         fill_empty_only: bool = False,
         protected_attrs: ProtectedAttrs = frozenset(),
+        on_progress: LlmProgressCallback | None = None,
+        progress_base: int = 15,
+        progress_span: int = 70,
     ) -> str:
         if not self.base_url:
             logger.error("LLM base URL is not configured")
             raise ValueError("LLM base URL is not configured in connections.json")
 
-        tasks = collect_fill_tasks(
+        tasks = await asyncio.to_thread(
+            collect_fill_tasks,
             xml_text,
             schema,
             fill_empty_only=fill_empty_only,
@@ -127,15 +134,37 @@ class LLMService:
             fill_empty_only,
         )
 
+        if on_progress:
+            await on_progress(
+                "llm_prepare",
+                f"Preparing {len(tasks)} fields in {len(batches)} batches",
+                progress_base,
+            )
+
         semaphore = asyncio.Semaphore(_LLM_MAX_CONCURRENT)
+        completed_batches = 0
+        batch_lock = asyncio.Lock()
 
         async def fill_batch(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            nonlocal completed_batches
             async with semaphore:
-                return await self._fill_tasks_batch(
+                result = await self._fill_tasks_batch(
                     batch,
                     metadata=metadata,
                     fill_empty_only=fill_empty_only,
                 )
+            async with batch_lock:
+                completed_batches += 1
+                if on_progress:
+                    percent = progress_base + int(
+                        (completed_batches / len(batches)) * progress_span
+                    )
+                    await on_progress(
+                        "llm_batch",
+                        f"LLM batch {completed_batches}/{len(batches)}",
+                        min(percent, progress_base + progress_span),
+                    )
+            return result
 
         batch_results = await asyncio.gather(
             *(fill_batch(batch) for batch in batches),
@@ -660,6 +689,9 @@ async def populate_with_llm(
     *,
     fill_empty_only: bool = False,
     protected_attrs: ProtectedAttrs = frozenset(),
+    on_progress: LlmProgressCallback | None = None,
+    progress_base: int = 15,
+    progress_span: int = 70,
 ) -> str:
     """Populate XML using the configured LLM service."""
     return await LLMService(alias=alias).populate_xml(
@@ -667,4 +699,7 @@ async def populate_with_llm(
         schema,
         fill_empty_only=fill_empty_only,
         protected_attrs=protected_attrs,
+        on_progress=on_progress,
+        progress_base=progress_base,
+        progress_span=progress_span,
     )
