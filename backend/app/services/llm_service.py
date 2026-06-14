@@ -29,17 +29,14 @@ _LLM_MAX_CONCURRENT = 4
 
 _FILL_SYSTEM_PROMPT = (
     "You are a test data generator for QA automation. "
-    "Fill the listed XML field paths with realistic Russian business test data. "
-    "Return only valid JSON without markdown fences or explanations."
+    "Fill the provided XML skeleton with realistic Russian business test data. "
+    "Preserve the exact element structure, indices, paths, and attribute names. "
+    "Return only valid XML without markdown fences or explanations."
 )
 
-_FILL_JSON_FORMAT = (
-    'Return JSON: {"v":[{"i":0,"a":{"attr":"value"},"t":"optional text"}]}\n'
-    '"i" is the field index from the input. Use exact attribute names from the input.'
-)
-
-_HYBRID_FILL_NOTE = (
-    "Only fill the listed fields. Do not invent additional indices, paths, or attributes.\n\n"
+_FILL_XML_NOTE = (
+    "Each <f> element has i (index) and p (path). "
+    "Fill empty attributes and text. Do not add or remove elements.\n\n"
 )
 
 _FIELD_MAPPING_SYSTEM_PROMPT = (
@@ -167,14 +164,17 @@ class LLMService:
         metadata: str,
         fill_empty_only: bool,
     ) -> list[dict[str, Any]]:
-        tasks_json = json.dumps(batch, ensure_ascii=False, separators=(",", ":"))
-        prefix = _HYBRID_FILL_NOTE if fill_empty_only else ""
+        skeleton = build_batch_xml_skeleton(batch)
+        prefix = (
+            "Only fill empty or placeholder attribute values. "
+            "Leave other attributes unchanged.\n\n"
+            if fill_empty_only
+            else ""
+        )
         user_message = (
-            f"{prefix}Fill the following XML fields with realistic test data.\n\n"
-            f"{_FILL_JSON_FORMAT}\n"
+            f"{prefix}{_FILL_XML_NOTE}"
             f"Schema metadata (JavaDoc-style comments):\n{metadata}\n\n"
-            f"Fields to fill (i=index, p=path, a=attribute names, t=text needed):\n"
-            f"{tasks_json}"
+            f"XML skeleton:\n{skeleton}"
         )
 
         logger.debug(
@@ -183,16 +183,31 @@ class LLMService:
             len(user_message),
         )
 
-        content = await self._chat_completion(
-            system_prompt=_FILL_SYSTEM_PROMPT,
-            user_message=user_message,
-            temperature=0.5,
-        )
-        data = self._extract_json(content)
-        values = data.get("v", data.get("values", []))
-        if not isinstance(values, list):
-            raise ValueError("LLM response JSON must contain a v array")
-        return values
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                content = await self._chat_completion(
+                    system_prompt=_FILL_SYSTEM_PROMPT,
+                    user_message=user_message,
+                    temperature=0.4 if attempt else 0.5,
+                )
+                return parse_batch_xml_response(content, batch)
+            except ValueError as exc:
+                last_error = exc
+                logger.warning(
+                    "LLM batch parse failed [attempt=%d tasks=%d]: %s",
+                    attempt + 1,
+                    len(batch),
+                    exc,
+                )
+                if attempt == 0:
+                    user_message += (
+                        "\n\nIMPORTANT: Return only the filled XML skeleton, "
+                        "no markdown and no explanations."
+                    )
+
+        assert last_error is not None
+        raise last_error
 
     def _extract_metadata_for_tasks(self, schema: DTDSchema, tasks: list[dict[str, Any]]) -> str:
         element_names: set[str] = set()
@@ -383,6 +398,85 @@ class LLMService:
             raise ValueError(f"LLM request failed: {exc}") from exc
 
         return f"Reachable (model: {self.model})"
+
+def _extract_xml(content: str) -> str:
+    content = content.strip()
+    fence_match = re.search(r"```(?:xml)?\s*([\s\S]*?)```", content, re.IGNORECASE)
+    if fence_match:
+        return fence_match.group(1).strip()
+    start = content.find("<")
+    if start >= 0:
+        return content[start:].strip()
+    logger.error(
+        "LLM response did not contain valid XML [preview=%s]",
+        truncate(content, max_len=300),
+    )
+    raise ValueError("LLM response did not contain valid XML")
+
+
+def build_batch_xml_skeleton(batch: list[dict[str, Any]]) -> str:
+    """Build a compact XML batch skeleton for LLM fill requests."""
+    lines = ["<fill>"]
+    for task in batch:
+        index = task["i"]
+        path = task["p"]
+        attr_names: list[str] = task.get("a", [])
+        needs_text = bool(task.get("t"))
+        attrs = [f'i="{index}"', f'p="{path}"']
+        for name in attr_names:
+            attrs.append(f'{name}=""')
+        attr_str = " ".join(attrs)
+        if needs_text:
+            lines.append(f"  <f {attr_str}></f>")
+        else:
+            lines.append(f"  <f {attr_str}/>")
+    lines.append("</fill>")
+    return "\n".join(lines)
+
+
+def parse_batch_xml_response(content: str, batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Parse filled batch XML from the LLM into value records."""
+    xml_text = _extract_xml(content)
+    try:
+        root = etree.fromstring(xml_text.encode("utf-8"))
+    except etree.XMLSyntaxError as exc:
+        raise ValueError("LLM response did not contain valid XML") from exc
+
+    allowed_indexes = {task["i"] for task in batch}
+    attr_names_by_index = {
+        task["i"]: set(task.get("a", []))
+        for task in batch
+    }
+    values: list[dict[str, Any]] = []
+
+    for node in root.iter("f"):
+        index_raw = node.get("i")
+        if index_raw is None:
+            continue
+        try:
+            index = int(index_raw)
+        except ValueError:
+            continue
+        if index not in allowed_indexes:
+            continue
+
+        item: dict[str, Any] = {"i": index}
+        allowed_attrs = attr_names_by_index.get(index, set())
+        filled_attrs = {
+            name: value
+            for name, value in node.attrib.items()
+            if name not in {"i", "p"} and name in allowed_attrs and value.strip()
+        }
+        if filled_attrs:
+            item["a"] = filled_attrs
+        if (node.text or "").strip():
+            item["t"] = node.text.strip()
+        if len(item) > 1:
+            values.append(item)
+
+    if not values:
+        raise ValueError("LLM response did not contain any filled field values")
+    return values
 
 
 def collect_fill_tasks(

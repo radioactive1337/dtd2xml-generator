@@ -52,6 +52,12 @@ function parseSseChunk(buffer) {
  * Resolves with { xml_text, strategy } on success.
  */
 export async function fillXmlStream(request, onProgress) {
+  onProgress?.({
+    step: 'started',
+    message: translateFillStep('started'),
+    percent: 0,
+  })
+
   const response = await fetch('/api/fill/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

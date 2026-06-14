@@ -1,7 +1,12 @@
 """Tests for compact LLM fill task collection and value application."""
 
 from app.core.dtd_models import AttributeDef, ContentNode, DTDSchema, ElementDef
-from app.services.llm_service import apply_llm_values, collect_fill_tasks
+from app.services.llm_service import (
+    apply_llm_values,
+    build_batch_xml_skeleton,
+    collect_fill_tasks,
+    parse_batch_xml_response,
+)
 
 
 def _paydoc_schema() -> DTDSchema:
@@ -117,3 +122,25 @@ def test_collect_fill_tasks_full_mode_includes_all_attributes():
         "p": "PayDoc",
         "a": ["id", "kladr", "active"],
     }
+
+
+def test_build_batch_xml_skeleton_and_parse_response():
+    batch = [
+        {"i": 0, "p": "PayDoc", "a": ["id"]},
+        {"i": 1, "p": "PayDoc.Body.Record.Field", "a": ["name", "type"]},
+    ]
+    skeleton = build_batch_xml_skeleton(batch)
+    assert '<f i="0" p="PayDoc" id=""/>' in skeleton
+    assert '<f i="1" p="PayDoc.Body.Record.Field" name="" type=""/>' in skeleton
+
+    filled = (
+        "<fill>"
+        '<f i="0" p="PayDoc" id="ai-id"/>'
+        '<f i="1" p="PayDoc.Body.Record.Field" name="filled" type="string"/>'
+        "</fill>"
+    )
+    values = parse_batch_xml_response(filled, batch)
+    assert values == [
+        {"i": 0, "a": {"id": "ai-id"}},
+        {"i": 1, "a": {"name": "filled", "type": "string"}},
+    ]

@@ -345,6 +345,7 @@ async def fill_xml_stream(request: FillRequest) -> StreamingResponse:
     task = asyncio.create_task(run_fill())
 
     async def event_stream():
+        yield ": connected\n\n"
         try:
             while True:
                 event = await queue.get()
@@ -356,7 +357,7 @@ async def fill_xml_stream(request: FillRequest) -> StreamingResponse:
 
     return StreamingResponse(
         event_stream(),
-        media_type="text/event-stream",
+        media_type="text/event-stream; charset=utf-8",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
