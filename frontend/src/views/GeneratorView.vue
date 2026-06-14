@@ -101,7 +101,12 @@
             :validation-result="validationResult"
             :build-info="buildInfo"
             :xml-sync-hint="xmlSyncHint"
+            :history="generationHistory"
+            :max-entries="historyMaxEntries"
             @go-to-error="goToValidationError"
+            @restore="restoreFromHistory"
+            @remove="removeHistoryEntry"
+            @clear-history="clearGenerationHistory"
           />
         </div>
 
@@ -162,6 +167,7 @@ import GeneratorStructureTab from '../components/generator/GeneratorStructureTab
 import GeneratorDataTab from '../components/generator/GeneratorDataTab.vue'
 import GeneratorResultsTab from '../components/generator/GeneratorResultsTab.vue'
 import GeneratorActionFooter from '../components/generator/GeneratorActionFooter.vue'
+import { useGenerationHistory } from '../composables/useGenerationHistory'
 import { generateXml } from '../api/generate'
 import { fillXmlStream } from '../api/fill'
 import { validateXml } from '../api/validate'
@@ -449,6 +455,14 @@ const fillPercent = ref(0)
 const fillElapsedSeconds = ref(0)
 const validating = ref(false)
 const validationResult = ref(null)
+
+const {
+  history: generationHistory,
+  addEntry: addHistoryEntry,
+  removeEntry: removeHistoryEntry,
+  clearHistory: clearGenerationHistory,
+  maxEntries: historyMaxEntries,
+} = useGenerationHistory()
 
 const AUTO_VALIDATE_KEY = 'xml-gen-auto-validate'
 const ACTIVE_TAB_KEY = 'xml-gen-left-tab'
@@ -871,6 +885,19 @@ async function syncFromPastedXml(text) {
   }
 }
 
+async function restoreFromHistory(entry) {
+  if (!entry?.xml_text) return
+  validationResult.value =
+    entry.validation_valid === true ? { valid: true, errors: [] } : null
+  buildInfo.value =
+    entry.node_count != null
+      ? { node_count: entry.node_count, warnings: entry.warnings || [] }
+      : null
+  xmlSyncHint.value = ''
+  error.value = ''
+  await setProgrammaticXml(entry.xml_text)
+}
+
 async function generate() {
   const requestSeq = ++generateRequestSeq
   generating.value = true
@@ -890,6 +917,15 @@ async function generate() {
     await setProgrammaticXml(result.xml_text)
     buildInfo.value = result
     validationResult.value = null
+    addHistoryEntry({
+      type: 'generate',
+      schema_id: schemaId.value,
+      root_element: rootElement.value,
+      mode: mode.value,
+      xml_text: result.xml_text,
+      node_count: result.node_count,
+      warnings: result.warnings || [],
+    })
     // In custom mode the tree drives generation; syncing back from XML
     // mis-resolves CHOICE branches that share element names (e.g. employer).
     if (result.warnings?.length) {
@@ -951,6 +987,15 @@ async function fill() {
     } else {
       validationResult.value = null
     }
+    addHistoryEntry({
+      type: 'fill',
+      schema_id: schemaId.value,
+      root_element: rootElement.value,
+      xml_text: xmlText.value,
+      node_count: buildInfo.value?.node_count ?? null,
+      warnings: buildInfo.value?.warnings || [],
+      validation_valid: validationResult.value?.valid ?? null,
+    })
   }
 }
 
