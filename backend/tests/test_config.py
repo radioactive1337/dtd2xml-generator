@@ -60,6 +60,18 @@ def test_load_connections_reads_aliases(connections_file: Path):
     assert connections.databases["PGSQL_DB"].user == "qa_user"
     assert list(connections.llm) == ["default"]
     assert connections.llm["default"].model == "gpt-4o-mini"
+    assert connections.llm["default"].timeout == 120.0
+
+
+def test_load_connections_reads_llm_timeout(connections_file: Path):
+    config = json.loads(connections_file.read_text(encoding="utf-8"))
+    config["llm"]["default"]["timeout"] = 600
+    connections_file.write_text(json.dumps(config), encoding="utf-8")
+
+    with patch("app.config._find_connections_file", return_value=connections_file):
+        connections = load_connections()
+
+    assert connections.llm["default"].timeout == 600.0
 
 
 def test_secrets_are_read_from_connections_file(connections_file: Path):

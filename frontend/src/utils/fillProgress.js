@@ -10,6 +10,7 @@ const FILL_STEP_MESSAGES = {
   llm_merge: 'Объединение ответа LLM…',
   faker_fallback: 'Дозаполнение через Faker…',
   complete: 'Заполнение завершено',
+  cancelled: 'Заполнение отменено',
 }
 
 export function translateFillStep(step) {

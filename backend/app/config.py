@@ -24,6 +24,7 @@ class LLMConfig(BaseModel):
     alias: str
     base_url: str
     model: str
+    timeout: float = 120.0
     # api_key is never exposed to the frontend
 
 

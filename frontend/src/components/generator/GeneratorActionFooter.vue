@@ -21,6 +21,14 @@
         <span class="fill-spinner" aria-hidden="true" />
         <span class="fill-status">{{ fillStatusMessage }}</span>
         <span class="fill-elapsed">{{ fillElapsedLabel }}</span>
+        <button
+          type="button"
+          class="btn-cancel-fill"
+          title="Отменить заполнение"
+          @click="$emit('cancel-fill')"
+        >
+          Отменить
+        </button>
       </div>
       <div class="fill-progress-bar" aria-hidden="true">
         <div class="fill-progress-fill" :style="{ width: fillPercent + '%' }" />
@@ -46,7 +54,7 @@ defineProps({
   error: { type: String, default: '' },
 })
 
-defineEmits(['generate', 'fill', 'validate'])
+defineEmits(['generate', 'fill', 'validate', 'cancel-fill'])
 </script>
 
 <style scoped>
@@ -108,6 +116,21 @@ defineEmits(['generate', 'fill', 'validate'])
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
+}
+
+.btn-cancel-fill {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+}
+
+.btn-cancel-fill:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 .fill-progress-bar {

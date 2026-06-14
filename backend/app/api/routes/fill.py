@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -121,6 +122,7 @@ def _validate_hybrid_mappings(request: FillRequest) -> list[SqlMapping]:
 async def execute_fill(
     request: FillRequest,
     on_progress: ProgressCallback = _noop_progress,
+    cancel_event: asyncio.Event | None = None,
 ) -> str:
     """Fill XML with test data, optionally emitting progress updates."""
     registry = get_schema_registry()
@@ -207,6 +209,7 @@ async def execute_fill(
                 on_progress=llm_progress,
                 progress_base=llm_percent,
                 progress_span=50 if request.strategy == "hybrid_db_ai" else 75,
+                cancel_event=cancel_event,
             )
             if request.strategy == "hybrid_db_ai":
                 await on_progress(
@@ -224,6 +227,8 @@ async def execute_fill(
                 )
         else:
             raise HTTPException(status_code=400, detail=f"Unknown strategy: {request.strategy!r}")
+    except asyncio.CancelledError:
+        raise
     except HTTPException:
         raise
     except Exception as exc:
@@ -351,6 +356,7 @@ async def fill_xml_stream(request: FillRequest) -> StreamingResponse:
     """Fill XML and stream progress updates as Server-Sent Events."""
     queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
     queue.put_nowait({"step": "started", "message": "Preparing fill request...", "percent": 0})
+    cancel_event = asyncio.Event()
 
     async def on_progress(step: str, message: str, percent: int) -> None:
         if step == "started":
@@ -359,13 +365,15 @@ async def fill_xml_stream(request: FillRequest) -> StreamingResponse:
 
     async def run_fill() -> None:
         try:
-            result, warnings = await execute_fill(request, on_progress)
+            result, warnings = await execute_fill(request, on_progress, cancel_event)
             await queue.put({
                 "step": "complete",
                 "xml_text": result,
                 "percent": 100,
                 "warnings": warnings,
             })
+        except asyncio.CancelledError:
+            await queue.put({"step": "cancelled", "message": "Fill cancelled"})
         except HTTPException as exc:
             detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
             await queue.put({"step": "error", "message": detail, "status": exc.status_code})
@@ -398,7 +406,11 @@ async def fill_xml_stream(request: FillRequest) -> StreamingResponse:
                 yield _sse_event(event)
                 await asyncio.sleep(0)
         finally:
-            await task
+            cancel_event.set()
+            if not task.done():
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     return StreamingResponse(
         event_stream(),

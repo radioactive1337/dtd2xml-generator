@@ -124,6 +124,7 @@
           :error="error"
           @generate="generate"
           @fill="fill"
+          @cancel-fill="cancelFill"
           @validate="validate"
         />
       </div>
@@ -622,6 +623,7 @@ let generateRequestSeq = 0
 let xmlSyncTimer = null
 let columnsFetchTimer = null
 let fillElapsedTimer = null
+let fillAbortController = null
 
 const fillElapsedLabel = computed(() => {
   const seconds = fillElapsedSeconds.value
@@ -949,6 +951,7 @@ async function fill() {
   resetFillProgress()
   fillStatusMessage.value = 'Запуск заполнения…'
   startFillProgressTimer()
+  fillAbortController = new AbortController()
   let filled = false
   try {
     if (xmlDirty.value) {
@@ -977,18 +980,27 @@ async function fill() {
           db_alias: m.db_alias || null,
         }))
     }
-    const result = await fillXmlStream(request, ({ step, message, percent }) => {
-      const translated = translateFillStep(step)
-      if (translated) fillStatusMessage.value = translated
-      else if (message) fillStatusMessage.value = message
-      if (typeof percent === 'number') fillPercent.value = percent
-    })
+    const result = await fillXmlStream(
+      request,
+      ({ step, message, percent }) => {
+        const translated = translateFillStep(step)
+        if (translated) fillStatusMessage.value = translated
+        else if (message) fillStatusMessage.value = message
+        if (typeof percent === 'number') fillPercent.value = percent
+      },
+      { signal: fillAbortController.signal },
+    )
     await setProgrammaticXml(result.xml_text)
     xmlDirty.value = false
     filled = true
   } catch (e) {
-    error.value = e.message
+    if (e.name === 'AbortError') {
+      fillStatusMessage.value = translateFillStep('cancelled')
+    } else {
+      error.value = e.message
+    }
   } finally {
+    fillAbortController = null
     stopFillProgressTimer()
     filling.value = false
   }
@@ -1008,6 +1020,10 @@ async function fill() {
       validation_valid: validationResult.value?.valid ?? null,
     })
   }
+}
+
+function cancelFill() {
+  fillAbortController?.abort()
 }
 
 async function runValidation() {

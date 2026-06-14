@@ -6,6 +6,7 @@ const API_ERROR_MESSAGES = {
   'Streaming is not supported by this browser': 'Браузер не поддерживает потоковую передачу',
   'Fill failed': 'Ошибка заполнения',
   'Fill stream ended without a result': 'Поток заполнения завершился без результата',
+  'Fill cancelled': 'Заполнение отменено',
   'Unknown error': 'Неизвестная ошибка',
 }
 

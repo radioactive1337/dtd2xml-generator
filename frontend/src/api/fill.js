@@ -57,12 +57,14 @@ function parseSseChunk(buffer) {
 /**
  * Fill XML via SSE stream. Calls onProgress({ step, message, percent }) for each stage.
  * Resolves with { xml_text, strategy } on success.
+ * Pass { signal } to allow cancellation via AbortController.
  */
-export async function fillXmlStream(request, onProgress) {
+export async function fillXmlStream(request, onProgress, { signal } = {}) {
   const response = await fetch('/api/fill/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
+    signal,
   })
 
   if (!response.ok) {
@@ -110,6 +112,10 @@ export async function fillXmlStream(request, onProgress) {
 
       if (event.step === 'error') {
         throw new Error(translateApiError(event.message || 'Fill failed'))
+      }
+
+      if (event.step === 'cancelled') {
+        throw new DOMException(event.message || 'Fill cancelled', 'AbortError')
       }
 
       onProgress?.({

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -76,6 +77,11 @@ async def close_llm_http_client() -> None:
         _http_client = None
 
 
+def _raise_if_cancelled(cancel_event: asyncio.Event | None) -> None:
+    if cancel_event and cancel_event.is_set():
+        raise asyncio.CancelledError("LLM fill cancelled")
+
+
 class LLMService:
     """Populate XML using an OpenAI-compatible chat completion API."""
 
@@ -85,7 +91,7 @@ class LLMService:
         base_url: str | None = None,
         model: str | None = None,
         api_key: str | None = None,
-        timeout: float = 120.0,
+        timeout: float | None = None,
     ) -> None:
         self.alias = resolve_llm_alias(alias)
         connections = load_connections()
@@ -94,7 +100,7 @@ class LLMService:
         self.base_url = (base_url or (llm_cfg.base_url if llm_cfg else "") or "").rstrip("/")
         self.model = model or (llm_cfg.model if llm_cfg else "gpt-4o-mini")
         self.api_key = api_key or get_llm_api_key(self.alias)
-        self.timeout = timeout
+        self.timeout = timeout if timeout is not None else (llm_cfg.timeout if llm_cfg else 120.0)
 
     async def populate_xml(
         self,
@@ -106,6 +112,7 @@ class LLMService:
         on_progress: LlmProgressCallback | None = None,
         progress_base: int = 15,
         progress_span: int = 70,
+        cancel_event: asyncio.Event | None = None,
     ) -> str:
         if not self.base_url:
             logger.error("LLM base URL is not configured")
@@ -147,11 +154,14 @@ class LLMService:
 
         async def fill_batch(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
             nonlocal completed_batches
+            _raise_if_cancelled(cancel_event)
             async with semaphore:
+                _raise_if_cancelled(cancel_event)
                 result = await self._fill_tasks_batch(
                     batch,
                     metadata=metadata,
                     fill_empty_only=fill_empty_only,
+                    cancel_event=cancel_event,
                 )
             async with batch_lock:
                 completed_batches += 1
@@ -173,6 +183,8 @@ class LLMService:
 
         all_values: list[dict[str, Any]] = []
         for index, result in enumerate(batch_results):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
             if isinstance(result, BaseException):
                 logger.error("LLM batch %d failed: %s", index, result)
                 raise ValueError(f"LLM batch {index + 1} failed: {result}") from result
@@ -192,6 +204,7 @@ class LLMService:
         *,
         metadata: str,
         fill_empty_only: bool,
+        cancel_event: asyncio.Event | None = None,
     ) -> list[dict[str, Any]]:
         skeleton = build_batch_xml_skeleton(batch)
         prefix = (
@@ -214,11 +227,13 @@ class LLMService:
 
         last_error: Exception | None = None
         for attempt in range(2):
+            _raise_if_cancelled(cancel_event)
             try:
                 content = await self._chat_completion(
                     system_prompt=_FILL_SYSTEM_PROMPT,
                     user_message=user_message,
                     temperature=0.4 if attempt else 0.5,
+                    cancel_event=cancel_event,
                 )
                 return parse_batch_xml_response(content, batch)
             except ValueError as exc:
@@ -318,7 +333,9 @@ class LLMService:
         system_prompt: str,
         user_message: str,
         temperature: float = 0.7,
+        cancel_event: asyncio.Event | None = None,
     ) -> str:
+        _raise_if_cancelled(cancel_event)
         payload = {
             "model": self.model,
             "messages": [
@@ -335,12 +352,32 @@ class LLMService:
         url = f"{self.base_url}/chat/completions"
         try:
             client = await _get_http_client()
-            response = await client.post(
+            request_coro = client.post(
                 url,
                 headers=headers,
                 json=payload,
                 timeout=self.timeout,
             )
+            if cancel_event is None:
+                response = await request_coro
+            else:
+                request_task = asyncio.create_task(request_coro)
+                cancel_wait = asyncio.create_task(cancel_event.wait())
+                try:
+                    done, _pending = await asyncio.wait(
+                        {request_task, cancel_wait},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if cancel_wait in done:
+                        request_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await request_task
+                        raise asyncio.CancelledError("LLM fill cancelled")
+                    response = request_task.result()
+                finally:
+                    cancel_wait.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await cancel_wait
             response.raise_for_status()
             data = response.json()
         except httpx.HTTPStatusError as exc:
@@ -356,6 +393,8 @@ class LLMService:
                 f"LLM API returned HTTP {exc.response.status_code}: {body}"
             ) from exc
         except httpx.RequestError as exc:
+            if cancel_event and cancel_event.is_set():
+                raise asyncio.CancelledError("LLM fill cancelled") from exc
             logger.exception(
                 "LLM request failed [model=%s url=%s timeout=%s]",
                 self.model,
@@ -692,6 +731,7 @@ async def populate_with_llm(
     on_progress: LlmProgressCallback | None = None,
     progress_base: int = 15,
     progress_span: int = 70,
+    cancel_event: asyncio.Event | None = None,
 ) -> str:
     """Populate XML using the configured LLM service."""
     return await LLMService(alias=alias).populate_xml(
@@ -702,4 +742,5 @@ async def populate_with_llm(
         on_progress=on_progress,
         progress_base=progress_base,
         progress_span=progress_span,
+        cancel_event=cancel_event,
     )
