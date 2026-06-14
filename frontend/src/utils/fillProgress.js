@@ -1,5 +1,6 @@
 const FILL_STEP_MESSAGES = {
   started: 'Подготовка…',
+  accepted: 'Подготовка…',
   db_query: 'Запрос к БД…',
   db_done: 'Данные из БД применены',
   faker: 'Генерация через Faker…',

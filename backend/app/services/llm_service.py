@@ -24,6 +24,9 @@ from app.core.xml_tree import (
 
 logger = logging.getLogger(__name__)
 
+_LLM_BATCH_SIZE = 12
+_LLM_MAX_CONCURRENT = 4
+
 _FILL_SYSTEM_PROMPT = (
     "You are a test data generator for QA automation. "
     "Fill the listed XML field paths with realistic Russian business test data. "
@@ -31,13 +34,12 @@ _FILL_SYSTEM_PROMPT = (
 )
 
 _FILL_JSON_FORMAT = (
-    'Return JSON: {"values": [{"path": "...", "attrs": {"attr": "value"}, "text": "..."}]}\n'
-    "Include only paths from the input list. Use exact attribute names from the input."
+    'Return JSON: {"v":[{"i":0,"a":{"attr":"value"},"t":"optional text"}]}\n'
+    '"i" is the field index from the input. Use exact attribute names from the input.'
 )
 
 _HYBRID_FILL_NOTE = (
-    "Only fill the listed empty or placeholder fields. "
-    "Do not invent additional paths or attributes.\n\n"
+    "Only fill the listed fields. Do not invent additional indices, paths, or attributes.\n\n"
 )
 
 _FIELD_MAPPING_SYSTEM_PROMPT = (
@@ -117,42 +119,85 @@ class LLMService:
             return xml_text
 
         metadata = self._extract_metadata_for_tasks(schema, tasks)
-        tasks_json = json.dumps(tasks, ensure_ascii=False, separators=(",", ":"))
+        batches = [
+            tasks[index : index + _LLM_BATCH_SIZE]
+            for index in range(0, len(tasks), _LLM_BATCH_SIZE)
+        ]
+        logger.info(
+            "LLM populate [tasks=%d batches=%d fill_empty_only=%s]",
+            len(tasks),
+            len(batches),
+            fill_empty_only,
+        )
+
+        semaphore = asyncio.Semaphore(_LLM_MAX_CONCURRENT)
+
+        async def fill_batch(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            async with semaphore:
+                return await self._fill_tasks_batch(
+                    batch,
+                    metadata=metadata,
+                    fill_empty_only=fill_empty_only,
+                )
+
+        batch_results = await asyncio.gather(
+            *(fill_batch(batch) for batch in batches),
+            return_exceptions=True,
+        )
+
+        all_values: list[dict[str, Any]] = []
+        for index, result in enumerate(batch_results):
+            if isinstance(result, BaseException):
+                logger.error("LLM batch %d failed: %s", index, result)
+                raise ValueError(f"LLM batch {index + 1} failed: {result}") from result
+            all_values.extend(result)
+
+        return apply_llm_values(
+            xml_text,
+            all_values,
+            tasks=tasks,
+            fill_empty_only=fill_empty_only,
+            protected_attrs=protected_attrs,
+        )
+
+    async def _fill_tasks_batch(
+        self,
+        batch: list[dict[str, Any]],
+        *,
+        metadata: str,
+        fill_empty_only: bool,
+    ) -> list[dict[str, Any]]:
+        tasks_json = json.dumps(batch, ensure_ascii=False, separators=(",", ":"))
         prefix = _HYBRID_FILL_NOTE if fill_empty_only else ""
         user_message = (
             f"{prefix}Fill the following XML fields with realistic test data.\n\n"
             f"{_FILL_JSON_FORMAT}\n"
             f"Schema metadata (JavaDoc-style comments):\n{metadata}\n\n"
-            f"Fields to fill:\n{tasks_json}"
+            f"Fields to fill (i=index, p=path, a=attribute names, t=text needed):\n"
+            f"{tasks_json}"
         )
 
         logger.debug(
-            "LLM populate request [tasks=%d prompt_chars=%d fill_empty_only=%s]",
-            len(tasks),
+            "LLM batch request [tasks=%d prompt_chars=%d]",
+            len(batch),
             len(user_message),
-            fill_empty_only,
         )
 
         content = await self._chat_completion(
             system_prompt=_FILL_SYSTEM_PROMPT,
             user_message=user_message,
-            temperature=0.7,
+            temperature=0.5,
         )
         data = self._extract_json(content)
-        values = data.get("values", [])
+        values = data.get("v", data.get("values", []))
         if not isinstance(values, list):
-            raise ValueError("LLM response JSON must contain a values array")
-        return apply_llm_values(
-            xml_text,
-            values,
-            fill_empty_only=fill_empty_only,
-            protected_attrs=protected_attrs,
-        )
+            raise ValueError("LLM response JSON must contain a v array")
+        return values
 
     def _extract_metadata_for_tasks(self, schema: DTDSchema, tasks: list[dict[str, Any]]) -> str:
         element_names: set[str] = set()
         for task in tasks:
-            for segment in task["path"].split("."):
+            for segment in task["p"].split("."):
                 element_names.add(re.sub(r"\[\d+\]", "", segment))
 
         lines: list[str] = []
@@ -347,7 +392,7 @@ def collect_fill_tasks(
     fill_empty_only: bool = False,
     protected_attrs: ProtectedAttrs = frozenset(),
 ) -> list[dict[str, Any]]:
-    """Build a compact list of XML fields that need LLM-generated values."""
+    """Build a compact indexed list of XML fields that need LLM-generated values."""
     root = etree.fromstring(xml_text.encode("utf-8"))
     tasks: list[dict[str, Any]] = []
 
@@ -356,40 +401,75 @@ def collect_fill_tasks(
         dot_path = element_dot_path(el)
         tree_path = element_path(el)
 
-        attrs_to_fill: dict[str, str] = {}
+        attr_names: list[str] = []
         for attr_name, attr_value in el.attrib.items():
             if (tree_path, attr_name) in protected_attrs:
                 continue
             attr_def = elem_def.attributes.get(attr_name) if elem_def else None
             if fill_empty_only:
                 if is_fillable_attribute_value(attr_value, attr_def=attr_def):
-                    attrs_to_fill[attr_name] = attr_value
+                    attr_names.append(attr_name)
             else:
-                attrs_to_fill[attr_name] = attr_value
+                attr_names.append(attr_name)
 
-        text_to_fill: str | None = None
-        if elem_def and elem_def.content_model.kind == "PCDATA":
+        needs_text = False
+        if not attr_names and elem_def and elem_def.content_model.kind == "PCDATA" and len(el) == 0:
             if fill_empty_only:
-                if not (el.text or "").strip():
-                    text_to_fill = ""
+                needs_text = not (el.text or "").strip()
             else:
-                text_to_fill = el.text or ""
+                needs_text = True
 
-        if attrs_to_fill or text_to_fill is not None:
-            task: dict[str, Any] = {"path": dot_path}
-            if attrs_to_fill:
-                task["attrs"] = attrs_to_fill
-            if text_to_fill is not None:
-                task["text"] = text_to_fill
+        if attr_names or needs_text:
+            task: dict[str, Any] = {
+                "i": len(tasks),
+                "p": dot_path,
+            }
+            if attr_names:
+                task["a"] = attr_names
+            if needs_text:
+                task["t"] = 1
             tasks.append(task)
 
     return tasks
+
+
+def _normalize_llm_value_item(
+    item: dict[str, Any],
+    *,
+    tasks: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+
+    dot_path = item.get("path") or item.get("p")
+    attrs = item.get("attrs") or item.get("a")
+    text = item.get("text")
+    if text is None and "t" in item:
+        text = item["t"]
+
+    if not dot_path and "i" in item and tasks is not None:
+        index = item["i"]
+        matched = next((task for task in tasks if task["i"] == index), None)
+        if matched is None:
+            return None
+        dot_path = matched["p"]
+
+    if not isinstance(dot_path, str) or not dot_path:
+        return None
+
+    normalized: dict[str, Any] = {"path": dot_path}
+    if isinstance(attrs, dict):
+        normalized["attrs"] = attrs
+    if text is not None:
+        normalized["text"] = text
+    return normalized
 
 
 def apply_llm_values(
     original_xml: str,
     values: list[dict[str, Any]],
     *,
+    tasks: list[dict[str, Any]] | None = None,
     fill_empty_only: bool = False,
     protected_attrs: ProtectedAttrs = frozenset(),
 ) -> str:
@@ -398,12 +478,11 @@ def apply_llm_values(
     by_dot_path = {element_dot_path(el): el for el in original_root.iter()}
 
     for item in values:
-        if not isinstance(item, dict):
-            continue
-        dot_path = item.get("path")
-        if not isinstance(dot_path, str) or not dot_path:
+        normalized = _normalize_llm_value_item(item, tasks=tasks)
+        if normalized is None:
             continue
 
+        dot_path = normalized["path"]
         el = by_dot_path.get(dot_path)
         if el is None:
             found = find_elements_by_dot_path(original_root, dot_path)
@@ -413,7 +492,7 @@ def apply_llm_values(
 
         tree_path = element_path(el)
 
-        attrs = item.get("attrs")
+        attrs = normalized.get("attrs")
         if isinstance(attrs, dict):
             for attr_name, new_value in attrs.items():
                 if (tree_path, attr_name) in protected_attrs:
@@ -425,8 +504,8 @@ def apply_llm_values(
                 if new_value is not None and str(new_value).strip():
                     el.set(attr_name, str(new_value))
 
-        if "text" in item:
-            new_text = item["text"]
+        if "text" in normalized:
+            new_text = normalized["text"]
             if new_text is not None and str(new_text).strip():
                 if fill_empty_only and (el.text or "").strip():
                     continue

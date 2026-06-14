@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.routes.dtd import get_schema_registry
+from app.api.routes.generate import get_last_generated, set_last_generated
 from app.config import resolve_llm_alias
 from app.core.xml_tree import ProtectedAttrs
 from app.services.db_service import SqlMapping, apply_db_overrides
@@ -39,7 +40,7 @@ ProgressCallback = Callable[[str, str, int], Awaitable[None]]
 
 class FillRequest(BaseModel):
     schema_id: str
-    xml_text: str
+    xml_text: str | None = None
     strategy: Strategy = "faker"
 
     # Hybrid pipeline: DB overrides (Stage 1)
@@ -127,7 +128,12 @@ async def execute_fill(
     schema = registry[request.schema_id]
     await on_progress("started", "Preparing fill request...", 0)
 
-    xml = request.xml_text
+    xml = (request.xml_text or "").strip() or get_last_generated(request.schema_id)
+    if not xml:
+        raise HTTPException(
+            status_code=400,
+            detail="xml_text is required when no generated XML is cached on the server",
+        )
     protected_attrs: ProtectedAttrs = frozenset()
     fill_warnings: list[str] = []
 
@@ -190,25 +196,20 @@ async def execute_fill(
                 fill_empty_only=fill_empty_only,
                 protected_attrs=protected_attrs,
             )
-            if fill_empty_only:
+            if request.strategy == "hybrid_db_ai":
                 await on_progress(
-                    "llm_merge",
-                    "Merging LLM output into XML...",
-                    82,
+                    "faker_fallback",
+                    "Filling remaining fields with Smart Faker...",
+                    90,
                 )
-            await on_progress(
-                "faker_fallback",
-                "Filling remaining fields with Smart Faker...",
-                90,
-            )
-            result = await asyncio.to_thread(
-                populate_with_faker,
-                result,
-                schema,
-                locale=request.faker_locale,
-                fill_empty_only=True,
-                protected_attrs=protected_attrs,
-            )
+                result = await asyncio.to_thread(
+                    populate_with_faker,
+                    result,
+                    schema,
+                    locale=request.faker_locale,
+                    fill_empty_only=True,
+                    protected_attrs=protected_attrs,
+                )
         else:
             raise HTTPException(status_code=400, detail=f"Unknown strategy: {request.strategy!r}")
     except HTTPException:
@@ -229,6 +230,7 @@ async def execute_fill(
             detail=f"{stage} stage failed: {exc}",
         ) from exc
 
+    set_last_generated(request.schema_id, result)
     return result, fill_warnings
 
 
@@ -310,8 +312,11 @@ def _sse_event(payload: dict[str, object]) -> str:
 async def fill_xml_stream(request: FillRequest) -> StreamingResponse:
     """Fill XML and stream progress updates as Server-Sent Events."""
     queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
+    queue.put_nowait({"step": "started", "message": "Preparing fill request...", "percent": 0})
 
     async def on_progress(step: str, message: str, percent: int) -> None:
+        if step == "started":
+            return
         await queue.put({"step": step, "message": message, "percent": percent})
 
     async def run_fill() -> None:

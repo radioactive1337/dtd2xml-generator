@@ -63,11 +63,11 @@ def test_collect_fill_tasks_hybrid_only_empty_and_placeholders():
     )
 
     assert len(tasks) == 2
-    assert tasks[0] == {"path": "PayDoc", "attrs": {"id": "id-1"}}
+    assert tasks[0] == {"i": 0, "p": "PayDoc", "a": ["id"]}
     assert tasks[1] == {
-        "path": "PayDoc.Body.Record.Field",
-        "attrs": {"name": "", "type": "string"},
-        "text": "",
+        "i": 1,
+        "p": "PayDoc.Body.Record.Field",
+        "a": ["name", "type"],
     }
 
 
@@ -77,16 +77,23 @@ def test_apply_llm_values_preserves_structure_and_db_values():
         "<Body><Record><Field name=\"\" type=\"string\"/></Record></Body>"
         "</PayDoc>"
     )
+    tasks = collect_fill_tasks(
+        original,
+        _paydoc_schema(),
+        fill_empty_only=True,
+        protected_attrs=frozenset({((), "kladr")}),
+    )
     values = [
-        {"path": "PayDoc", "attrs": {"id": "ai-id", "kladr": "999", "active": "false"}},
-        {"path": "PayDoc.Body.Record.Field", "attrs": {"name": "filled", "type": "number"}},
-        {"path": "PayDoc.Body.Record.Extra", "attrs": {"x": "y"}},
+        {"i": 0, "a": {"id": "ai-id", "kladr": "999", "active": "false"}},
+        {"i": 1, "a": {"name": "filled", "type": "number"}},
+        {"i": 99, "a": {"x": "y"}},
     ]
     protected = frozenset({((), "kladr")})
 
     result = apply_llm_values(
         original,
         values,
+        tasks=tasks,
         fill_empty_only=True,
         protected_attrs=protected,
     )
@@ -105,8 +112,8 @@ def test_collect_fill_tasks_full_mode_includes_all_attributes():
     tasks = collect_fill_tasks(xml, _paydoc_schema(), fill_empty_only=False)
 
     assert len(tasks) == 1
-    assert tasks[0]["attrs"] == {
-        "id": "existing",
-        "kladr": "",
-        "active": "false",
+    assert tasks[0] == {
+        "i": 0,
+        "p": "PayDoc",
+        "a": ["id", "kladr", "active"],
     }

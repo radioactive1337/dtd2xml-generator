@@ -48,3 +48,8 @@ async def generate_xml(config: BuildConfig) -> BuildResult:
 def get_last_generated(schema_id: str) -> str | None:
     """Return the last generated XML for a schema."""
     return _last_generated.get(schema_id)
+
+
+def set_last_generated(schema_id: str, xml_text: str) -> None:
+    """Remember the latest XML for a schema (after generate or fill)."""
+    _last_generated[schema_id] = xml_text

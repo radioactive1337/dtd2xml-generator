@@ -448,6 +448,7 @@ async function refreshDtdElementPaths() {
 }
 
 const xmlText = ref('')
+const xmlDirty = ref(false)
 const liveXmlText = ref('')
 const buildInfo = ref(null)
 const generating = ref(false)
@@ -566,13 +567,14 @@ function getEditorXmlText() {
   return xmlEditorRef.value?.getValue?.() ?? xmlText.value
 }
 
-async function setProgrammaticXml(text) {
+async function setProgrammaticXml(text, { dirty = false } = {}) {
   clearTimeout(xmlSyncTimer)
   xmlSyncTimer = null
   ignoreNextXmlWatch = true
   const xml = text || ''
   liveXmlText.value = xml
   xmlText.value = xml
+  xmlDirty.value = dirty
   await nextTick()
   xmlEditorRef.value?.setValue?.(xml)
   ignoreNextXmlWatch = false
@@ -592,13 +594,14 @@ function onEditorContentChange(text) {
   if (ignoreNextXmlWatch || generating.value || filling.value) return
   liveXmlText.value = text || ''
   xmlText.value = text || ''
+  xmlDirty.value = true
   scheduleXmlSync(text)
 }
 
 async function onXmlFileImported({ text }) {
   validationResult.value = null
   buildInfo.value = null
-  await setProgrammaticXml(text)
+  await setProgrammaticXml(text, { dirty: true })
   if (schemaId.value) {
     await syncFromPastedXml(text)
   }
@@ -897,7 +900,7 @@ async function restoreFromHistory(entry) {
       : null
   xmlSyncHint.value = ''
   error.value = ''
-  await setProgrammaticXml(entry.xml_text)
+  await setProgrammaticXml(entry.xml_text, { dirty: true })
 }
 
 async function generate() {
@@ -950,8 +953,10 @@ async function fill() {
   try {
     const request = {
       schema_id: schemaId.value,
-      xml_text: xmlText.value,
       strategy: fillStrategy.value,
+    }
+    if (xmlDirty.value) {
+      request.xml_text = getEditorXmlText() || xmlText.value
     }
     if (llmAlias.value) {
       request.llm_alias = llmAlias.value
@@ -976,6 +981,7 @@ async function fill() {
       if (typeof percent === 'number') fillPercent.value = percent
     })
     await setProgrammaticXml(result.xml_text)
+    xmlDirty.value = false
     filled = true
   } catch (e) {
     error.value = e.message
