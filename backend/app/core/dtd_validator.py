@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from io import BytesIO
 
 from lxml import etree
@@ -9,6 +10,9 @@ from pydantic import BaseModel, Field
 
 from app.core.dtd_exporter import export_flat_dtd
 from app.core.dtd_models import DTDSchema
+
+_compiled_dtd_cache: dict[int, etree.DTD] = {}
+_dtd_cache_lock = threading.Lock()
 
 
 class ValidationError(BaseModel):
@@ -21,6 +25,26 @@ class ValidationError(BaseModel):
 class ValidationResult(BaseModel):
     valid: bool
     errors: list[ValidationError] = Field(default_factory=list)
+
+
+def _schema_fingerprint(schema: DTDSchema) -> int:
+    return hash(schema.model_dump_json())
+
+
+def _get_compiled_dtd(schema: DTDSchema) -> etree.DTD:
+    """Return a compiled libxml2 DTD, reusing cached instances per schema content."""
+    key = _schema_fingerprint(schema)
+    with _dtd_cache_lock:
+        cached = _compiled_dtd_cache.get(key)
+        if cached is not None:
+            return cached
+
+    flat_dtd = export_flat_dtd(schema)
+    dtd = etree.DTD(BytesIO(flat_dtd.encode("utf-8")))
+
+    with _dtd_cache_lock:
+        _compiled_dtd_cache[key] = dtd
+    return dtd
 
 
 def validate_xml(xml_text: str, schema: DTDSchema) -> ValidationResult:
@@ -46,15 +70,12 @@ def validate_xml(xml_text: str, schema: DTDSchema) -> ValidationResult:
         )
 
     try:
-        flat_dtd = export_flat_dtd(schema)
+        dtd = _get_compiled_dtd(schema)
     except ValueError as exc:
         return ValidationResult(
             valid=False,
             errors=[ValidationError(line=0, column=0, message=str(exc))],
         )
-
-    try:
-        dtd = etree.DTD(BytesIO(flat_dtd.encode("utf-8")))
     except etree.DTDParseError as exc:
         return ValidationResult(
             valid=False,
