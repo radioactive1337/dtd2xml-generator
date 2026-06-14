@@ -74,6 +74,27 @@ def find_elements_by_dot_path(
     return [current]
 
 
+def element_dot_path(el: etree._Element) -> str:
+    """Dot-separated path from document root, with ``[index]`` for duplicate siblings."""
+    chain: list[etree._Element] = []
+    current: etree._Element | None = el
+    while current is not None:
+        chain.append(current)
+        current = current.getparent()
+    chain.reverse()
+
+    segments: list[str] = []
+    for index, node in enumerate(chain):
+        tag = node.tag
+        if index > 0:
+            parent = chain[index - 1]
+            siblings = [child for child in parent if child.tag == tag]
+            if len(siblings) > 1:
+                tag = f"{tag}[{siblings.index(node)}]"
+        segments.append(tag)
+    return ".".join(segments)
+
+
 def element_path(el: etree._Element) -> ElementPath:
     """Indexed path from root to *el* (tag, sibling-index among same-tag children)."""
     parts: list[tuple[str, int]] = []

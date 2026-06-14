@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -13,25 +14,30 @@ from lxml import etree
 from app.config import get_llm_api_key, load_connections, resolve_llm_alias
 from app.core.dtd_models import DTDSchema
 from app.core.logging_config import truncate
-from app.core.xml_tree import ProtectedAttrs, element_path, is_fillable_attribute_value
+from app.core.xml_tree import (
+    ProtectedAttrs,
+    element_dot_path,
+    element_path,
+    find_elements_by_dot_path,
+    is_fillable_attribute_value,
+)
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = (
+_FILL_SYSTEM_PROMPT = (
     "You are a test data generator for QA automation. "
-    "Fill in the provided XML skeleton with realistic Russian business test data. "
-    "Preserve the exact XML structure, element names, and attribute names. "
-    "Return only valid XML without markdown fences or explanations."
+    "Fill the listed XML field paths with realistic Russian business test data. "
+    "Return only valid JSON without markdown fences or explanations."
 )
 
-_HYBRID_SYSTEM_PROMPT = (
-    "You are a test data generator for QA automation. "
-    "Fill attribute values and text nodes that are empty or contain placeholder values "
-    "(e.g. id-1, empty strings). "
-    "Do NOT change attributes that already contain real database values. "
-    "Do NOT add, remove, or rename any elements or attributes. "
-    "Preserve the exact XML structure, element order, and nesting. "
-    "Return only valid XML without markdown fences or explanations."
+_FILL_JSON_FORMAT = (
+    'Return JSON: {"values": [{"path": "...", "attrs": {"attr": "value"}, "text": "..."}]}\n'
+    "Include only paths from the input list. Use exact attribute names from the input."
+)
+
+_HYBRID_FILL_NOTE = (
+    "Only fill the listed empty or placeholder fields. "
+    "Do not invent additional paths or attributes.\n\n"
 )
 
 _FIELD_MAPPING_SYSTEM_PROMPT = (
@@ -40,6 +46,32 @@ _FIELD_MAPPING_SYSTEM_PROMPT = (
     "and any provided documentation. "
     "Return only valid JSON without markdown fences or explanations."
 )
+
+_http_client: httpx.AsyncClient | None = None
+_http_client_lock = asyncio.Lock()
+
+
+async def _get_http_client() -> httpx.AsyncClient:
+    """Return a shared async HTTP client with connection pooling."""
+    global _http_client
+    if _http_client is not None and not _http_client.is_closed:
+        return _http_client
+
+    async with _http_client_lock:
+        if _http_client is not None and not _http_client.is_closed:
+            return _http_client
+        _http_client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+        return _http_client
+
+
+async def close_llm_http_client() -> None:
+    """Close the shared LLM HTTP client. Called on application shutdown."""
+    global _http_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
 
 
 class LLMService:
@@ -74,107 +106,69 @@ class LLMService:
             logger.error("LLM base URL is not configured")
             raise ValueError("LLM base URL is not configured in connections.json")
 
-        metadata = self._extract_metadata(schema, xml_text)
-        if fill_empty_only:
-            user_message = (
-                "Fill attribute values and text nodes that are empty or still contain "
-                "builder placeholders (e.g. id-1). "
-                "Leave database-filled values unchanged. "
-                "Do not add or remove any elements.\n\n"
-                f"Schema metadata (JavaDoc-style comments):\n{metadata}\n\n"
-                f"XML skeleton:\n{xml_text}"
-            )
-            system_prompt = _HYBRID_SYSTEM_PROMPT
-        else:
-            user_message = (
-                "Fill the following XML skeleton with realistic test data.\n\n"
-                f"Schema metadata (JavaDoc-style comments):\n{metadata}\n\n"
-                f"XML skeleton:\n{xml_text}"
-            )
-            system_prompt = _SYSTEM_PROMPT
+        tasks = collect_fill_tasks(
+            xml_text,
+            schema,
+            fill_empty_only=fill_empty_only,
+            protected_attrs=protected_attrs,
+        )
+        if not tasks:
+            logger.debug("LLM populate skipped: no fillable fields")
+            return xml_text
 
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            "temperature": 0.7,
-        }
+        metadata = self._extract_metadata_for_tasks(schema, tasks)
+        tasks_json = json.dumps(tasks, ensure_ascii=False, separators=(",", ":"))
+        prefix = _HYBRID_FILL_NOTE if fill_empty_only else ""
+        user_message = (
+            f"{prefix}Fill the following XML fields with realistic test data.\n\n"
+            f"{_FILL_JSON_FORMAT}\n"
+            f"Schema metadata (JavaDoc-style comments):\n{metadata}\n\n"
+            f"Fields to fill:\n{tasks_json}"
+        )
 
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+        logger.debug(
+            "LLM populate request [tasks=%d prompt_chars=%d fill_empty_only=%s]",
+            len(tasks),
+            len(user_message),
+            fill_empty_only,
+        )
 
-        url = f"{self.base_url}/chat/completions"
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
-        except httpx.HTTPStatusError as exc:
-            body = truncate(exc.response.text, max_len=500)
-            logger.error(
-                "LLM API HTTP error [model=%s url=%s status=%s]: %s",
-                self.model,
-                url,
-                exc.response.status_code,
-                body,
-            )
-            raise ValueError(
-                f"LLM API returned HTTP {exc.response.status_code}: {body}"
-            ) from exc
-        except httpx.RequestError as exc:
-            logger.exception(
-                "LLM request failed [model=%s url=%s timeout=%s]",
-                self.model,
-                url,
-                self.timeout,
-            )
-            raise ValueError(f"LLM request failed: {exc}") from exc
+        content = await self._chat_completion(
+            system_prompt=_FILL_SYSTEM_PROMPT,
+            user_message=user_message,
+            temperature=0.7,
+        )
+        data = self._extract_json(content)
+        values = data.get("values", [])
+        if not isinstance(values, list):
+            raise ValueError("LLM response JSON must contain a values array")
+        return apply_llm_values(
+            xml_text,
+            values,
+            fill_empty_only=fill_empty_only,
+            protected_attrs=protected_attrs,
+        )
 
-        try:
-            content = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            logger.error(
-                "Unexpected LLM response shape [model=%s keys=%s]",
-                self.model,
-                list(data.keys()) if isinstance(data, dict) else type(data).__name__,
-            )
-            raise ValueError("LLM response did not contain a message") from exc
+    def _extract_metadata_for_tasks(self, schema: DTDSchema, tasks: list[dict[str, Any]]) -> str:
+        element_names: set[str] = set()
+        for task in tasks:
+            for segment in task["path"].split("."):
+                element_names.add(re.sub(r"\[\d+\]", "", segment))
 
-        llm_xml = self._extract_xml(content)
-        if fill_empty_only:
-            return merge_fill_empty_only(xml_text, llm_xml, protected_attrs=protected_attrs)
-        return llm_xml
-
-    def _extract_metadata(self, schema: DTDSchema, xml_text: str) -> str:
         lines: list[str] = []
         for elem in schema.elements.values():
-            if f"<{elem.name}" in xml_text or f"</{elem.name}>" in xml_text:
-                if elem.doc:
-                    lines.append(f"@doc {elem.name}: {elem.doc}")
-                for attr_name, attr in elem.attributes.items():
-                    if attr.doc:
-                        lines.append(f"@att {elem.name}.{attr_name}: {attr.doc}")
-                    if attr.allowed_values:
-                        lines.append(
-                            f"@enum {elem.name}.{attr_name}: {', '.join(attr.allowed_values)}"
-                        )
+            if elem.name not in element_names:
+                continue
+            if elem.doc:
+                lines.append(f"@doc {elem.name}: {elem.doc}")
+            for attr_name, attr in elem.attributes.items():
+                if attr.doc:
+                    lines.append(f"@att {elem.name}.{attr_name}: {attr.doc}")
+                if attr.allowed_values:
+                    lines.append(
+                        f"@enum {elem.name}.{attr_name}: {', '.join(attr.allowed_values)}"
+                    )
         return "\n".join(lines) if lines else "(no metadata)"
-
-    def _extract_xml(self, content: str) -> str:
-        content = content.strip()
-        fence_match = re.search(r"```(?:xml)?\s*([\s\S]*?)```", content, re.IGNORECASE)
-        if fence_match:
-            return fence_match.group(1).strip()
-        if content.startswith("<?xml") or content.startswith("<"):
-            return content
-        logger.error(
-            "LLM response did not contain valid XML [preview=%s]",
-            truncate(content, max_len=300),
-        )
-        raise ValueError("LLM response did not contain valid XML")
 
     async def suggest_field_mappings_json(
         self,
@@ -251,10 +245,15 @@ class LLMService:
 
         url = f"{self.base_url}/chat/completions"
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
+            client = await _get_http_client()
+            response = await client.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
         except httpx.HTTPStatusError as exc:
             body = truncate(exc.response.text, max_len=500)
             logger.error(
@@ -315,9 +314,9 @@ class LLMService:
 
         url = f"{self.base_url}/models"
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(url, headers=headers)
-                response.raise_for_status()
+            client = await _get_http_client()
+            response = await client.get(url, headers=headers, timeout=15.0)
+            response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             body = truncate(exc.response.text, max_len=300)
             logger.error(
@@ -339,6 +338,106 @@ class LLMService:
             raise ValueError(f"LLM request failed: {exc}") from exc
 
         return f"Reachable (model: {self.model})"
+
+
+def collect_fill_tasks(
+    xml_text: str,
+    schema: DTDSchema,
+    *,
+    fill_empty_only: bool = False,
+    protected_attrs: ProtectedAttrs = frozenset(),
+) -> list[dict[str, Any]]:
+    """Build a compact list of XML fields that need LLM-generated values."""
+    root = etree.fromstring(xml_text.encode("utf-8"))
+    tasks: list[dict[str, Any]] = []
+
+    for el in root.iter():
+        elem_def = schema.elements.get(el.tag)
+        dot_path = element_dot_path(el)
+        tree_path = element_path(el)
+
+        attrs_to_fill: dict[str, str] = {}
+        for attr_name, attr_value in el.attrib.items():
+            if (tree_path, attr_name) in protected_attrs:
+                continue
+            attr_def = elem_def.attributes.get(attr_name) if elem_def else None
+            if fill_empty_only:
+                if is_fillable_attribute_value(attr_value, attr_def=attr_def):
+                    attrs_to_fill[attr_name] = attr_value
+            else:
+                attrs_to_fill[attr_name] = attr_value
+
+        text_to_fill: str | None = None
+        if elem_def and elem_def.content_model.kind == "PCDATA":
+            if fill_empty_only:
+                if not (el.text or "").strip():
+                    text_to_fill = ""
+            else:
+                text_to_fill = el.text or ""
+
+        if attrs_to_fill or text_to_fill is not None:
+            task: dict[str, Any] = {"path": dot_path}
+            if attrs_to_fill:
+                task["attrs"] = attrs_to_fill
+            if text_to_fill is not None:
+                task["text"] = text_to_fill
+            tasks.append(task)
+
+    return tasks
+
+
+def apply_llm_values(
+    original_xml: str,
+    values: list[dict[str, Any]],
+    *,
+    fill_empty_only: bool = False,
+    protected_attrs: ProtectedAttrs = frozenset(),
+) -> str:
+    """Apply LLM JSON field values onto the original XML tree."""
+    original_root = etree.fromstring(original_xml.encode("utf-8"))
+    by_dot_path = {element_dot_path(el): el for el in original_root.iter()}
+
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        dot_path = item.get("path")
+        if not isinstance(dot_path, str) or not dot_path:
+            continue
+
+        el = by_dot_path.get(dot_path)
+        if el is None:
+            found = find_elements_by_dot_path(original_root, dot_path)
+            el = found[0] if found else None
+        if el is None:
+            continue
+
+        tree_path = element_path(el)
+
+        attrs = item.get("attrs")
+        if isinstance(attrs, dict):
+            for attr_name, new_value in attrs.items():
+                if (tree_path, attr_name) in protected_attrs:
+                    continue
+                if attr_name not in el.attrib:
+                    continue
+                if fill_empty_only and not is_fillable_attribute_value(el.attrib[attr_name]):
+                    continue
+                if new_value is not None and str(new_value).strip():
+                    el.set(attr_name, str(new_value))
+
+        if "text" in item:
+            new_text = item["text"]
+            if new_text is not None and str(new_text).strip():
+                if fill_empty_only and (el.text or "").strip():
+                    continue
+                el.text = str(new_text)
+
+    return etree.tostring(
+        original_root,
+        pretty_print=True,
+        encoding="UTF-8",
+        xml_declaration=False,
+    ).decode("UTF-8")
 
 
 def _build_path_map(root: etree._Element) -> dict[tuple[tuple[str, int], ...], etree._Element]:

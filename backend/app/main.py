@@ -15,6 +15,7 @@ from app.api.routes import config, db, dtd, export, fill, generate, mapping_pres
 from app.config import PROJECT_ROOT, get_app_settings, get_connection_aliases
 from app.core.logging_config import setup_logging
 from app.services.db_service import close_db_pools
+from app.services.llm_service import close_llm_http_client
 from app.services.oracle_client import bootstrap_oracle_client
 
 setup_logging()
@@ -29,6 +30,7 @@ async def lifespan(_app: FastAPI):
     logger.info("DTD schema registry initialized [loaded=%d]", loaded)
     yield
     await close_db_pools()
+    await close_llm_http_client()
 
 
 app = FastAPI(
