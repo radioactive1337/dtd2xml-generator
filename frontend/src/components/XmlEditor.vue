@@ -42,6 +42,7 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import loader from '@monaco-editor/loader'
 import { registerXmlFormatter } from '../utils/formatXml'
+import { useTheme } from '../composables/useTheme'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -50,6 +51,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['content-change', 'import'])
+
+const { isDark } = useTheme()
 
 const editorContainer = ref(null)
 const fileInput = ref(null)
@@ -90,7 +93,7 @@ onMounted(async () => {
   editor = monaco.editor.create(editorContainer.value, {
     value: props.modelValue,
     language: 'xml',
-    theme: 'vs-dark',
+    theme: isDark.value ? 'vs-dark' : 'vs',
     readOnly: false,
     minimap: { enabled: false },
     wordWrap: 'on',
@@ -106,6 +109,10 @@ onMounted(async () => {
 })
 
 watch(() => props.modelValue, applyModelValue)
+
+watch(isDark, (dark) => {
+  if (monaco) monaco.editor.setTheme(dark ? 'vs-dark' : 'vs')
+})
 
 watch(
   () => props.validationErrors,

@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Генератор XML</title>
+    <script>
+      (function () {
+        var t = localStorage.getItem('xml-gen-theme');
+        document.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark';
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

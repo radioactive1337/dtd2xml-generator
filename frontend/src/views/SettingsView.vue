@@ -288,12 +288,12 @@ code {
 }
 
 .status-badge.ok {
-  background: rgba(34, 197, 94, 0.15);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
   color: var(--success);
 }
 
 .status-badge.error {
-  background: rgba(239, 68, 68, 0.15);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
   color: var(--danger);
 }
 
@@ -318,7 +318,7 @@ code {
 }
 
 .alias-icon.llm {
-  background: #8b5cf6;
+  background: var(--llm-accent);
 }
 
 .empty {

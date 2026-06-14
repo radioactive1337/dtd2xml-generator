@@ -97,7 +97,7 @@ function onFileSelect(e) {
 .drop-zone:hover,
 .drop-zone.dragging {
   border-color: var(--accent);
-  background: rgba(59, 130, 246, 0.05);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 
 .drop-zone.loaded {

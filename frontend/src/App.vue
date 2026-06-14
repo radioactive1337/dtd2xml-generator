@@ -8,6 +8,14 @@
       <nav class="nav">
         <router-link to="/" class="nav-link">Генератор</router-link>
         <router-link to="/settings" class="nav-link">Настройки</router-link>
+        <button
+          class="theme-toggle"
+          :title="isDark ? 'Светлая тема' : 'Тёмная тема'"
+          :aria-label="isDark ? 'Включить светлую тему' : 'Включить тёмную тему'"
+          @click="toggleTheme"
+        >
+          <span class="theme-icon" aria-hidden="true">{{ isDark ? '☀' : '☾' }}</span>
+        </button>
       </nav>
     </header>
     <main class="app-main">
@@ -17,6 +25,12 @@
     </main>
   </div>
 </template>
+
+<script setup>
+import { useTheme } from './composables/useTheme'
+
+const { isDark, toggleTheme } = useTheme()
+</script>
 
 <style scoped>
 .app {
@@ -73,6 +87,30 @@
 .nav-link.router-link-active {
   color: var(--text);
   background: var(--surface2);
+}
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: all 0.15s;
+}
+
+.theme-toggle:hover {
+  color: var(--text);
+  background: var(--surface2);
+}
+
+.theme-icon {
+  font-size: 16px;
+  line-height: 1;
 }
 
 .app-main {
