@@ -31,6 +31,7 @@ COPY config/connections.json.example /app/config/connections.json.example
 COPY docker/entrypoint.sh /app/docker/entrypoint.sh
 
 RUN mkdir -p /app/dtd_schemas /app/mapping_presets /app/presets /app/config \
+    && sed -i 's/\r$//' /app/docker/entrypoint.sh \
     && chmod +x /app/docker/entrypoint.sh
 
 WORKDIR /app/backend
@@ -42,4 +43,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health')" || exit 1
 
-CMD ["/app/docker/entrypoint.sh"]
+CMD ["/bin/sh", "/app/docker/entrypoint.sh"]
