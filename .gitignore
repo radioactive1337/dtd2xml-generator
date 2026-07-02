@@ -1,5 +1,6 @@
 # Secrets
 connections.json
+config/connections.json
 
 # Python
 __pycache__/

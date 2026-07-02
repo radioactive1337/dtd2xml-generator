@@ -239,10 +239,12 @@ Thick mode инициализируется при старте процесса
 1. Подготовьте конфигурацию:
 
 ```bash
-copy connections.docker.json.example connections.json
+copy config\connections.json.example config\connections.json
 ```
 
 В Docker `localhost` указывает на сам контейнер. Для сервисов на хосте (PostgreSQL, Ollama и т.д.) используйте `host.docker.internal` — это уже задано в примере.
+
+> **Важно:** не монтируйте `connections.json` как отдельный файл — если его нет на хосте, Docker создаст **папку** с таким именем и приложение упадёт с `IsADirectoryError`. Используйте каталог `config/`.
 
 2. Создайте каталоги для данных (если их ещё нет):
 
@@ -266,7 +268,7 @@ docker compose down           # остановка
 docker compose up --build     # пересборка после изменений кода
 ```
 
-**Тома:** `connections.json`, `dtd_schemas/`, `mapping_presets/`, `presets/` монтируются с хоста и сохраняются между перезапусками.
+**Тома:** `config/`, `dtd_schemas/`, `mapping_presets/`, `presets/` монтируются с хоста и сохраняются между перезапусками.
 
 **Oracle в Docker:** для thick mode смонтируйте Instant Client в контейнер и раскомментируйте том в `docker-compose.yml`:
 
@@ -275,7 +277,7 @@ volumes:
   - ./oracle-client:/opt/oracle/instantclient:ro
 ```
 
-В `connections.json` укажите `"oracle_client_lib_dir": "/opt/oracle/instantclient"` и добавьте алиас Oracle с `host: "host.docker.internal"` (или именем сервиса в compose-сети).
+В `config/connections.json` укажите `"oracle_client_lib_dir": "/opt/oracle/instantclient"` и добавьте алиас Oracle с `host: "host.docker.internal"` (или именем сервиса в compose-сети).
 
 ### Разработка (два терминала)
 

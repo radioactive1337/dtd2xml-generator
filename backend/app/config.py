@@ -46,11 +46,12 @@ class ConnectionsConfig(BaseModel):
 
 def _find_connections_file() -> Path | None:
     candidates = [
+        PROJECT_ROOT / "config" / "connections.json",
         PROJECT_ROOT / "connections.json",
         BACKEND_ROOT / "connections.json",
     ]
     for path in candidates:
-        if path.exists():
+        if path.is_file():
             return path
     return None
 

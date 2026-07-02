@@ -27,8 +27,11 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
 COPY backend/ /app/backend/
 COPY --from=frontend-builder /build/frontend/dist /app/frontend/dist
+COPY config/connections.json.example /app/config/connections.json.example
+COPY docker/entrypoint.sh /app/docker/entrypoint.sh
 
-RUN mkdir -p /app/dtd_schemas /app/mapping_presets /app/presets
+RUN mkdir -p /app/dtd_schemas /app/mapping_presets /app/presets /app/config \
+    && chmod +x /app/docker/entrypoint.sh
 
 WORKDIR /app/backend
 
@@ -39,4 +42,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health')" || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["/app/docker/entrypoint.sh"]

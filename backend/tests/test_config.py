@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from app.config import (
+    _find_connections_file,
     get_app_settings,
     get_connection_aliases,
     get_db_password,
@@ -50,6 +51,30 @@ def connections_file(tmp_path: Path):
     path = tmp_path / "connections.json"
     path.write_text(json.dumps(config), encoding="utf-8")
     return path
+
+
+def test_find_connections_file_prefers_config_directory(tmp_path: Path, monkeypatch):
+    project_root = tmp_path
+    config_file = project_root / "config" / "connections.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text('{"databases": {}, "llm": {}}', encoding="utf-8")
+    (project_root / "connections.json").write_text(
+        '{"databases": {"OTHER": {}}, "llm": {}}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("app.config.PROJECT_ROOT", project_root)
+
+    assert _find_connections_file() == config_file
+
+
+def test_find_connections_file_skips_directory(tmp_path: Path, monkeypatch):
+    project_root = tmp_path
+    (project_root / "connections.json").mkdir()
+    monkeypatch.setattr("app.config.PROJECT_ROOT", project_root)
+    monkeypatch.setattr("app.config.BACKEND_ROOT", project_root / "backend")
+
+    assert _find_connections_file() is None
 
 
 def test_load_connections_reads_aliases(connections_file: Path):
