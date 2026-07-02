@@ -270,14 +270,28 @@ docker compose up --build     # пересборка после изменени
 
 **Тома:** `config/`, `dtd_schemas/`, `mapping_presets/`, `presets/` монтируются с хоста и сохраняются между перезапусками.
 
-**Oracle в Docker:** для thick mode смонтируйте Instant Client в контейнер и раскомментируйте том в `docker-compose.yml`:
+**Oracle в Docker (без volume):**
 
-```yaml
-volumes:
-  - ./oracle-client:/opt/oracle/instantclient:ro
+1. Скачайте `instantclient-basic-linux.x64-19.31.0.0.0dbru.zip`.
+2. Положите архив в `docker/oracle/` (не распаковывайте).
+3. Пересоберите контейнер:
+   ```bash
+   docker compose build --no-cache
+   docker compose up -d
+   ```
+
+Во время сборки `Dockerfile` автоматически распакует клиент в `/opt/oracle/instantclient`.
+
+В `config/connections.json` укажите:
+
+```json
+{
+  "oracle_client_lib_dir": "/opt/oracle/instantclient",
+  "oracle_home": "/opt/oracle/instantclient"
+}
 ```
 
-В `config/connections.json` укажите `"oracle_client_lib_dir": "/opt/oracle/instantclient"` и добавьте алиас Oracle с `host: "host.docker.internal"` (или именем сервиса в compose-сети).
+И добавьте алиас Oracle с `host: "host.docker.internal"` (или именем сервиса в compose-сети).
 
 ### Разработка (два терминала)
 
