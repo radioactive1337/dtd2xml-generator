@@ -64,7 +64,7 @@
 cd backend
 python -m venv .venv
 .venv\Scripts\activate   # Windows
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
 ### Frontend
@@ -287,11 +287,14 @@ docker compose up --build     # пересборка после изменени
 ```json
 {
   "oracle_client_lib_dir": "/opt/oracle/instantclient",
-  "oracle_home": "/opt/oracle/instantclient"
+  "oracle_home": "/opt/oracle/instantclient",
+  "ora_tzfile": null
 }
 ```
 
 И добавьте алиас Oracle с `host: "host.docker.internal"` (или именем сервиса в compose-сети).
+
+> Для Docker не указывайте `ora_tzfile` вручную (оставьте `null`) — иначе Instant Client может не найти timezone-файл внутри контейнера.
 
 ### Разработка (два терминала)
 
@@ -320,6 +323,7 @@ cd ../backend && uvicorn app.main:app --host 0.0.0.0 --port 8080
 
 ```bash
 cd backend
+pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 

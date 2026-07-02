@@ -5,6 +5,7 @@
     "log_level": "INFO",
     "default_llm_alias": "OLLAMA"
   },
+  "ora_tzfile": null,
   "databases": {
     "PGSQL_DB": {
       "driver": "postgresql",

@@ -1,9 +1,11 @@
 # Git
 .git
 .gitignore
+.gitattributes
 
 # Secrets and local data
 connections.json
+config/connections.json
 dtd_schemas/
 mapping_presets/
 presets/
@@ -16,6 +18,7 @@ presets/
 **/.ruff_cache
 **/.venv
 **/venv
+backend/tests/
 
 # Frontend (rebuilt in Docker)
 frontend/node_modules

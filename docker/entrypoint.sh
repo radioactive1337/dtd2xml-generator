@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e
+set -eu
 
 CONFIG_DIR="/app/config"
 CONFIG_FILE="${CONFIG_DIR}/connections.json"
@@ -27,7 +27,7 @@ if [ ! -f "$CONFIG_FILE" ] && [ ! -f "$LEGACY_FILE" ]; then
   if [ -f "${CONFIG_DIR}/connections.json.example" ]; then
     echo "connections.json not found, copying from example..."
     cp "${CONFIG_DIR}/connections.json.example" "$CONFIG_FILE"
-    echo "Edit ${CONFIG_FILE} on the host and restart the container."
+    echo "Edit config/connections.json on the host and restart the container."
   else
     echo "ERROR: connections.json not found."
     echo "Copy config/connections.json.example to config/connections.json before starting Docker."
@@ -35,4 +35,7 @@ if [ ! -f "$CONFIG_FILE" ] && [ ! -f "$LEGACY_FILE" ]; then
   fi
 fi
 
-exec uvicorn app.main:app --host 0.0.0.0 --port 8080
+PORT="$(python -c 'from app.config import get_app_settings; print(get_app_settings().port)')"
+HOST="$(python -c 'from app.config import get_app_settings; print(get_app_settings().host)')"
+
+exec uvicorn app.main:app --host "$HOST" --port "$PORT"
