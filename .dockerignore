@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Secrets and local data
+connections.json
+dtd_schemas/
+mapping_presets/
+presets/
+
+# Python
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+**/venv
+
+# Frontend (rebuilt in Docker)
+frontend/node_modules
+frontend/dist
+
+# IDE / OS
+.idea
+.vscode
+*.swp
+.DS_Store
+Thumbs.db
+
+# Docs / misc
+*.md
+!README.md

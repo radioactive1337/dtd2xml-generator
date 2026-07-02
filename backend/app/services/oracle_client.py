@@ -26,16 +26,21 @@ def derive_oracle_home(lib_dir: str) -> str:
     return str(path)
 
 
+def _client_library_name() -> str:
+    return "oci.dll" if sys.platform == "win32" else "libclntsh.so"
+
+
 def resolve_client_lib_dir(lib_dir: str) -> str:
-    """Return the directory that actually contains oci.dll."""
+    """Return the directory that actually contains the Oracle client library."""
+    lib_name = _client_library_name()
     path = Path(lib_dir)
-    if (path / "oci.dll").is_file():
+    if (path / lib_name).is_file():
         return str(path)
-    if path.name.lower() != "bin" and (path / "bin" / "oci.dll").is_file():
+    if path.name.lower() != "bin" and (path / "bin" / lib_name).is_file():
         return str(path / "bin")
     raise ValueError(
-        f"oci.dll was not found under oracle_client_lib_dir: {lib_dir}. "
-        "Point it to the folder that contains oci.dll, usually ...\\client_1\\bin."
+        f"{lib_name} was not found under oracle_client_lib_dir: {lib_dir}. "
+        "Point it to the folder that contains the Oracle client library."
     )
 
 

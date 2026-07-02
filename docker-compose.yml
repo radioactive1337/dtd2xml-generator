@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./connections.json:/app/connections.json:ro
+      - ./dtd_schemas:/app/dtd_schemas
+      - ./mapping_presets:/app/mapping_presets
+      - ./presets:/app/presets
+      # Optional: mount Oracle Instant Client for thick mode (Linux paths in connections.json)
+      # - ./oracle-client:/opt/oracle/instantclient:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

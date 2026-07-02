@@ -230,6 +230,53 @@ Thick mode инициализируется при старте процесса
 
 ## Запуск
 
+### Docker (production)
+
+Один контейнер собирает frontend и запускает backend на порту **8080**.
+
+**Требования:** Docker и Docker Compose.
+
+1. Подготовьте конфигурацию:
+
+```bash
+copy connections.docker.json.example connections.json
+```
+
+В Docker `localhost` указывает на сам контейнер. Для сервисов на хосте (PostgreSQL, Ollama и т.д.) используйте `host.docker.internal` — это уже задано в примере.
+
+2. Создайте каталоги для данных (если их ещё нет):
+
+```bash
+mkdir dtd_schemas mapping_presets presets
+```
+
+3. Соберите и запустите:
+
+```bash
+docker compose up --build -d
+```
+
+Откройте [http://localhost:8080](http://localhost:8080)
+
+**Полезные команды:**
+
+```bash
+docker compose logs -f app    # логи
+docker compose down           # остановка
+docker compose up --build     # пересборка после изменений кода
+```
+
+**Тома:** `connections.json`, `dtd_schemas/`, `mapping_presets/`, `presets/` монтируются с хоста и сохраняются между перезапусками.
+
+**Oracle в Docker:** для thick mode смонтируйте Instant Client в контейнер и раскомментируйте том в `docker-compose.yml`:
+
+```yaml
+volumes:
+  - ./oracle-client:/opt/oracle/instantclient:ro
+```
+
+В `connections.json` укажите `"oracle_client_lib_dir": "/opt/oracle/instantclient"` и добавьте алиас Oracle с `host: "host.docker.internal"` (или именем сервиса в compose-сети).
+
 ### Разработка (два терминала)
 
 ```bash
