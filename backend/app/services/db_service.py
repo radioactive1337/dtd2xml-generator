@@ -16,6 +16,7 @@ from app.core.dtd_models import DTDSchema
 from app.core.logging_config import truncate
 from app.services.oracle_client import ensure_oracle_thick_mode, map_oracle_client_error
 from app.services.sql_safety import validate_readonly_select
+from app.user_context import UserContext
 from lxml import etree
 
 from app.core.xml_tree import ProtectedAttrs, element_path, find_elements_by_dot_path
@@ -31,17 +32,21 @@ _oracle_pools: dict[str, oracledb.ConnectionPool] = {}
 _oracle_pool_lock = threading.Lock()
 
 
+def _pool_key(user: UserContext, alias: str) -> str:
+    return f"{user.user_id}:{alias}"
+
+
 async def _get_pg_pool(
-    alias: str,
+    pool_key: str,
     cfg: DatabaseConfig,
     password: str,
 ) -> asyncpg.Pool:
-    pool = _pg_pools.get(alias)
+    pool = _pg_pools.get(pool_key)
     if pool is not None:
         return pool
 
     async with _pg_pool_lock:
-        pool = _pg_pools.get(alias)
+        pool = _pg_pools.get(pool_key)
         if pool is not None:
             return pool
 
@@ -54,22 +59,22 @@ async def _get_pg_pool(
             min_size=_POOL_MIN_SIZE,
             max_size=_POOL_MAX_SIZE,
         )
-        _pg_pools[alias] = pool
-        logger.debug("Created PostgreSQL pool [alias=%s max_size=%d]", alias, _POOL_MAX_SIZE)
+        _pg_pools[pool_key] = pool
+        logger.debug("Created PostgreSQL pool [key=%s max_size=%d]", pool_key, _POOL_MAX_SIZE)
         return pool
 
 
 def _get_oracle_pool(
-    alias: str,
+    pool_key: str,
     cfg: DatabaseConfig,
     password: str,
 ) -> oracledb.ConnectionPool:
-    pool = _oracle_pools.get(alias)
+    pool = _oracle_pools.get(pool_key)
     if pool is not None:
         return pool
 
     with _oracle_pool_lock:
-        pool = _oracle_pools.get(alias)
+        pool = _oracle_pools.get(pool_key)
         if pool is not None:
             return pool
 
@@ -87,8 +92,8 @@ def _get_oracle_pool(
             max=_POOL_MAX_SIZE,
             increment=1,
         )
-        _oracle_pools[alias] = pool
-        logger.debug("Created Oracle pool [alias=%s max=%d]", alias, _POOL_MAX_SIZE)
+        _oracle_pools[pool_key] = pool
+        logger.debug("Created Oracle pool [key=%s max=%d]", pool_key, _POOL_MAX_SIZE)
         return pool
 
 
@@ -190,23 +195,27 @@ def _oracle_query_sync(
 class DBService:
     """Execute SQL queries against configured database aliases."""
 
+    def __init__(self, user: UserContext) -> None:
+        self.user = user
+
     async def test_connection(self, alias: str) -> str:
         """Verify that a configured database alias is reachable."""
-        connections = load_connections()
+        connections = load_connections(self.user)
         if alias not in connections.databases:
             logger.error("Unknown database alias: %s", alias)
-            raise ValueError(f"Database alias '{alias}' not found in connections.json")
+            raise ValueError(f"Database alias '{alias}' not found in connections")
 
         cfg = connections.databases[alias]
-        password = get_db_password(alias)
+        password = get_db_password(self.user, alias)
         driver = cfg.driver.lower()
+        key = _pool_key(self.user, alias)
 
         try:
             if driver == "postgresql":
-                await self._test_postgresql(alias, cfg, password)
+                await self._test_postgresql(key, cfg, password)
                 return f"Connected ({driver})"
             if driver in {"oracle", "oracledb"}:
-                await self._test_oracle(alias, cfg, password)
+                await self._test_oracle(key, cfg, password)
                 return f"Connected ({driver})"
         except Exception:
             logger.exception(
@@ -224,21 +233,21 @@ class DBService:
 
     async def _test_postgresql(
         self,
-        alias: str,
+        pool_key: str,
         cfg: DatabaseConfig,
         password: str,
     ) -> None:
-        pool = await _get_pg_pool(alias, cfg, password)
+        pool = await _get_pg_pool(pool_key, cfg, password)
         async with pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
 
     async def _test_oracle(
         self,
-        alias: str,
+        pool_key: str,
         cfg: DatabaseConfig,
         password: str,
     ) -> None:
-        pool = _get_oracle_pool(alias, cfg, password)
+        pool = _get_oracle_pool(pool_key, cfg, password)
         try:
             await asyncio.to_thread(_oracle_ping_sync, pool)
         except oracledb.Error as exc:
@@ -248,21 +257,22 @@ class DBService:
             raise
 
     async def run_query(self, alias: str, sql: str) -> list[dict[str, Any]]:
-        connections = load_connections()
+        connections = load_connections(self.user)
         if alias not in connections.databases:
             logger.error("Unknown database alias: %s", alias)
-            raise ValueError(f"Database alias '{alias}' not found in connections.json")
+            raise ValueError(f"Database alias '{alias}' not found in connections")
 
         cfg = connections.databases[alias]
-        password = get_db_password(alias)
+        password = get_db_password(self.user, alias)
         driver = cfg.driver.lower()
         validated_sql = validate_readonly_select(sql)
+        key = _pool_key(self.user, alias)
 
         try:
             if driver == "postgresql":
-                return await self._query_postgresql(alias, cfg, password, validated_sql)
+                return await self._query_postgresql(key, cfg, password, validated_sql)
             if driver in {"oracle", "oracledb"}:
-                return await self._query_oracle(alias, cfg, password, validated_sql)
+                return await self._query_oracle(key, cfg, password, validated_sql)
         except Exception:
             logger.exception(
                 "SQL query failed [alias=%s driver=%s host=%s:%s db=%s query=%s]",
@@ -279,21 +289,22 @@ class DBService:
         raise ValueError(f"Unsupported database driver: {cfg.driver}")
 
     async def get_query_columns(self, alias: str, sql: str) -> list[str]:
-        connections = load_connections()
+        connections = load_connections(self.user)
         if alias not in connections.databases:
             logger.error("Unknown database alias: %s", alias)
-            raise ValueError(f"Database alias '{alias}' not found in connections.json")
+            raise ValueError(f"Database alias '{alias}' not found in connections")
 
         cfg = connections.databases[alias]
-        password = get_db_password(alias)
+        password = get_db_password(self.user, alias)
         driver = cfg.driver.lower()
         validated_sql = validate_readonly_select(sql)
+        key = _pool_key(self.user, alias)
 
         try:
             if driver == "postgresql":
-                return await self._query_columns_postgresql(alias, cfg, password, validated_sql)
+                return await self._query_columns_postgresql(key, cfg, password, validated_sql)
             if driver in {"oracle", "oracledb"}:
-                return await self._query_columns_oracle(alias, cfg, password, validated_sql)
+                return await self._query_columns_oracle(key, cfg, password, validated_sql)
         except Exception:
             logger.exception(
                 "SQL column introspection failed [alias=%s driver=%s host=%s:%s query=%s]",
@@ -310,12 +321,12 @@ class DBService:
 
     async def _query_columns_postgresql(
         self,
-        alias: str,
+        pool_key: str,
         cfg: DatabaseConfig,
         password: str,
         sql: str,
     ) -> list[str]:
-        pool = await _get_pg_pool(alias, cfg, password)
+        pool = await _get_pg_pool(pool_key, cfg, password)
         async with pool.acquire() as conn:
             await conn.execute(
                 "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
@@ -325,12 +336,12 @@ class DBService:
 
     async def _query_columns_oracle(
         self,
-        alias: str,
+        pool_key: str,
         cfg: DatabaseConfig,
         password: str,
         sql: str,
     ) -> list[str]:
-        pool = _get_oracle_pool(alias, cfg, password)
+        pool = _get_oracle_pool(pool_key, cfg, password)
         try:
             return await asyncio.to_thread(_oracle_columns_sync, pool, sql)
         except oracledb.Error as exc:
@@ -341,12 +352,12 @@ class DBService:
 
     async def _query_postgresql(
         self,
-        alias: str,
+        pool_key: str,
         cfg: DatabaseConfig,
         password: str,
         sql: str,
     ) -> list[dict[str, Any]]:
-        pool = await _get_pg_pool(alias, cfg, password)
+        pool = await _get_pg_pool(pool_key, cfg, password)
         async with pool.acquire() as conn:
             await conn.execute(
                 "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"
@@ -358,12 +369,12 @@ class DBService:
 
     async def _query_oracle(
         self,
-        alias: str,
+        pool_key: str,
         cfg: DatabaseConfig,
         password: str,
         sql: str,
     ) -> list[dict[str, Any]]:
-        pool = _get_oracle_pool(alias, cfg, password)
+        pool = _get_oracle_pool(pool_key, cfg, password)
         try:
             return await asyncio.to_thread(_oracle_query_sync, pool, sql)
         except oracledb.Error as exc:
@@ -523,18 +534,20 @@ class DBService:
 
 
 async def populate_with_db(
+    user: UserContext,
     xml_text: str,
     schema: DTDSchema,
     alias: str,
     sql: str,
 ) -> str:
     """Populate XML by mapping the first SQL result row onto matching nodes."""
-    return await DBService().populate_xml(xml_text, schema, alias, sql)
+    return await DBService(user).populate_xml(xml_text, schema, alias, sql)
 
 
 async def apply_db_overrides(
+    user: UserContext,
     xml_text: str,
     sql_mappings: list[SqlMapping],
 ) -> tuple[str, ProtectedAttrs, list[str]]:
     """Stage-1 of the hybrid pipeline: targeted DB injections before faker/LLM fallback."""
-    return await DBService().apply_overrides(xml_text, sql_mappings)
+    return await DBService(user).apply_overrides(xml_text, sql_mappings)

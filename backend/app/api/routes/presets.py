@@ -6,14 +6,13 @@ import json
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.config import PROJECT_ROOT
+from app.auth.sessions import get_current_user
+from app.user_context import UserContext
 
 router = APIRouter(prefix="/presets", tags=["presets"])
-
-PRESETS_DIR = PROJECT_ROOT / "presets"
 
 
 class PresetSummary(BaseModel):
@@ -34,17 +33,16 @@ def _safe_name(name: str) -> str:
     return name
 
 
-def _preset_path(name: str) -> Path:
-    PRESETS_DIR.mkdir(parents=True, exist_ok=True)
-    return PRESETS_DIR / f"{_safe_name(name)}.json"
+def _preset_path(user: UserContext, name: str) -> Path:
+    user.presets_dir.mkdir(parents=True, exist_ok=True)
+    return user.presets_dir / f"{_safe_name(name)}.json"
 
 
 @router.get("", response_model=list[PresetSummary])
-async def list_presets() -> list[PresetSummary]:
-    """List all saved presets."""
-    PRESETS_DIR.mkdir(parents=True, exist_ok=True)
+async def list_presets(user: UserContext = Depends(get_current_user)) -> list[PresetSummary]:
+    user.presets_dir.mkdir(parents=True, exist_ok=True)
     summaries: list[PresetSummary] = []
-    for path in sorted(PRESETS_DIR.glob("*.json")):
+    for path in sorted(user.presets_dir.glob("*.json")):
         data = json.loads(path.read_text(encoding="utf-8"))
         summaries.append(
             PresetSummary(
@@ -57,9 +55,11 @@ async def list_presets() -> list[PresetSummary]:
 
 
 @router.post("", response_model=PresetData)
-async def save_preset(preset: PresetData) -> PresetData:
-    """Save a custom path preset to a local JSON file."""
-    path = _preset_path(preset.name)
+async def save_preset(
+    preset: PresetData,
+    user: UserContext = Depends(get_current_user),
+) -> PresetData:
+    path = _preset_path(user, preset.name)
     path.write_text(
         json.dumps(preset.model_dump(), ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -68,9 +68,11 @@ async def save_preset(preset: PresetData) -> PresetData:
 
 
 @router.get("/{name}", response_model=PresetData)
-async def load_preset(name: str) -> PresetData:
-    """Load a saved preset by name."""
-    path = _preset_path(name)
+async def load_preset(
+    name: str,
+    user: UserContext = Depends(get_current_user),
+) -> PresetData:
+    path = _preset_path(user, name)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Preset '{name}' not found")
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -78,9 +80,11 @@ async def load_preset(name: str) -> PresetData:
 
 
 @router.delete("/{name}")
-async def delete_preset(name: str) -> dict[str, str]:
-    """Delete a saved preset."""
-    path = _preset_path(name)
+async def delete_preset(
+    name: str,
+    user: UserContext = Depends(get_current_user),
+) -> dict[str, str]:
+    path = _preset_path(user, name)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Preset '{name}' not found")
     path.unlink()

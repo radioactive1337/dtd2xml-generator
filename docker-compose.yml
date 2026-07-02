@@ -5,9 +5,9 @@ services:
       - "8080:8080"
     volumes:
       - ./config:/app/config
-      - ./dtd_schemas:/app/dtd_schemas
-      - ./mapping_presets:/app/mapping_presets
-      - ./presets:/app/presets
+      - ./data:/app/data
+    environment:
+      - ALLOW_SELF_REGISTRATION=true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     init: true

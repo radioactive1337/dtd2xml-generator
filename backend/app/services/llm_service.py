@@ -14,6 +14,7 @@ import httpx
 from lxml import etree
 
 from app.config import get_llm_api_key, load_connections, resolve_llm_alias
+from app.user_context import UserContext
 from app.core.dtd_models import DTDSchema
 from app.core.logging_config import truncate
 from app.core.xml_tree import (
@@ -87,19 +88,27 @@ class LLMService:
 
     def __init__(
         self,
+        user: UserContext,
         alias: str = "default",
         base_url: str | None = None,
         model: str | None = None,
         api_key: str | None = None,
         timeout: float | None = None,
     ) -> None:
-        self.alias = resolve_llm_alias(alias)
-        connections = load_connections()
+        self.user = user
+        try:
+            self.alias = resolve_llm_alias(user, alias)
+        except ValueError:
+            self.alias = (alias or "default").strip() or "default"
+        connections = load_connections(user)
         llm_cfg = connections.llm.get(self.alias)
 
         self.base_url = (base_url or (llm_cfg.base_url if llm_cfg else "") or "").rstrip("/")
         self.model = model or (llm_cfg.model if llm_cfg else "gpt-4o-mini")
-        self.api_key = api_key or get_llm_api_key(self.alias)
+        try:
+            self.api_key = api_key or get_llm_api_key(user, self.alias)
+        except ValueError:
+            self.api_key = api_key or ""
         self.timeout = timeout if timeout is not None else (llm_cfg.timeout if llm_cfg else 120.0)
 
     async def populate_xml(
@@ -724,6 +733,7 @@ def merge_fill_empty_only(
 async def populate_with_llm(
     xml_text: str,
     schema: DTDSchema,
+    user: UserContext,
     alias: str = "default",
     *,
     fill_empty_only: bool = False,
@@ -734,7 +744,7 @@ async def populate_with_llm(
     cancel_event: asyncio.Event | None = None,
 ) -> str:
     """Populate XML using the configured LLM service."""
-    return await LLMService(alias=alias).populate_xml(
+    return await LLMService(user, alias=alias).populate_xml(
         xml_text,
         schema,
         fill_empty_only=fill_empty_only,

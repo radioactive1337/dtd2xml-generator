@@ -1,35 +1,19 @@
 """Tests for XML validation API."""
 
-import shutil
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.api.routes import dtd as dtd_routes
-from app.config import PROJECT_ROOT
 from app.core.xml_builder import BuildConfig, build_xml
-from app.main import app
+from app.user_context import dev_user_context
 
 FIXTURES = Path(__file__).parent / "fixtures"
-SCHEMA_DIR = PROJECT_ROOT / "dtd_schemas"
-
-
-@pytest.fixture(autouse=True)
-def clear_registry():
-    dtd_routes._schema_registry.clear()
-    yield
-    dtd_routes._schema_registry.clear()
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app)
 
 
 def test_validate_valid_xml(client: TestClient):
     schema_id = _upload_fixture(client)
-    schema = dtd_routes._schema_registry[schema_id]
+    schema = dtd_routes._user_registry(dev_user_context())[schema_id]
     xml_text = build_xml(schema, BuildConfig(root_element="PayDoc", mode="minimal")).xml_text
 
     response = client.post(
@@ -45,7 +29,7 @@ def test_validate_valid_xml(client: TestClient):
 
 def test_validate_invalid_xml(client: TestClient):
     schema_id = _upload_fixture(client)
-    schema = dtd_routes._schema_registry[schema_id]
+    schema = dtd_routes._user_registry(dev_user_context())[schema_id]
     xml_text = build_xml(schema, BuildConfig(root_element="PayDoc", mode="minimal")).xml_text
     bad_xml = xml_text.replace('id="', 'removed="', 1)
 
@@ -69,8 +53,9 @@ def test_validate_schema_not_found(client: TestClient):
 
 
 def _upload_fixture(client: TestClient) -> str:
-    SCHEMA_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.copy(FIXTURES / "types.dtd", SCHEMA_DIR / "types.dtd")
+    dtd_dir = dev_user_context().dtd_dir
+    dtd_dir.mkdir(parents=True, exist_ok=True)
+    (dtd_dir / "types.dtd").write_bytes((FIXTURES / "types.dtd").read_bytes())
 
     dtd_path = FIXTURES / "main.dtd"
     with dtd_path.open("rb") as f:

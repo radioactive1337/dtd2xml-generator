@@ -9,28 +9,30 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from app.api.routes.dtd import get_schema_registry
 from app.api.routes.generate import get_last_generated, set_last_generated
+from app.auth.sessions import get_current_user
 from app.config import resolve_llm_alias
 from app.core.xml_tree import ProtectedAttrs
 from app.services.db_service import SqlMapping, apply_db_overrides
 from app.services.field_mapping_service import suggest_field_mappings as suggest_field_mappings_service
 from app.services.faker_service import populate_with_faker
 from app.services.llm_service import populate_with_llm
+from app.user_context import UserContext
 
 router = APIRouter(prefix="/fill", tags=["fill"])
 logger = logging.getLogger(__name__)
 
 # fmt: off
 Strategy = Literal[
-    "faker",           # Smart Faker only
-    "ai",              # LLM only
-    "hybrid_db_faker", # Stage-1: DB overrides  →  Stage-2: Smart Faker fallback
-    "hybrid_db_ai",    # Stage-1: DB overrides  →  Stage-2: LLM fallback
+    "faker",
+    "ai",
+    "hybrid_db_faker",
+    "hybrid_db_ai",
 ]
 # fmt: on
 
@@ -43,18 +45,9 @@ class FillRequest(BaseModel):
     schema_id: str
     xml_text: str | None = None
     strategy: Strategy = "faker"
-
-    # Hybrid pipeline: DB overrides (Stage 1)
     sql_mappings: list[SqlMapping] = Field(default_factory=list)
-
-    # Fallback engine options (Stage 2)
     llm_alias: str = "default"
     faker_locale: str = "ru_RU"
-
-    @field_validator("llm_alias", mode="before")
-    @classmethod
-    def _resolve_llm_alias(cls, value: object) -> str:
-        return resolve_llm_alias(str(value) if value is not None else None)
 
 
 class FillResponse(BaseModel):
@@ -80,15 +73,10 @@ class SuggestFieldMappingsRequest(BaseModel):
     existing_mappings: list[FieldMappingPair] = Field(default_factory=list)
     llm_alias: str = "default"
 
-    @field_validator("llm_alias", mode="before")
-    @classmethod
-    def _resolve_llm_alias(cls, value: object) -> str:
-        return resolve_llm_alias(str(value) if value is not None else None)
-
 
 class SuggestFieldMappingsResponse(BaseModel):
     mappings: list[FieldMappingPair]
-    matcher: str  # "llm" | "fuzzy"
+    matcher: str
 
 
 async def _noop_progress(_step: str, _message: str, _percent: int) -> None:
@@ -120,12 +108,14 @@ def _validate_hybrid_mappings(request: FillRequest) -> list[SqlMapping]:
 
 
 async def execute_fill(
+    user: UserContext,
     request: FillRequest,
     on_progress: ProgressCallback = _noop_progress,
     cancel_event: asyncio.Event | None = None,
-) -> str:
-    """Fill XML with test data, optionally emitting progress updates."""
-    registry = get_schema_registry()
+) -> tuple[str, list[str]]:
+    resolved_llm = resolve_llm_alias(user, request.llm_alias)
+
+    registry = get_schema_registry(user)
     if request.schema_id not in registry:
         raise HTTPException(
             status_code=404,
@@ -135,7 +125,7 @@ async def execute_fill(
     schema = registry[request.schema_id]
     await on_progress("started", "Preparing fill request...", 0)
 
-    xml = (request.xml_text or "").strip() or get_last_generated(request.schema_id)
+    xml = (request.xml_text or "").strip() or get_last_generated(user, request.schema_id)
     if not xml:
         raise HTTPException(
             status_code=400,
@@ -144,12 +134,12 @@ async def execute_fill(
     protected_attrs: ProtectedAttrs = frozenset()
     fill_warnings: list[str] = []
 
-    # ── Stage 1: DB overrides (hybrid strategies only) ───────────────────
     if request.strategy in _HYBRID:
         active_mappings = _validate_hybrid_mappings(request)
         await on_progress("db_query", "Querying database...", 10)
         try:
             xml, protected_attrs, fill_warnings = await apply_db_overrides(
+                user,
                 xml,
                 request.sql_mappings,
             )
@@ -171,7 +161,6 @@ async def execute_fill(
         for warning in fill_warnings:
             await on_progress("db_warning", warning, 35)
 
-    # ── Stage 2: fallback engine for remaining empty fields ───────────────
     fill_empty_only = request.strategy in _HYBRID
     try:
         if request.strategy in ("faker", "hybrid_db_faker"):
@@ -203,7 +192,8 @@ async def execute_fill(
             result = await populate_with_llm(
                 xml,
                 schema,
-                alias=request.llm_alias,
+                user,
+                alias=resolved_llm,
                 fill_empty_only=fill_empty_only,
                 protected_attrs=protected_attrs,
                 on_progress=llm_progress,
@@ -239,7 +229,7 @@ async def execute_fill(
             request.schema_id,
             request.strategy,
             request.faker_locale,
-            request.llm_alias,
+            resolved_llm,
             exc,
         )
         raise HTTPException(
@@ -247,16 +237,16 @@ async def execute_fill(
             detail=f"{stage} stage failed: {exc}",
         ) from exc
 
-    set_last_generated(request.schema_id, result)
+    set_last_generated(user, request.schema_id, result)
     return result, fill_warnings
 
 
 @router.post("/suggest-field-mappings", response_model=SuggestFieldMappingsResponse)
 async def suggest_field_mappings_route(
     request: SuggestFieldMappingsRequest,
+    user: UserContext = Depends(get_current_user),
 ) -> SuggestFieldMappingsResponse:
-    """Use LLM (with fuzzy fallback) to map SQL columns to XML attributes."""
-    registry = get_schema_registry()
+    registry = get_schema_registry(user)
     if request.schema_id not in registry:
         raise HTTPException(
             status_code=404,
@@ -276,14 +266,16 @@ async def suggest_field_mappings_route(
         {"db_col": pair.db_col, "xml_attr": pair.xml_attr}
         for pair in request.existing_mappings
     ]
+    resolved_llm = resolve_llm_alias(user, request.llm_alias)
 
     try:
         mappings, matcher = await suggest_field_mappings_service(
             schema,
             target_element,
             columns,
+            user,
             existing_pairs=existing,
-            llm_alias=request.llm_alias,
+            llm_alias=resolved_llm,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -303,10 +295,12 @@ async def suggest_field_mappings_route(
 
 
 @router.post("", response_model=FillResponse)
-async def fill_xml(request: FillRequest) -> FillResponse:
-    """Fill XML with test data using a two-stage hybrid pipeline."""
+async def fill_xml(
+    request: FillRequest,
+    user: UserContext = Depends(get_current_user),
+) -> FillResponse:
     try:
-        result, warnings = await execute_fill(request)
+        result, warnings = await execute_fill(user, request)
     except HTTPException:
         raise
     except Exception as exc:
@@ -322,9 +316,11 @@ async def fill_xml(request: FillRequest) -> FillResponse:
 
 
 @router.put("/xml-cache")
-async def stage_xml_cache(request: XmlCacheRequest) -> dict[str, str]:
-    """Stage edited XML on the server so /fill/stream can start without a large body."""
-    registry = get_schema_registry()
+async def stage_xml_cache(
+    request: XmlCacheRequest,
+    user: UserContext = Depends(get_current_user),
+) -> dict[str, str]:
+    registry = get_schema_registry(user)
     if request.schema_id not in registry:
         raise HTTPException(
             status_code=404,
@@ -335,9 +331,10 @@ async def stage_xml_cache(request: XmlCacheRequest) -> dict[str, str]:
     if not xml:
         raise HTTPException(status_code=400, detail="xml_text cannot be empty")
 
-    set_last_generated(request.schema_id, xml)
+    set_last_generated(user, request.schema_id, xml)
     logger.debug(
-        "Staged XML cache [schema_id=%s chars=%d]",
+        "Staged XML cache [user=%s schema_id=%s chars=%d]",
+        user.display_name,
         request.schema_id,
         len(xml),
     )
@@ -352,8 +349,10 @@ _SSE_KEEPALIVE_SEC = 2.0
 
 
 @router.post("/stream")
-async def fill_xml_stream(request: FillRequest) -> StreamingResponse:
-    """Fill XML and stream progress updates as Server-Sent Events."""
+async def fill_xml_stream(
+    request: FillRequest,
+    user: UserContext = Depends(get_current_user),
+) -> StreamingResponse:
     queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
     queue.put_nowait({"step": "started", "message": "Preparing fill request...", "percent": 0})
     cancel_event = asyncio.Event()
@@ -365,7 +364,7 @@ async def fill_xml_stream(request: FillRequest) -> StreamingResponse:
 
     async def run_fill() -> None:
         try:
-            result, warnings = await execute_fill(request, on_progress, cancel_event)
+            result, warnings = await execute_fill(user, request, on_progress, cancel_event)
             await queue.put({
                 "step": "complete",
                 "xml_text": result,

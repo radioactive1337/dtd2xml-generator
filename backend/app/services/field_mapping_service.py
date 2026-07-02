@@ -8,6 +8,7 @@ from typing import Any
 
 from app.core.dtd_models import DTDSchema, ElementDef
 from app.services.llm_service import LLMService
+from app.user_context import UserContext
 
 logger = logging.getLogger(__name__)
 
@@ -158,8 +159,8 @@ def _validate_llm_mappings(
 class FieldMappingService:
     """Orchestrate LLM-based field mapping suggestions."""
 
-    def __init__(self, llm_alias: str = "default") -> None:
-        self.llm = LLMService(alias=llm_alias)
+    def __init__(self, user: UserContext, llm_alias: str = "default") -> None:
+        self.llm = LLMService(user, alias=llm_alias)
 
     async def suggest_mappings(
         self,
@@ -233,11 +234,12 @@ async def suggest_field_mappings(
     schema: DTDSchema,
     target_element: str,
     columns: list[str],
+    user: UserContext,
     existing_pairs: list[dict[str, str]] | None = None,
     llm_alias: str = "default",
 ) -> tuple[list[dict[str, str]], str]:
     """Suggest db_col → xml_attr rows for hybrid mapping UI."""
-    return await FieldMappingService(llm_alias=llm_alias).suggest_mappings(
+    return await FieldMappingService(user, llm_alias=llm_alias).suggest_mappings(
         schema,
         target_element,
         columns,

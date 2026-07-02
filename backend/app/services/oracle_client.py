@@ -10,7 +10,7 @@ from pathlib import Path
 
 import oracledb
 
-from app.config import get_ora_tzfile, get_oracle_client_lib_dir, has_oracle_databases
+from app.config import get_ora_tzfile, get_oracle_client_lib_dir
 
 logger = logging.getLogger(__name__)
 
@@ -178,15 +178,21 @@ def ensure_oracle_thick_mode(*, required: bool = False) -> None:
 
 
 def bootstrap_oracle_client() -> None:
-    """Initialize Oracle thick mode at application startup when needed."""
-    if not has_oracle_databases():
+    """Initialize Oracle thick mode at application startup when client lib is configured."""
+    lib_dir = get_oracle_client_lib_dir()
+    if not lib_dir:
         return
 
-    if not get_oracle_client_lib_dir():
-        logger.error("Oracle databases configured but client lib dir is missing")
-        raise RuntimeError(str(_missing_client_config_error()))
+    from pathlib import Path
 
-    ensure_oracle_thick_mode(required=True)
+    if not Path(lib_dir).is_dir():
+        logger.warning("Oracle client lib dir not found, skipping thick mode init: %s", lib_dir)
+        return
+
+    try:
+        ensure_oracle_thick_mode(required=True)
+    except Exception:
+        logger.warning("Oracle thick mode failed to initialize at startup", exc_info=True)
 
 
 def map_oracle_client_error(exc: Exception) -> ValueError | None:

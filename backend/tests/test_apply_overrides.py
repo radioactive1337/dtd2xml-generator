@@ -7,6 +7,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services.db_service import DBService, SqlMapping
+from app.user_context import UserContext
+
+
+@pytest.fixture
+def db_user(tmp_path) -> UserContext:
+    root = tmp_path / "override-user"
+    root.mkdir(parents=True, exist_ok=True)
+    return UserContext(user_id="ov-user", display_name="ov", root=root)
 
 
 SAMPLE_XML = """\
@@ -23,7 +31,7 @@ SAMPLE_XML = """\
 
 
 @pytest.mark.asyncio
-async def test_apply_overrides_tag_only_fills_all_matches():
+async def test_apply_overrides_tag_only_fills_all_matches(db_user: UserContext):
     mapping = SqlMapping(
         query="SELECT 1",
         target_element="client",
@@ -36,7 +44,7 @@ async def test_apply_overrides_tag_only_fills_all_matches():
         "run_query",
         new=AsyncMock(return_value=[{"inn": "7701", "name": "Acme"}]),
     ):
-        xml_out, protected, warnings = await DBService().apply_overrides(
+        xml_out, protected, warnings = await DBService(db_user).apply_overrides(
             SAMPLE_XML,
             [mapping],
         )
@@ -48,7 +56,7 @@ async def test_apply_overrides_tag_only_fills_all_matches():
 
 
 @pytest.mark.asyncio
-async def test_apply_overrides_target_path_fills_single_element():
+async def test_apply_overrides_target_path_fills_single_element(db_user: UserContext):
     mapping = SqlMapping(
         query="SELECT 1",
         target_element="client",
@@ -62,7 +70,7 @@ async def test_apply_overrides_target_path_fills_single_element():
         "run_query",
         new=AsyncMock(return_value=[{"inn": "9999"}]),
     ):
-        xml_out, protected, warnings = await DBService().apply_overrides(
+        xml_out, protected, warnings = await DBService(db_user).apply_overrides(
             SAMPLE_XML,
             [mapping],
         )
@@ -73,7 +81,7 @@ async def test_apply_overrides_target_path_fills_single_element():
 
 
 @pytest.mark.asyncio
-async def test_apply_overrides_path_not_found_skips_with_warning():
+async def test_apply_overrides_path_not_found_skips_with_warning(db_user: UserContext):
     mapping = SqlMapping(
         query="SELECT 1",
         target_element="client",
@@ -87,7 +95,7 @@ async def test_apply_overrides_path_not_found_skips_with_warning():
         "run_query",
         new=AsyncMock(return_value=[{"inn": "9999"}]),
     ):
-        xml_out, protected, warnings = await DBService().apply_overrides(
+        xml_out, protected, warnings = await DBService(db_user).apply_overrides(
             SAMPLE_XML,
             [mapping],
         )
@@ -99,7 +107,7 @@ async def test_apply_overrides_path_not_found_skips_with_warning():
 
 
 @pytest.mark.asyncio
-async def test_apply_overrides_no_rows_adds_warning():
+async def test_apply_overrides_no_rows_adds_warning(db_user: UserContext):
     mapping = SqlMapping(
         query="SELECT 1",
         target_element="client",
@@ -112,7 +120,7 @@ async def test_apply_overrides_no_rows_adds_warning():
         "run_query",
         new=AsyncMock(return_value=[]),
     ):
-        xml_out, protected, warnings = await DBService().apply_overrides(
+        xml_out, protected, warnings = await DBService(db_user).apply_overrides(
             SAMPLE_XML,
             [mapping],
         )

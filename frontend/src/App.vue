@@ -8,6 +8,15 @@
       <nav class="nav">
         <router-link to="/" class="nav-link">Генератор</router-link>
         <router-link to="/settings" class="nav-link">Настройки</router-link>
+        <span v-if="user" class="user-badge" :title="user.display_name">{{ user.display_name }}</span>
+        <button
+          v-if="user"
+          class="btn-secondary btn-logout"
+          title="Сменить пользователя"
+          @click="handleLogout"
+        >
+          Выйти
+        </button>
         <button
           class="theme-toggle"
           :title="isDark ? 'Светлая тема' : 'Тёмная тема'"
@@ -27,9 +36,23 @@
 </template>
 
 <script setup>
+import { onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useTheme } from './composables/useTheme'
+import { useAuth } from './composables/useAuth'
 
 const { isDark, toggleTheme } = useTheme()
+const { user, refresh, logout } = useAuth()
+const router = useRouter()
+
+onMounted(() => {
+  refresh()
+})
+
+async function handleLogout() {
+  await logout()
+  router.push('/login')
+}
 </script>
 
 <style scoped>
@@ -71,6 +94,7 @@ const { isDark, toggleTheme } = useTheme()
 
 .nav {
   display: flex;
+  align-items: center;
   gap: 8px;
 }
 
@@ -87,6 +111,23 @@ const { isDark, toggleTheme } = useTheme()
 .nav-link.router-link-active {
   color: var(--text);
   background: var(--surface2);
+}
+
+.user-badge {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 4px 10px;
+  background: var(--surface2);
+  border-radius: var(--radius);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-logout {
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 .theme-toggle {

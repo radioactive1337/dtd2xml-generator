@@ -11,22 +11,31 @@ from pathlib import Path
 from typing import Any
 
 import aiofiles
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from app.config import PROJECT_ROOT
+from app.auth.sessions import get_current_user
 from app.core.dtd_archive import extract_jar_dtd_files
 from app.core.dtd_models import DTDSchema, ElementDef
 from app.core.dtd_parser import DTDParser
+from app.user_context import UserContext
 
 router = APIRouter(prefix="/dtd", tags=["dtd"])
 logger = logging.getLogger(__name__)
 
-DTD_SCHEMA_DIR = PROJECT_ROOT / "dtd_schemas"
 DTD_EXTENSIONS = (".dtd", ".ent", ".mod")
 
-# In-memory schema registry; warmed from disk on application startup.
-_schema_registry: dict[str, DTDSchema] = {}
+# user_id -> schema_id -> DTDSchema
+_schema_registry: dict[str, dict[str, DTDSchema]] = {}
+
+# Legacy export for tests (dev-user path)
+DTD_SCHEMA_DIR: Path | None = None
+
+
+def _user_registry(user: UserContext) -> dict[str, DTDSchema]:
+    if user.user_id not in _schema_registry:
+        _schema_registry[user.user_id] = {}
+    return _schema_registry[user.user_id]
 
 
 def _schema_id_sidecar(dtd_path: Path) -> Path:
@@ -45,14 +54,17 @@ def _write_schema_id(dtd_path: Path, schema_id: str) -> None:
     _schema_id_sidecar(dtd_path).write_text(schema_id, encoding="utf-8")
 
 
-def _parse_and_register(dtd_path: Path, schema_id: str | None = None) -> str:
-    """Parse a DTD file from disk and register it in the in-memory registry."""
-    parser = DTDParser(base_dir=DTD_SCHEMA_DIR)
+def _parse_and_register(
+    user: UserContext,
+    dtd_path: Path,
+    schema_id: str | None = None,
+) -> str:
+    parser = DTDParser(base_dir=user.dtd_dir)
     schema = parser.parse_file(dtd_path)
 
     sid = schema_id or _read_schema_id(dtd_path) or str(uuid.uuid4())
     _write_schema_id(dtd_path, sid)
-    _schema_registry[sid] = schema
+    _user_registry(user)[sid] = schema
     return sid
 
 
@@ -60,7 +72,6 @@ _SYSTEM_REF_RE = re.compile(r'SYSTEM\s+["\']([^"\']+)["\']', re.IGNORECASE)
 
 
 def _referenced_dtd_modules(schema_dir: Path) -> set[str]:
-    """Return basenames of DTD modules included via SYSTEM from other files in the folder."""
     referenced: set[str] = set()
     for path in schema_dir.glob("*.dtd"):
         try:
@@ -77,7 +88,6 @@ def _source_basenames(schema: DTDSchema) -> set[str]:
 
 
 def _collect_system_ref_basenames(dtd_path: Path) -> set[str]:
-    """Return basenames of DTD modules referenced via SYSTEM from *dtd_path*."""
     referenced: set[str] = set()
     to_scan = [dtd_path]
     scanned: set[Path] = set()
@@ -138,19 +148,21 @@ def _delete_schema_artifacts(path: Path) -> None:
 
 
 def _cleanup_schema_storage(
+    user: UserContext,
     *,
     keep_basenames: set[str],
     keep_schema_ids: set[str],
 ) -> None:
-    """Remove stale DTD files, sidecars, and in-memory schemas."""
-    for schema_id in list(_schema_registry):
+    registry = _user_registry(user)
+    for schema_id in list(registry):
         if schema_id not in keep_schema_ids:
-            del _schema_registry[schema_id]
+            del registry[schema_id]
 
-    if not DTD_SCHEMA_DIR.is_dir():
+    schema_dir = user.dtd_dir
+    if not schema_dir.is_dir():
         return
 
-    for path in list(DTD_SCHEMA_DIR.iterdir()):
+    for path in list(schema_dir.iterdir()):
         if not path.is_file():
             continue
 
@@ -164,35 +176,48 @@ def _cleanup_schema_storage(
             _delete_schema_artifacts(path)
 
 
-def initialize_schema_registry() -> int:
-    """Scan dtd_schemas/ and load the primary saved DTD entry point."""
-    DTD_SCHEMA_DIR.mkdir(parents=True, exist_ok=True)
-    entry_points = _entry_point_paths(DTD_SCHEMA_DIR)
+def ensure_user_registry_loaded(user: UserContext) -> int:
+    """Scan user's dtd_schemas/ and load the primary entry point if registry is empty."""
+    registry = _user_registry(user)
+    if registry:
+        return len(registry)
+
+    user.dtd_dir.mkdir(parents=True, exist_ok=True)
+    entry_points = _entry_point_paths(user.dtd_dir)
     if not entry_points:
         return 0
 
     primary_path = _pick_primary_entry_point(entry_points)
 
     try:
-        schema_id = _parse_and_register(primary_path)
+        schema_id = _parse_and_register(user, primary_path)
     except Exception:
         logger.exception(
-            "Failed to load DTD schema from disk [file=%s]", primary_path.name
+            "Failed to load DTD schema from disk [user=%s file=%s]",
+            user.display_name,
+            primary_path.name,
         )
         return 0
 
-    schema = _schema_registry[schema_id]
+    schema = registry[schema_id]
     _cleanup_schema_storage(
+        user,
         keep_basenames=_source_basenames(schema),
         keep_schema_ids={schema_id},
     )
 
     logger.info(
-        "Loaded DTD schema from disk [file=%s schema_id=%s]",
+        "Loaded DTD schema from disk [user=%s file=%s schema_id=%s]",
+        user.display_name,
         primary_path.name,
         schema_id,
     )
     return 1
+
+
+def initialize_schema_registry() -> int:
+    """Legacy startup hook — no-op; registries load lazily per user."""
+    return 0
 
 
 class ElementSummary(BaseModel):
@@ -231,8 +256,10 @@ def _element_to_summary(elem: ElementDef) -> ElementSummary:
 
 
 @router.post("/upload", response_model=SchemaResponse)
-async def upload_dtd(file: UploadFile = File(...)) -> SchemaResponse:
-    """Upload a DTD file, parse it, and register the resulting schema."""
+async def upload_dtd(
+    file: UploadFile = File(...),
+    user: UserContext = Depends(get_current_user),
+) -> SchemaResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
 
@@ -242,9 +269,8 @@ async def upload_dtd(file: UploadFile = File(...)) -> SchemaResponse:
             detail="Only .dtd, .ent, and .mod files are supported",
         )
 
-    DTD_SCHEMA_DIR.mkdir(parents=True, exist_ok=True)
-
-    saved_path = DTD_SCHEMA_DIR / file.filename
+    user.dtd_dir.mkdir(parents=True, exist_ok=True)
+    saved_path = user.dtd_dir / file.filename
     content = await file.read()
 
     async with aiofiles.open(saved_path, "wb") as f:
@@ -253,6 +279,7 @@ async def upload_dtd(file: UploadFile = File(...)) -> SchemaResponse:
     try:
         schema_id = await asyncio.to_thread(
             _parse_and_register,
+            user,
             saved_path,
             schema_id=_read_schema_id(saved_path),
         )
@@ -270,8 +297,9 @@ async def upload_dtd(file: UploadFile = File(...)) -> SchemaResponse:
             status_code=422, detail=f"DTD parsing failed: {exc}"
         ) from exc
 
-    schema = _schema_registry[schema_id]
+    schema = _user_registry(user)[schema_id]
     _cleanup_schema_storage(
+        user,
         keep_basenames=_source_basenames(schema),
         keep_schema_ids={schema_id},
     )
@@ -289,8 +317,8 @@ async def upload_dtd_jar(
     file: UploadFile = File(...),
     inner_path: str = Form("META-INF/dtd/"),
     entry_file: str = Form("v2.dtd"),
+    user: UserContext = Depends(get_current_user),
 ) -> SchemaResponse:
-    """Upload a JAR, extract DTD modules, and parse the configured entry DTD."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
 
@@ -301,11 +329,11 @@ async def upload_dtd_jar(
     if entry_basename != entry_file or not entry_basename.lower().endswith(".dtd"):
         raise HTTPException(status_code=400, detail="entry_file must be a .dtd basename")
 
-    DTD_SCHEMA_DIR.mkdir(parents=True, exist_ok=True)
+    user.dtd_dir.mkdir(parents=True, exist_ok=True)
     jar_bytes = await file.read()
 
     try:
-        extracted = extract_jar_dtd_files(jar_bytes, DTD_SCHEMA_DIR, prefix=inner_path)
+        extracted = extract_jar_dtd_files(jar_bytes, user.dtd_dir, prefix=inner_path)
     except zipfile.BadZipFile as exc:
         raise HTTPException(status_code=400, detail="Invalid JAR archive") from exc
     except ValueError as exc:
@@ -328,6 +356,7 @@ async def upload_dtd_jar(
     try:
         schema_id = await asyncio.to_thread(
             _parse_and_register,
+            user,
             entry_path,
             schema_id=_read_schema_id(entry_path),
         )
@@ -350,8 +379,9 @@ async def upload_dtd_jar(
             status_code=422, detail=f"DTD parsing failed: {exc}"
         ) from exc
 
-    schema = _schema_registry[schema_id]
+    schema = _user_registry(user)[schema_id]
     _cleanup_schema_storage(
+        user,
         keep_basenames=_source_basenames(schema),
         keep_schema_ids={schema_id},
     )
@@ -365,8 +395,9 @@ async def upload_dtd_jar(
 
 
 @router.get("/schemas", response_model=list[SchemaResponse])
-async def list_schemas() -> list[SchemaResponse]:
-    """List all registered schemas."""
+async def list_schemas(user: UserContext = Depends(get_current_user)) -> list[SchemaResponse]:
+    ensure_user_registry_loaded(user)
+    registry = _user_registry(user)
     return [
         SchemaResponse(
             schema_id=sid,
@@ -374,21 +405,26 @@ async def list_schemas() -> list[SchemaResponse]:
             element_count=len(schema.elements),
             elements=schema.root_elements(),
         )
-        for sid, schema in _schema_registry.items()
+        for sid, schema in registry.items()
     ]
 
 
 @router.get("/{schema_id}/elements", response_model=list[ElementSummary])
-async def list_elements(schema_id: str) -> list[ElementSummary]:
-    """Return all elements for a registered schema."""
-    schema = _get_schema(schema_id)
+async def list_elements(
+    schema_id: str,
+    user: UserContext = Depends(get_current_user),
+) -> list[ElementSummary]:
+    schema = _get_schema(user, schema_id)
     return [_element_to_summary(elem) for elem in schema.elements.values()]
 
 
 @router.get("/{schema_id}/elements/{element_name}", response_model=ElementDetailResponse)
-async def get_element(schema_id: str, element_name: str) -> ElementDetailResponse:
-    """Return detailed metadata for a single element."""
-    schema = _get_schema(schema_id)
+async def get_element(
+    schema_id: str,
+    element_name: str,
+    user: UserContext = Depends(get_current_user),
+) -> ElementDetailResponse:
+    schema = _get_schema(user, schema_id)
     if element_name not in schema.elements:
         raise HTTPException(
             status_code=404, detail=f"Element '{element_name}' not found"
@@ -400,9 +436,12 @@ async def get_element(schema_id: str, element_name: str) -> ElementDetailRespons
 
 
 @router.get("/{schema_id}/elements/{element_name}/tree")
-async def get_element_tree(schema_id: str, element_name: str) -> dict[str, Any]:
-    """Return the full content model tree for lazy UI rendering."""
-    schema = _get_schema(schema_id)
+async def get_element_tree(
+    schema_id: str,
+    element_name: str,
+    user: UserContext = Depends(get_current_user),
+) -> dict[str, Any]:
+    schema = _get_schema(user, schema_id)
     if element_name not in schema.elements:
         raise HTTPException(
             status_code=404, detail=f"Element '{element_name}' not found"
@@ -420,12 +459,15 @@ async def get_element_tree(schema_id: str, element_name: str) -> dict[str, Any]:
     }
 
 
-def _get_schema(schema_id: str) -> DTDSchema:
-    if schema_id not in _schema_registry:
+def _get_schema(user: UserContext, schema_id: str) -> DTDSchema:
+    ensure_user_registry_loaded(user)
+    registry = _user_registry(user)
+    if schema_id not in registry:
         raise HTTPException(status_code=404, detail=f"Schema '{schema_id}' not found")
-    return _schema_registry[schema_id]
+    return registry[schema_id]
 
 
-def get_schema_registry() -> dict[str, DTDSchema]:
-    """Expose registry for tests and future modules."""
-    return _schema_registry
+def get_schema_registry(user: UserContext) -> dict[str, DTDSchema]:
+    """Expose registry for other modules."""
+    ensure_user_registry_loaded(user)
+    return _user_registry(user)

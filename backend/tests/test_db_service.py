@@ -8,6 +8,7 @@ import pytest
 
 from app.config import ConnectionsConfig, DatabaseConfig
 from app.services.db_service import DBService, _oracle_dsn
+from app.user_context import UserContext
 
 
 def _oracle_cfg(**overrides) -> DatabaseConfig:
@@ -23,18 +24,25 @@ def _oracle_cfg(**overrides) -> DatabaseConfig:
     return DatabaseConfig(**defaults)
 
 
+@pytest.fixture
+def db_user(tmp_path) -> UserContext:
+    root = tmp_path / "db-user"
+    root.mkdir(parents=True, exist_ok=True)
+    return UserContext(user_id="db-test", display_name="db", root=root)
+
+
 @pytest.mark.asyncio
-async def test_run_query_rejects_unknown_driver():
+async def test_run_query_rejects_unknown_driver(db_user: UserContext):
     cfg = _oracle_cfg(driver="mysql")
     connections = ConnectionsConfig(databases={"ORACLE_DB": cfg})
 
     with patch("app.services.db_service.load_connections", return_value=connections):
         with pytest.raises(ValueError, match="Unsupported database driver: mysql"):
-            await DBService().run_query("ORACLE_DB", "SELECT 1 FROM dual")
+            await DBService(db_user).run_query("ORACLE_DB", "SELECT 1 FROM dual")
 
 
 @pytest.mark.asyncio
-async def test_run_query_oracle_returns_normalized_rows():
+async def test_run_query_oracle_returns_normalized_rows(db_user: UserContext):
     cfg = _oracle_cfg()
     connections = ConnectionsConfig(databases={"ORACLE_DB": cfg})
     expected = [{"inn": "7701234567", "name": "Acme"}]
@@ -56,7 +64,7 @@ async def test_run_query_oracle_returns_normalized_rows():
                         "app.services.db_service.asyncio.to_thread",
                         new=fake_to_thread,
                     ):
-                        rows = await DBService().run_query(
+                        rows = await DBService(db_user).run_query(
                             "ORACLE_DB",
                             "SELECT inn, name FROM company WHERE rownum = 1",
                         )
@@ -66,17 +74,17 @@ async def test_run_query_oracle_returns_normalized_rows():
 
 
 @pytest.mark.asyncio
-async def test_run_query_rejects_non_select():
+async def test_run_query_rejects_non_select(db_user: UserContext):
     cfg = _oracle_cfg()
     connections = ConnectionsConfig(databases={"ORACLE_DB": cfg})
 
     with patch("app.services.db_service.load_connections", return_value=connections):
         with pytest.raises(ValueError, match="Only SELECT queries are allowed"):
-            await DBService().run_query("ORACLE_DB", "DROP TABLE company")
+            await DBService(db_user).run_query("ORACLE_DB", "DROP TABLE company")
 
 
 @pytest.mark.asyncio
-async def test_get_query_columns_oracle_returns_description_columns():
+async def test_get_query_columns_oracle_returns_description_columns(db_user: UserContext):
     cfg = _oracle_cfg()
     connections = ConnectionsConfig(databases={"ORACLE_DB": cfg})
 
@@ -97,7 +105,7 @@ async def test_get_query_columns_oracle_returns_description_columns():
                         "app.services.db_service.asyncio.to_thread",
                         new=fake_to_thread,
                     ):
-                        columns = await DBService().get_query_columns(
+                        columns = await DBService(db_user).get_query_columns(
                             "ORACLE_DB",
                             "SELECT inn, name FROM company WHERE rownum = 1",
                         )

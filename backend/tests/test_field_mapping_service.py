@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -69,8 +70,10 @@ def test_validate_llm_mappings_drops_unknown_columns():
 @pytest.mark.asyncio
 async def test_stale_existing_pairs_are_excluded(schema_from_enterprise):
     from app.services.field_mapping_service import FieldMappingService
+    from app.user_context import UserContext
 
-    service = FieldMappingService()
+    user = UserContext(user_id="fm-1", display_name="fm", root=Path("/tmp/fm"))
+    service = FieldMappingService(user)
     service.llm.base_url = ""
     mappings, _ = await service.suggest_mappings(
         schema_from_enterprise,
@@ -85,8 +88,10 @@ async def test_stale_existing_pairs_are_excluded(schema_from_enterprise):
 @pytest.mark.asyncio
 async def test_merge_returns_only_query_columns(schema_from_enterprise):
     from app.services.field_mapping_service import FieldMappingService
+    from app.user_context import UserContext
 
-    service = FieldMappingService()
+    user = UserContext(user_id="fm-1", display_name="fm", root=Path("/tmp/fm"))
+    service = FieldMappingService(user)
     service.llm.base_url = ""
     mappings, _ = await service.suggest_mappings(
         schema_from_enterprise,
@@ -102,8 +107,10 @@ async def test_merge_returns_only_query_columns(schema_from_enterprise):
 @pytest.mark.asyncio
 async def test_suggest_field_mappings_uses_llm_when_available(schema_from_enterprise):
     from app.services.field_mapping_service import FieldMappingService
+    from app.user_context import UserContext
 
-    service = FieldMappingService()
+    user = UserContext(user_id="fm-1", display_name="fm", root=Path("/tmp/fm"))
+    service = FieldMappingService(user)
     service.llm.base_url = "http://llm.test"
     with patch.object(
         service.llm,

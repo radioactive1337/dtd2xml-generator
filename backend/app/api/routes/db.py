@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.auth.sessions import get_current_user
 from app.core.logging_config import truncate
 from app.services.db_service import DBService
+from app.user_context import UserContext
 
 router = APIRouter(prefix="/db", tags=["db"])
 logger = logging.getLogger(__name__)
@@ -34,14 +36,17 @@ class QueryPreviewResponse(BaseModel):
 
 
 @router.post("/query-preview", response_model=QueryPreviewResponse)
-async def query_preview(request: QueryPreviewRequest) -> QueryPreviewResponse:
-    """Return column names and the first result row for a SQL query."""
+async def query_preview(
+    request: QueryPreviewRequest,
+    user: UserContext = Depends(get_current_user),
+) -> QueryPreviewResponse:
     query = request.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="SQL query is required")
 
+    db = DBService(user)
     try:
-        rows = await DBService().run_query(request.db_alias, query)
+        rows = await db.run_query(request.db_alias, query)
     except ValueError as exc:
         logger.warning(
             "Query preview validation failed [alias=%s query=%s]: %s",
@@ -60,7 +65,7 @@ async def query_preview(request: QueryPreviewRequest) -> QueryPreviewResponse:
         raise HTTPException(status_code=422, detail=f"Query failed: {exc}") from exc
 
     if not rows:
-        columns = await DBService().get_query_columns(request.db_alias, query)
+        columns = await db.get_query_columns(request.db_alias, query)
         return QueryPreviewResponse(columns=columns, row=None)
 
     row = rows[0]
@@ -69,14 +74,17 @@ async def query_preview(request: QueryPreviewRequest) -> QueryPreviewResponse:
 
 
 @router.post("/query-columns", response_model=QueryColumnsResponse)
-async def query_columns(request: QueryColumnsRequest) -> QueryColumnsResponse:
-    """Return result column names for a SQL query without fetching row data."""
+async def query_columns(
+    request: QueryColumnsRequest,
+    user: UserContext = Depends(get_current_user),
+) -> QueryColumnsResponse:
     query = request.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="SQL query is required")
 
+    db = DBService(user)
     try:
-        columns = await DBService().get_query_columns(request.db_alias, query)
+        columns = await db.get_query_columns(request.db_alias, query)
     except ValueError as exc:
         logger.warning(
             "Query columns validation failed [alias=%s query=%s]: %s",

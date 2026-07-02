@@ -260,42 +260,26 @@ npm run dev
 
 Один контейнер собирает frontend и запускает backend на порту **8080**. Подходит для деплоя и демо, когда не нужен hot-reload.
 
+**Мультипользовательский режим:** при первом открытии введите логин. Если пользователя нет — система предложит подтвердить создание (защита от опечаток). У каждого пользователя своё пространство: DTD, пресеты, алиасы БД/LLM. Глобальные настройки Oracle — в `config/app.json`.
+
 **Требования:** Docker и Docker Compose.
 
-1. Подготовьте конфигурацию:
+1. Подготовьте глобальную конфигурацию:
 
 ```bash
-copy config\connections.json.example config\connections.json
+copy config\app.json.example config\app.json
+mkdir data
 ```
 
-В Docker `localhost` указывает на сам контейнер. Для сервисов на хосте (PostgreSQL, Ollama и т.д.) используйте `host.docker.internal`:
+В Docker `localhost` указывает на сам контейнер. Для сервисов на хосте (PostgreSQL, Ollama и т.д.) используйте `host.docker.internal` при настройке алиасов в UI (**Настройки**) или в per-user `connections.json`.
 
-```json
-{
-  "databases": {
-    "PGSQL_DB": { "host": "host.docker.internal" }
-  },
-  "llm": {
-    "OLLAMA": { "base_url": "http://host.docker.internal:11434/v1" }
-  }
-}
-```
-
-> **Важно:** не монтируйте `connections.json` как отдельный файл — если его нет на хосте, Docker создаст **папку** с таким именем и приложение упадёт с `IsADirectoryError`. Используйте каталог `config/`.
-
-2. Создайте каталоги для данных (если их ещё нет):
-
-```bash
-mkdir dtd_schemas mapping_presets presets
-```
-
-3. Соберите и запустите:
+2. Соберите и запустите:
 
 ```bash
 docker compose up --build -d
 ```
 
-Откройте [http://localhost:8080](http://localhost:8080)
+Откройте [http://localhost:8080](http://localhost:8080) и войдите под своим логином.
 
 **Полезные команды:**
 
@@ -305,7 +289,9 @@ docker compose down           # остановка
 docker compose up --build     # пересборка после изменений кода
 ```
 
-**Тома:** `config/`, `dtd_schemas/`, `mapping_presets/`, `presets/` монтируются с хоста и сохраняются между перезапусками.
+**Тома:** `config/` (глобальные настройки) и `data/` (пользователи, их DTD и пресеты) монтируются с хоста.
+
+**Миграция со старой single-user версии:** при первой регистрации пользователя legacy-данные из корневых `dtd_schemas/`, `presets/`, `mapping_presets/` и `config/connections.json` автоматически копируются в его пространство (один раз).
 
 **Oracle в Docker (без volume):**
 

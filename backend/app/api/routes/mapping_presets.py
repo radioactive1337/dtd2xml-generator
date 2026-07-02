@@ -6,14 +6,13 @@ import json
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.config import PROJECT_ROOT
+from app.auth.sessions import get_current_user
+from app.user_context import UserContext
 
 router = APIRouter(prefix="/mapping-presets", tags=["mapping-presets"])
-
-PRESETS_DIR = PROJECT_ROOT / "mapping_presets"
 
 
 class MappingField(BaseModel):
@@ -47,9 +46,9 @@ def _safe_name(name: str) -> str:
     return name
 
 
-def _preset_path(name: str) -> Path:
-    PRESETS_DIR.mkdir(parents=True, exist_ok=True)
-    return PRESETS_DIR / f"{_safe_name(name)}.json"
+def _preset_path(user: UserContext, name: str) -> Path:
+    user.mapping_presets_dir.mkdir(parents=True, exist_ok=True)
+    return user.mapping_presets_dir / f"{_safe_name(name)}.json"
 
 
 def _normalize_fields(raw_fields: list | dict) -> list[MappingField]:
@@ -64,11 +63,11 @@ def _normalize_fields(raw_fields: list | dict) -> list[MappingField]:
 @router.get("", response_model=list[MappingPresetSummary])
 async def list_mapping_presets(
     schema_id: str | None = Query(default=None),
+    user: UserContext = Depends(get_current_user),
 ) -> list[MappingPresetSummary]:
-    """List saved mapping presets, optionally filtered by schema."""
-    PRESETS_DIR.mkdir(parents=True, exist_ok=True)
+    user.mapping_presets_dir.mkdir(parents=True, exist_ok=True)
     summaries: list[MappingPresetSummary] = []
-    for path in sorted(PRESETS_DIR.glob("*.json")):
+    for path in sorted(user.mapping_presets_dir.glob("*.json")):
         data = json.loads(path.read_text(encoding="utf-8"))
         preset_schema = data.get("schema_id", "")
         if schema_id and preset_schema != schema_id:
@@ -84,9 +83,11 @@ async def list_mapping_presets(
 
 
 @router.post("", response_model=MappingPresetData)
-async def save_mapping_preset(preset: MappingPresetData) -> MappingPresetData:
-    """Save a database mapping preset to a local JSON file."""
-    path = _preset_path(preset.name)
+async def save_mapping_preset(
+    preset: MappingPresetData,
+    user: UserContext = Depends(get_current_user),
+) -> MappingPresetData:
+    path = _preset_path(user, preset.name)
     path.write_text(
         json.dumps(preset.model_dump(), ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -95,9 +96,11 @@ async def save_mapping_preset(preset: MappingPresetData) -> MappingPresetData:
 
 
 @router.get("/{name}", response_model=MappingPresetData)
-async def load_mapping_preset(name: str) -> MappingPresetData:
-    """Load a saved mapping preset by name."""
-    path = _preset_path(name)
+async def load_mapping_preset(
+    name: str,
+    user: UserContext = Depends(get_current_user),
+) -> MappingPresetData:
+    path = _preset_path(user, name)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Mapping preset '{name}' not found")
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -120,9 +123,11 @@ async def load_mapping_preset(name: str) -> MappingPresetData:
 
 
 @router.delete("/{name}")
-async def delete_mapping_preset(name: str) -> dict[str, str]:
-    """Delete a saved mapping preset."""
-    path = _preset_path(name)
+async def delete_mapping_preset(
+    name: str,
+    user: UserContext = Depends(get_current_user),
+) -> dict[str, str]:
+    path = _preset_path(user, name)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Mapping preset '{name}' not found")
     path.unlink()

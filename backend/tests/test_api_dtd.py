@@ -2,25 +2,9 @@
 
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app.api.routes import dtd as dtd_routes
-from app.main import app
-
 FIXTURES = Path(__file__).parent / "fixtures"
-
-
-@pytest.fixture(autouse=True)
-def clear_registry():
-    dtd_routes._schema_registry.clear()
-    yield
-    dtd_routes._schema_registry.clear()
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app)
 
 
 def test_health(client: TestClient):
