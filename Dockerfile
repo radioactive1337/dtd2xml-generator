@@ -19,12 +19,17 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libxml2 \
         libxslt1.1 \
-        libaio1t64 \
         libnsl2 \
         unzip \
-    && if [ -e /usr/lib/x86_64-linux-gnu/libaio.so.1t64 ] && [ ! -e /usr/lib/x86_64-linux-gnu/libaio.so.1 ]; then \
-        ln -s /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1; \
+    && (apt-get install -y --no-install-recommends libaio1 || apt-get install -y --no-install-recommends libaio1t64) \
+    && set -eux; \
+       libaio_path="$(ldconfig -p | awk '/libaio\.so/{print $NF; exit}')" || true; \
+       if [ -n "${libaio_path:-}" ]; then \
+           mkdir -p /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu; \
+           ln -sf "$libaio_path" /usr/lib/x86_64-linux-gnu/libaio.so.1; \
+           ln -sf "$libaio_path" /lib/x86_64-linux-gnu/libaio.so.1; \
        fi \
+    && ldconfig \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt /app/backend/requirements.txt
