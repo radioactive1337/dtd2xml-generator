@@ -46,7 +46,7 @@ RUN mkdir -p /app/dtd_schemas /app/mapping_presets /app/presets /app/config \
         mkdir -p /opt/oracle \
         && unzip -q /tmp/oracle/instantclient-basic-linux.x64-*.zip -d /opt/oracle \
         && ln -sfn "$(find /opt/oracle -maxdepth 1 -type d -name 'instantclient_*' | head -n 1)" /opt/oracle/instantclient \
-        && test -e /opt/oracle/instantclient/libclntsh.so* \
+        && ls /opt/oracle/instantclient/libclntsh.so* >/dev/null 2>&1 \
         && chmod -R a+rX /opt/oracle; \
        else \
         echo "Oracle Instant Client zip not found in docker/oracle/. Skipping Oracle client install."; \
