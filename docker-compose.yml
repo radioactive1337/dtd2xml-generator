@@ -8,6 +8,7 @@ services:
       - ./data:/app/data
     environment:
       - ALLOW_SELF_REGISTRATION=true
+      # - SESSION_SECRET=replace-with-random-value-on-production
     extra_hosts:
       - "host.docker.internal:host-gateway"
     init: true

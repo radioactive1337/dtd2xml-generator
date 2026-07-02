@@ -9,7 +9,7 @@
 ### 1. Подготовка окружения
 
 1. Установите зависимости backend и frontend (см. [Установка](#установка)).
-2. Скопируйте `config/connections.json.example` → `config/connections.json` и укажите алиасы БД и LLM.
+2. Скопируйте `config/app.json.example` → `config/app.json` и `config/connections.json.example` → `config/connections.json`; укажите алиасы БД и LLM.
 3. Запустите приложение в [режиме разработки](#разработка-два-терминала) и откройте [http://localhost:5173](http://localhost:5173).
 
 ### 2. Проверка подключений
@@ -76,13 +76,19 @@ npm install
 
 ### Конфигурация
 
-Все учётные данные и настройки runtime хранятся в одном локальном файле — **`config/connections.json`**.
+Локальные файлы (в `.gitignore`, в репозитории только `*.example`):
+
+| Файл | Содержимое |
+| ---- | ---------- |
+| **`config/app.json`** | Глобальные настройки: host/port, Oracle Instant Client, `allow_self_registration` |
+| **`config/connections.json`** | Legacy single-user: алиасы БД/LLM с паролями и API-ключами |
 
 ```bash
+copy config\app.json.example config\app.json
 copy config\connections.json.example config\connections.json
 ```
 
-Файл добавлен в `.gitignore`.
+При первом запуске backend допишет в `app.json` сгенерированный **`session_secret`** (подпись cookie-сессий). На production задайте свой ключ через переменную окружения **`SESSION_SECRET`** — тогда секрет не попадёт в файл.
 
 Пример в `config/connections.json.example` настроен для **локального запуска** (`localhost`). Для Docker замените хосты на `host.docker.internal` (см. [Docker](#docker)).
 
@@ -201,7 +207,7 @@ Thick mode инициализируется при старте процесса
 
 При ошибке `ORA-01804: failure to initialize timezone information`:
 
-- **Сначала попробуйте:** оставить `"ora_tzfile": null` в `config/connections.json`.
+- **Сначала попробуйте:** оставить `"ora_tzfile": null` в `config/app.json`.
 - Значение `v$timezone_file` на **сервере БД** не обязано совпадать с файлами в **локальном** Instant Client. У Client 19 часто есть `timezlrg_32.dat`, а не `timezlrg_1.dat`.
 - Если всё же нужно указать файл — используйте `.dat`, который реально лежит в:
   ```
@@ -240,7 +246,7 @@ Thick mode инициализируется при старте процесса
 | [Docker](#docker) | Деплой, демо, окружение без Python/Node | `:8080` | в контейнере |
 | [Локальный production](#локальный-production) | Прод без Docker | `:8080` | `:8080` (статика из `frontend/dist`) |
 
-Конфиг для всех сценариев: **`config/connections.json`**.
+Конфиг для всех сценариев: **`config/app.json`** (глобально) и подключения к БД/LLM (per-user в `data/` через UI или legacy **`config/connections.json`**).
 
 ### Разработка (два терминала)
 
@@ -270,6 +276,8 @@ npm run dev
 copy config\app.json.example config\app.json
 mkdir data
 ```
+
+При первом старте `session_secret` сгенерируется автоматически и сохранится в смонтированный `config/app.json`. На production передайте свой ключ: `SESSION_SECRET` в `docker-compose.yml` или `.env`.
 
 В Docker `localhost` указывает на сам контейнер. Для сервисов на хосте (PostgreSQL, Ollama и т.д.) используйте `host.docker.internal` при настройке алиасов в UI (**Настройки**) или в per-user `connections.json`.
 
@@ -305,7 +313,7 @@ docker compose up --build     # пересборка после изменени
 
 Во время сборки `Dockerfile` автоматически распакует клиент в `/opt/oracle/instantclient`.
 
-В `config/connections.json` укажите:
+В `config/app.json` укажите:
 
 ```json
 {

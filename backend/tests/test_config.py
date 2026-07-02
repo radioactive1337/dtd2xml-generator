@@ -10,6 +10,7 @@ import pytest
 
 from app.config import (
     _find_connections_file,
+    ensure_app_config,
     get_app_settings,
     get_connection_aliases,
     get_db_password,
@@ -17,6 +18,7 @@ from app.config import (
     get_llm_api_key,
     get_ora_tzfile,
     get_oracle_client_lib_dir,
+    get_session_secret,
     load_connections,
     resolve_llm_alias,
     set_default_llm_alias,
@@ -140,6 +142,52 @@ def test_app_and_oracle_settings(app_config_file: Path):
     assert app.log_level == "DEBUG"
     assert get_oracle_client_lib_dir() == "C:\\Oracle\\client19_64\\bin"
     assert get_ora_tzfile() == "timezlrg_1.dat"
+
+
+def test_ensure_app_config_generates_session_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    example = config_dir / "app.json.example"
+    example.write_text(
+        json.dumps({"app": {"host": "0.0.0.0", "port": 8080}}),
+        encoding="utf-8",
+    )
+    app_config = config_dir / "app.json"
+
+    monkeypatch.setattr("app.config.CONFIG_DIR", config_dir)
+    monkeypatch.setattr("app.config.APP_CONFIG_FILE", app_config)
+    monkeypatch.setattr("app.config.APP_CONFIG_EXAMPLE", example)
+    monkeypatch.delenv("SESSION_SECRET", raising=False)
+
+    ensure_app_config()
+
+    raw = json.loads(app_config.read_text(encoding="utf-8"))
+    secret = raw["app"]["session_secret"]
+    assert secret
+    assert get_session_secret() == secret
+
+
+def test_ensure_app_config_skips_file_secret_when_env_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    app_config = config_dir / "app.json"
+    app_config.write_text(
+        json.dumps({"app": {"host": "0.0.0.0", "port": 8080}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("app.config.CONFIG_DIR", config_dir)
+    monkeypatch.setattr("app.config.APP_CONFIG_FILE", app_config)
+    monkeypatch.setattr("app.config.APP_CONFIG_EXAMPLE", config_dir / "app.json.example")
+    monkeypatch.setenv("SESSION_SECRET", "env-only-secret")
+
+    ensure_app_config()
+
+    raw = json.loads(app_config.read_text(encoding="utf-8"))
+    assert "session_secret" not in raw.get("app", {})
+    assert get_session_secret() == "env-only-secret"
 
 
 def test_missing_connections_file_returns_defaults(test_user_ctx: UserContext):
