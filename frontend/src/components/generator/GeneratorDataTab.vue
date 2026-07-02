@@ -25,7 +25,7 @@
       </p>
     </div>
     <p v-else-if="usesLlmStrategy && !llmAliases.length" class="llm-alias-hint llm-alias-hint--warn">
-      Алиасы LLM не настроены — добавьте их в <code>connections.json</code> (см. Настройки).
+      Алиасы LLM не настроены — добавьте их в <code>config/connections.json</code> (см. Настройки).
     </p>
 
     <label class="auto-validate-label">

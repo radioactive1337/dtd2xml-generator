@@ -45,10 +45,16 @@ class ConnectionsConfig(BaseModel):
 
 
 def _find_connections_file() -> Path | None:
+    """Return the active connections.json path.
+
+    Canonical location: ``config/connections.json`` at the project root.
+    Legacy paths (root or ``backend/connections.json``) are still checked for
+    backward compatibility; prefer ``config/connections.json`` for new setups.
+    """
     candidates = [
         PROJECT_ROOT / "config" / "connections.json",
-        PROJECT_ROOT / "connections.json",
-        BACKEND_ROOT / "connections.json",
+        PROJECT_ROOT / "connections.json",  # legacy
+        BACKEND_ROOT / "connections.json",  # legacy
     ]
     for path in candidates:
         if path.is_file():

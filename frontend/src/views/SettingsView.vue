@@ -3,7 +3,7 @@
     <div class="card">
       <div class="panel-title">Алиасы подключений</div>
       <p class="hint">
-        Учётные данные читаются из локального <code>connections.json</code>.
+        Учётные данные читаются из локального <code>config/connections.json</code>.
         В интерфейсе отображаются только алиасы — секреты не передаются.
         Используйте «Проверить БД» / «Проверить LLM» перед заполнением данных.
       </p>
@@ -92,7 +92,7 @@
         <section class="setup-hint card inner">
           <div class="panel-title">Настройка</div>
           <ol>
-            <li>Скопируйте <code>backend/connections.json.example</code> в <code>connections.json</code></li>
+            <li>Скопируйте <code>config/connections.json.example</code> в <code>config/connections.json</code></li>
             <li>Заполните локально учётные данные БД, LLM и Oracle</li>
             <li>Не добавляйте эти файлы в систему контроля версий</li>
           </ol>

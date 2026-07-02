@@ -77,6 +77,16 @@ def test_find_connections_file_skips_directory(tmp_path: Path, monkeypatch):
     assert _find_connections_file() is None
 
 
+def test_find_connections_file_falls_back_to_legacy_root(tmp_path: Path, monkeypatch):
+    project_root = tmp_path
+    legacy_file = project_root / "connections.json"
+    legacy_file.write_text('{"databases": {}, "llm": {}}', encoding="utf-8")
+    monkeypatch.setattr("app.config.PROJECT_ROOT", project_root)
+    monkeypatch.setattr("app.config.BACKEND_ROOT", project_root / "backend")
+
+    assert _find_connections_file() == legacy_file
+
+
 def test_load_connections_reads_aliases(connections_file: Path):
     with patch("app.config._find_connections_file", return_value=connections_file):
         connections = load_connections()

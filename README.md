@@ -9,12 +9,12 @@
 ### 1. Подготовка окружения
 
 1. Установите зависимости backend и frontend (см. [Установка](#установка)).
-2. Скопируйте `backend/connections.json.example` → `connections.json` в корне репозитория и укажите алиасы БД и LLM.
-3. Запустите оба процесса в dev-режиме и откройте [http://localhost:5173](http://localhost:5173).
+2. Скопируйте `config/connections.json.example` → `config/connections.json` и укажите алиасы БД и LLM.
+3. Запустите приложение в [режиме разработки](#разработка-два-терминала) и откройте [http://localhost:5173](http://localhost:5173).
 
 ### 2. Проверка подключений
 
-На странице **Настройки** нажмите «Проверить БД» и «Проверить LLM» для нужных алиасов. Секреты остаются в `connections.json` на сервере — в UI видны только имена алиасов.
+На странице **Настройки** нажмите «Проверить БД» и «Проверить LLM» для нужных алиасов. Секреты остаются в `config/connections.json` на сервере — в UI видны только имена алиасов.
 
 ### 3. Загрузка DTD
 
@@ -76,13 +76,15 @@ npm install
 
 ### Конфигурация
 
-Все учётные данные и настройки runtime хранятся в одном локальном файле — `**connections.json**`.
+Все учётные данные и настройки runtime хранятся в одном локальном файле — **`config/connections.json`**.
 
 ```bash
-copy backend\connections.json.example connections.json
+copy config\connections.json.example config\connections.json
 ```
 
 Файл добавлен в `.gitignore`.
+
+Пример в `config/connections.json.example` настроен для **локального запуска** (`localhost`). Для Docker замените хосты на `host.docker.internal` (см. [Docker](#docker)).
 
 Пример структуры:
 
@@ -151,7 +153,7 @@ Backend использует **python-oracledb**. Есть два режима:
    dir C:\Oracle\client19_64\bin\oci.dll
   ```
 
-### 2. Настройка алиаса Oracle в `connections.json`
+### 2. Настройка алиаса Oracle в `config/connections.json`
 
 Используйте `"driver": "oracle"` (или `"oracledb"`).
 
@@ -188,7 +190,7 @@ Backend использует **python-oracledb**. Есть два режима:
 
 Thick mode инициализируется при старте процесса (`bootstrap_oracle_client()` в `main.py`).
 
-После изменения `connections.json`:
+После изменения `config/connections.json`:
 
 1. Остановите все процессы backend (Ctrl+C; на Windows проверьте, не остались ли лишние `python.exe` после hot-reload).
 2. Запустите uvicorn заново.
@@ -199,7 +201,7 @@ Thick mode инициализируется при старте процесса
 
 При ошибке `ORA-01804: failure to initialize timezone information`:
 
-- **Сначала попробуйте:** оставить `"ora_tzfile": null` в `connections.json`.
+- **Сначала попробуйте:** оставить `"ora_tzfile": null` в `config/connections.json`.
 - Значение `v$timezone_file` на **сервере БД** не обязано совпадать с файлами в **локальном** Instant Client. У Client 19 часто есть `timezlrg_32.dat`, а не `timezlrg_1.dat`.
 - Если всё же нужно указать файл — используйте `.dat`, который реально лежит в:
   ```
@@ -230,9 +232,33 @@ Thick mode инициализируется при старте процесса
 
 ## Запуск
 
-### Docker (production)
+Три сценария — выберите под задачу:
 
-Один контейнер собирает frontend и запускает backend на порту **8080**.
+| Сценарий | Когда использовать | UI | Backend |
+| -------- | ------------------ | -- | ------- |
+| [Разработка](#разработка-два-терминала) | Активная работа над кодом, hot-reload | `:5173` (Vite) | `:8080` (uvicorn `--reload`) |
+| [Docker](#docker) | Деплой, демо, окружение без Python/Node | `:8080` | в контейнере |
+| [Локальный production](#локальный-production) | Прод без Docker | `:8080` | `:8080` (статика из `frontend/dist`) |
+
+Конфиг для всех сценариев: **`config/connections.json`**.
+
+### Разработка (два терминала)
+
+```bash
+# Терминал 1 — API на порту 8080
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+
+# Терминал 2 — UI на порту 5173
+cd frontend
+npm run dev
+```
+
+Откройте [http://localhost:5173](http://localhost:5173)
+
+### Docker
+
+Один контейнер собирает frontend и запускает backend на порту **8080**. Подходит для деплоя и демо, когда не нужен hot-reload.
 
 **Требования:** Docker и Docker Compose.
 
@@ -242,7 +268,18 @@ Thick mode инициализируется при старте процесса
 copy config\connections.json.example config\connections.json
 ```
 
-В Docker `localhost` указывает на сам контейнер. Для сервисов на хосте (PostgreSQL, Ollama и т.д.) используйте `host.docker.internal` — это уже задано в примере.
+В Docker `localhost` указывает на сам контейнер. Для сервисов на хосте (PostgreSQL, Ollama и т.д.) используйте `host.docker.internal`:
+
+```json
+{
+  "databases": {
+    "PGSQL_DB": { "host": "host.docker.internal" }
+  },
+  "llm": {
+    "OLLAMA": { "base_url": "http://host.docker.internal:11434/v1" }
+  }
+}
+```
 
 > **Важно:** не монтируйте `connections.json` как отдельный файл — если его нет на хосте, Docker создаст **папку** с таким именем и приложение упадёт с `IsADirectoryError`. Используйте каталог `config/`.
 
@@ -296,21 +333,9 @@ docker compose up --build     # пересборка после изменени
 
 > Для Docker не указывайте `ora_tzfile` вручную (оставьте `null`) — иначе Instant Client может не найти timezone-файл внутри контейнера.
 
-### Разработка (два терминала)
+### Локальный production
 
-```bash
-# Терминал 1 — API на порту 8080
-cd backend
-uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
-
-# Терминал 2 — UI на порту 5173
-cd frontend
-npm run dev
-```
-
-Откройте [http://localhost:5173](http://localhost:5173)
-
-### Production (один процесс)
+Альтернатива Docker: один процесс uvicorn раздаёт собранный frontend. Подходит, когда Docker недоступен.
 
 ```bash
 cd frontend && npm run build
@@ -336,8 +361,8 @@ pytest tests/ -v
 | `DPY-3010` / thin mode                   | Oracle 11g без Instant Client          | Установите Instant Client, задайте `oracle_client_lib_dir`, полный перезапуск                        |
 | `Oracle thick mode failed to initialize` | Неверный путь или нет `oci.dll`        | Исправьте `oracle_client_lib_dir`, проверьте наличие `oci.dll`                                       |
 | `ORA-01804`                              | Отсутствует или неверный timezone-файл | Сначала `"ora_tzfile": null`; если задаёте файл — только тот, что есть локально в `oracore\zoneinfo` |
-| `Database alias '…' not found`           | Опечатка или нет `connections.json`    | Скопируйте example, проверьте совпадение алиаса с пресетом                                           |
+| `Database alias '…' not found`           | Опечатка или нет `config/connections.json` | Скопируйте example, проверьте совпадение алиаса с пресетом                                           |
 | DTD пропала после перезапуска            | Пустая `dtd_schemas/`                  | Загрузите снова; папка должна сохраняться между запусками                                            |
 
 
-В логах backend при ошибках есть контекст: алиас, driver, host, усечённый SQL. Для подробностей задайте `"log_level": "DEBUG"` в `connections.json` → `app`.
+В логах backend при ошибках есть контекст: алиас, driver, host, усечённый SQL. Для подробностей задайте `"log_level": "DEBUG"` в `config/connections.json` → `app`.
