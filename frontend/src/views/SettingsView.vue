@@ -98,9 +98,12 @@
           <input v-model="dbForm.host" required />
           <label>Порт</label>
           <input v-model.number="dbForm.port" type="number" required />
-          <label>База / service name</label>
-          <input v-model="dbForm.database" required />
-          <label>SID (Oracle, опционально)</label>
+          <label>
+            База / service name
+            <span v-if="!dbDatabaseRequired" class="label-hint">(необязательно при SID)</span>
+          </label>
+          <input v-model="dbForm.database" :required="dbDatabaseRequired" />
+          <label>SID <span class="label-hint">(Oracle, опционально)</span></label>
           <input v-model="dbForm.sid" />
           <label>Пользователь</label>
           <input v-model="dbForm.user" required />
@@ -139,7 +142,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import {
   getConnections,
   setDefaultLlmAlias,
@@ -188,6 +191,11 @@ const emptyLlmForm = () => ({
 
 const dbForm = ref(emptyDbForm())
 const llmForm = ref(emptyLlmForm())
+
+const dbDatabaseRequired = computed(() => {
+  if (dbForm.value.driver === 'postgresql') return true
+  return !dbForm.value.sid?.trim()
+})
 
 function dbStatus(alias) {
   return dbTests.value[alias] ?? null
@@ -522,6 +530,11 @@ code {
   font-size: 13px;
   margin-top: 10px;
   margin-bottom: 4px;
+}
+
+.label-hint {
+  font-weight: 400;
+  color: var(--text-muted);
 }
 
 .modal input,
