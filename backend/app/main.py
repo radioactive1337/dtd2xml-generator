@@ -4,30 +4,52 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import Scope
 
 from app.api.routes import config, db, dtd, export, fill, generate, mapping_presets, presets, validate
-from app.config import PROJECT_ROOT, get_app_settings, get_connection_aliases
+from app.auth import routes as auth
+from app.auth.sessions import get_current_user, install_session_middleware
+from app.auth.users import init_user_db
+from app.config import PROJECT_ROOT, ensure_app_config, get_app_settings
 from app.core.logging_config import setup_logging
 from app.services.db_service import close_db_pools
 from app.services.llm_service import close_llm_http_client
 from app.services.oracle_client import bootstrap_oracle_client
+from app.user_context import UserContext
+
+
+class SPAStaticFiles(StaticFiles):
+    """Static files with index.html fallback for Vue Router history mode."""
+
+    async def get_response(self, path: str, scope: Scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            if scope["method"] not in {"GET", "HEAD"}:
+                raise
+            if "." in path.rsplit("/", 1)[-1]:
+                raise
+            return await super().get_response("index.html", scope)
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
+ensure_app_config()
 bootstrap_oracle_client()
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    loaded = dtd.initialize_schema_registry()
-    logger.info("DTD schema registry initialized [loaded=%d]", loaded)
+    init_user_db()
+    logger.info("User database initialized")
     yield
     await close_db_pools()
     await close_llm_http_client()
@@ -36,9 +58,11 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="QA XML Generator",
     description="Local QA tool for generating XML from DTD schemas",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
+
+install_session_middleware(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,6 +72,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/api")
 app.include_router(config.router, prefix="/api")
 app.include_router(db.router, prefix="/api")
 app.include_router(dtd.router, prefix="/api")
@@ -61,7 +86,6 @@ app.include_router(validate.router, prefix="/api")
 
 @app.exception_handler(Exception)
 async def log_exceptions(request: Request, exc: Exception) -> JSONResponse:
-    """Log server errors with request context before returning a response."""
     if isinstance(exc, (HTTPException, StarletteHTTPException)):
         if exc.status_code >= 500:
             logger.error(
@@ -95,15 +119,17 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/api/config/aliases")
-async def config_aliases() -> dict[str, list[str] | str | None]:
-    """Return connection aliases only — no secrets."""
-    return get_connection_aliases()
+async def config_aliases_legacy(
+    user: UserContext = Depends(get_current_user),
+) -> dict[str, list[str] | str | None]:
+    from app.config import get_connection_aliases
+
+    return get_connection_aliases(user)
 
 
-# Serve built Vue frontend in production
 _frontend_dist = PROJECT_ROOT / "frontend" / "dist"
 if _frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
+    app.mount("/", SPAStaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
 
 
 if __name__ == "__main__":

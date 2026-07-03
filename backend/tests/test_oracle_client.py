@@ -28,10 +28,19 @@ def test_resolve_client_lib_dir_accepts_bin_directory(tmp_path: Path):
     assert oracle_client.resolve_client_lib_dir(str(bin_dir)) == str(bin_dir)
 
 
+def test_resolve_client_lib_dir_accepts_linux_library(tmp_path: Path, monkeypatch):
+    client_dir = tmp_path / "instantclient"
+    client_dir.mkdir(parents=True)
+    (client_dir / "libclntsh.so").write_bytes(b"oci")
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    assert oracle_client.resolve_client_lib_dir(str(client_dir)) == str(client_dir)
+
+
 def test_apply_oracle_environment_unsets_missing_ora_tzfile(tmp_path: Path, monkeypatch):
     bin_dir = tmp_path / "client" / "bin"
     bin_dir.mkdir(parents=True)
-    (bin_dir / "oci.dll").write_bytes(b"oci")
+    (bin_dir / "libclntsh.so").write_bytes(b"oci")
     monkeypatch.delenv("ORA_TZFILE", raising=False)
     monkeypatch.setattr(sys, "platform", "linux")
 

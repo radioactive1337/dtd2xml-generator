@@ -109,10 +109,10 @@
             </button>
             <button
               class="btn-secondary"
-              :disabled="!preview.columns?.length || autoMapLoading"
+              :disabled="!preview.columns?.length"
               @click="addAllColumns"
             >
-              {{ autoMapLoading ? 'Сопоставление…' : 'Добавить все столбцы' }}
+              Добавить все столбцы
             </button>
           </div>
           <p v-if="autoMapHint" class="wizard-hint">{{ autoMapHint }}</p>
@@ -189,6 +189,7 @@ import {
   lastPathSegment,
   pathsEndingWithTag,
   buildFieldMappingsFromColumns,
+  buildFieldsFromSqlColumns,
   mappingsToFields,
   normalizeFieldName,
 } from '../utils/mappingUtils'
@@ -352,6 +353,16 @@ function formatPreviewValue(val) {
   return String(val)
 }
 
+function autoMapHintForMatcher(matcher) {
+  if (matcher === 'llm') {
+    return 'Сопоставлено через AI по документации DTD.'
+  }
+  if (matcher === 'unavailable') {
+    return 'LLM не настроен — использовано локальное сопоставление.'
+  }
+  return 'Использовано локальное сопоставление по именам полей.'
+}
+
 async function suggestDraftMappings({ keepFilled = true } = {}) {
   const columns = preview.value.columns || []
   if (!columns.length || !props.schemaId || !draft.value.target_element?.trim()) {
@@ -381,9 +392,7 @@ async function suggestDraftMappings({ keepFilled = true } = {}) {
     })
     return {
       fields: mappingsToFields(mappings),
-      hint: matcher === 'llm'
-        ? 'Сопоставлено через AI по документации DTD.'
-        : 'LLM недоступен — использовано локальное сопоставление.',
+      hint: autoMapHintForMatcher(matcher),
     }
   } catch (e) {
     return {
@@ -402,18 +411,6 @@ async function testQuery() {
       columns: data.columns || [],
       row: data.row ?? null,
       error: '',
-    }
-    if (data.columns?.length && draft.value.target_element) {
-      autoMapLoading.value = true
-      try {
-        const result = await suggestDraftMappings({ keepFilled: true })
-        if (result) {
-          draft.value.fields = result.fields
-          autoMapHint.value = result.hint
-        }
-      } finally {
-        autoMapLoading.value = false
-      }
     }
   } catch (e) {
     preview.value = {
@@ -439,18 +436,11 @@ async function autoMap() {
   }
 }
 
-async function addAllColumns() {
-  autoMapLoading.value = true
+function addAllColumns() {
+  const columns = preview.value.columns || []
+  if (!columns.length) return
+  draft.value.fields = buildFieldsFromSqlColumns(columns, draft.value.fields)
   autoMapHint.value = ''
-  try {
-    const result = await suggestDraftMappings({ keepFilled: false })
-    if (result) {
-      draft.value.fields = result.fields
-      autoMapHint.value = result.hint
-    }
-  } finally {
-    autoMapLoading.value = false
-  }
 }
 
 function addField() {

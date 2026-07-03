@@ -1,8 +1,10 @@
-"""Application configuration loaded from connections.json only."""
+"""Application configuration: global app.json and per-user connections."""
 
 from __future__ import annotations
 
 import json
+import os
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -11,13 +13,21 @@ from pydantic import BaseModel, Field
 # Project root: xml-generator/
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = PROJECT_ROOT / "data"
+CONFIG_DIR = PROJECT_ROOT / "config"
+APP_CONFIG_FILE = CONFIG_DIR / "app.json"
+APP_CONFIG_EXAMPLE = CONFIG_DIR / "app.json.example"
+USER_CONNECTIONS_TEMPLATE = CONFIG_DIR / "connections.json.example"
+
+DEV_USER_ID = "dev-local"
 
 
 class AppSettings(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
     log_level: str = "INFO"
-    default_llm_alias: str | None = None
+    session_secret: str | None = None
+    allow_self_registration: bool = True
 
 
 class LLMConfig(BaseModel):
@@ -25,7 +35,6 @@ class LLMConfig(BaseModel):
     base_url: str
     model: str
     timeout: float = 120.0
-    # api_key is never exposed to the frontend
 
 
 class DatabaseConfig(BaseModel):
@@ -35,8 +44,7 @@ class DatabaseConfig(BaseModel):
     port: int
     database: str
     user: str
-    sid: str | None = None  # Oracle SID; if set, used instead of database (service name)
-    # password is never exposed to the frontend
+    sid: str | None = None
 
 
 class ConnectionsConfig(BaseModel):
@@ -44,47 +52,168 @@ class ConnectionsConfig(BaseModel):
     llm: dict[str, LLMConfig] = Field(default_factory=dict)
 
 
-def _find_connections_file() -> Path | None:
-    candidates = [
-        PROJECT_ROOT / "connections.json",
-        BACKEND_ROOT / "connections.json",
-    ]
-    for path in candidates:
-        if path.exists():
-            return path
-    return None
+def is_auth_disabled() -> bool:
+    return os.getenv("AUTH_DISABLED", "").strip().lower() in {"1", "true", "yes"}
 
 
-def _load_raw_connections() -> dict[str, Any]:
-    path = _find_connections_file()
-    if path is None:
+def is_allow_self_registration() -> bool:
+    env = os.getenv("ALLOW_SELF_REGISTRATION", "").strip().lower()
+    if env in {"0", "false", "no"}:
+        return False
+    if env in {"1", "true", "yes"}:
+        return True
+    return load_app_settings().allow_self_registration
+
+
+def _load_json_file(path: Path) -> dict[str, Any]:
+    if not path.is_file():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_connections() -> ConnectionsConfig:
-    """Load connections.json; returns empty config if file is missing."""
-    raw = _load_raw_connections()
+def _find_legacy_connections_file() -> Path | None:
+    candidates = [
+        CONFIG_DIR / "connections.json",
+        PROJECT_ROOT / "connections.json",
+        BACKEND_ROOT / "connections.json",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
 
+
+def _connections_path_for_user(user: "UserContext") -> Path:
+    if is_auth_disabled() and user.user_id == DEV_USER_ID:
+        legacy = _find_legacy_connections_file()
+        if legacy is not None:
+            return legacy
+    return user.connections_path
+
+
+def _load_raw_user_connections(user: "UserContext") -> dict[str, Any]:
+    path = _connections_path_for_user(user)
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _save_raw_user_connections(user: "UserContext", raw: dict[str, Any]) -> None:
+    path = _connections_path_for_user(user)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _load_raw_app_config() -> dict[str, Any]:
+    raw = _load_json_file(APP_CONFIG_FILE)
+    if raw:
+        return raw
+
+    legacy = _find_legacy_connections_file()
+    if legacy is not None:
+        legacy_raw = _load_json_file(legacy)
+        merged: dict[str, Any] = {"app": legacy_raw.get("app", {})}
+        for key in ("oracle_client_lib_dir", "oracle_home", "ora_tzfile"):
+            if key in legacy_raw:
+                merged[key] = legacy_raw[key]
+        return merged
+    return {}
+
+
+def load_app_settings() -> AppSettings:
+    raw = _load_raw_app_config()
+    app = raw.get("app", {})
+    env_secret = os.getenv("SESSION_SECRET", "").strip()
+    session_secret = env_secret or str(app.get("session_secret", "")).strip() or None
+    allow_reg = app.get("allow_self_registration", True)
+    if isinstance(allow_reg, str):
+        allow_reg = allow_reg.lower() not in {"0", "false", "no"}
+    return AppSettings(
+        host=str(app.get("host", "0.0.0.0")),
+        port=int(app.get("port", 8080)),
+        log_level=str(app.get("log_level", "INFO")),
+        session_secret=session_secret,
+        allow_self_registration=bool(allow_reg),
+    )
+
+
+def get_app_settings() -> AppSettings:
+    """Backward-compatible alias."""
+    return load_app_settings()
+
+
+def get_session_secret() -> str:
+    settings = load_app_settings()
+    if settings.session_secret:
+        return settings.session_secret
+    env = os.getenv("SESSION_SECRET", "").strip()
+    if env:
+        return env
+    return "dev-insecure-session-secret-change-me"
+
+
+def ensure_app_config() -> None:
+    """Create app.json from example and generate session secret if needed."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if not APP_CONFIG_FILE.is_file():
+        if APP_CONFIG_EXAMPLE.is_file():
+            APP_CONFIG_FILE.write_text(
+                APP_CONFIG_EXAMPLE.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+        else:
+            APP_CONFIG_FILE.write_text(
+                json.dumps(
+                    {
+                        "app": {
+                            "host": "0.0.0.0",
+                            "port": 8080,
+                            "log_level": "INFO",
+                            "allow_self_registration": True,
+                        }
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+    raw = _load_raw_app_config()
+    app = raw.setdefault("app", {})
+    if not str(app.get("session_secret", "")).strip() and not os.getenv("SESSION_SECRET"):
+        app["session_secret"] = secrets.token_urlsafe(32)
+        APP_CONFIG_FILE.write_text(
+            json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+
+def load_connections(user: "UserContext") -> ConnectionsConfig:
+    raw = _load_raw_user_connections(user)
     databases: dict[str, DatabaseConfig] = {}
     for alias, cfg in raw.get("databases", {}).items():
         databases[alias] = DatabaseConfig(alias=alias, **cfg)
-
     llm: dict[str, LLMConfig] = {}
     for alias, cfg in raw.get("llm", {}).items():
         llm[alias] = LLMConfig(alias=alias, **cfg)
-
     return ConnectionsConfig(databases=databases, llm=llm)
 
 
-def get_default_llm_alias() -> str | None:
-    """Return the configured default LLM alias, or None when no LLM is configured."""
-    connections = load_connections()
+def get_default_llm_alias(user: "UserContext") -> str | None:
+    connections = load_connections(user)
     if not connections.llm:
         return None
 
-    raw = _load_raw_connections()
-    configured = str(raw.get("app", {}).get("default_llm_alias", "")).strip()
+    raw = _load_raw_user_connections(user)
+    configured_raw = raw.get("app", {}).get("default_llm_alias")
+    configured = (
+        str(configured_raw).strip()
+        if configured_raw is not None and str(configured_raw).strip()
+        else ""
+    )
     if configured:
         if configured in connections.llm:
             return configured
@@ -103,13 +232,12 @@ def get_default_llm_alias() -> str | None:
     available = ", ".join(sorted(connections.llm))
     raise ValueError(
         f"Multiple LLM aliases configured ({available}). "
-        "Set app.default_llm_alias in connections.json."
+        "Set app.default_llm_alias in connections."
     )
 
 
-def resolve_llm_alias(alias: str | None = None) -> str:
-    """Resolve an explicit LLM alias or fall back to the configured default."""
-    connections = load_connections()
+def resolve_llm_alias(user: "UserContext", alias: str | None = None) -> str:
+    connections = load_connections(user)
     requested = (alias or "").strip()
 
     if requested and requested in connections.llm:
@@ -121,54 +249,68 @@ def resolve_llm_alias(alias: str | None = None) -> str:
             f"LLM alias '{requested}' is not configured. Available: {available}"
         )
 
-    default = get_default_llm_alias()
+    default = get_default_llm_alias(user)
     if default is None:
-        raise ValueError("No LLM aliases configured in connections.json")
+        raise ValueError("No LLM aliases configured")
     return default
 
 
-def get_llm_api_key(alias: str = "default") -> str:
-    """Return LLM API key from connections.json (server-side only)."""
-    resolved = resolve_llm_alias(alias)
-    raw = _load_raw_connections()
+def get_llm_api_key(user: "UserContext", alias: str = "default") -> str:
+    resolved = resolve_llm_alias(user, alias)
+    raw = _load_raw_user_connections(user)
     return raw.get("llm", {}).get(resolved, {}).get("api_key", "")
 
 
-def get_db_password(alias: str) -> str:
-    """Return DB password from connections.json (server-side only)."""
-    raw = _load_raw_connections()
+def get_db_password(user: "UserContext", alias: str) -> str:
+    raw = _load_raw_user_connections(user)
     return raw.get("databases", {}).get(alias, {}).get("password", "")
 
 
-def has_oracle_databases() -> bool:
-    """Return True when connections.json contains at least one Oracle alias."""
-    connections = load_connections()
+def has_oracle_databases(user: "UserContext") -> bool:
+    connections = load_connections(user)
     return any(
         cfg.driver.lower() in {"oracle", "oracledb"}
         for cfg in connections.databases.values()
     )
 
 
-def get_oracle_client_lib_dir() -> str | None:
-    """Return Oracle client library directory from connections.json."""
-    raw = _load_raw_connections()
+def _optional_config_str(value: Any) -> str | None:
+    """Normalize optional JSON config values; treat null and empty as unset."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == "none":
+        return None
+    return text
 
-    lib_dir = str(raw.get("oracle_client_lib_dir", "")).strip()
+
+def _dir_has_oracle_client_lib(directory: Path) -> bool:
+    if not directory.is_dir():
+        return False
+    for name in ("oci.dll", "libclntsh.so"):
+        if (directory / name).is_file():
+            return True
+    return any(directory.glob("libclntsh.so*"))
+
+
+def get_oracle_client_lib_dir() -> str | None:
+    raw = _load_raw_app_config()
+    lib_dir = _optional_config_str(raw.get("oracle_client_lib_dir"))
     if lib_dir:
         return lib_dir
 
-    oracle_home = str(raw.get("oracle_home", "")).strip()
+    oracle_home = _optional_config_str(raw.get("oracle_home"))
     if oracle_home:
-        bin_dir = Path(oracle_home) / "bin"
-        if (bin_dir / "oci.dll").is_file():
-            return str(bin_dir)
+        home = Path(oracle_home)
+        for candidate in (home, home / "bin"):
+            if _dir_has_oracle_client_lib(candidate):
+                return str(candidate)
 
     return None
 
 
 def get_ora_tzfile() -> str | None:
-    """Return optional ORA_TZFILE value from connections.json."""
-    raw = _load_raw_connections()
+    raw = _load_raw_app_config()
     value = raw.get("ora_tzfile")
     if value is None:
         return None
@@ -176,26 +318,11 @@ def get_ora_tzfile() -> str | None:
     return stripped or None
 
 
-def get_app_settings() -> AppSettings:
-    raw = _load_raw_connections()
-    app = raw.get("app", {})
-    default_llm_alias = app.get("default_llm_alias")
-    return AppSettings(
-        host=app.get("host", "0.0.0.0"),
-        port=int(app.get("port", 8080)),
-        log_level=str(app.get("log_level", "INFO")),
-        default_llm_alias=str(default_llm_alias).strip() or None
-        if default_llm_alias is not None
-        else None,
-    )
-
-
-def get_connection_aliases() -> dict[str, list[str] | str | None]:
-    """Return only aliases safe to expose in the UI."""
-    connections = load_connections()
+def get_connection_aliases(user: "UserContext") -> dict[str, list[str] | str | None]:
+    connections = load_connections(user)
     default_llm: str | None = None
     try:
-        default_llm = get_default_llm_alias()
+        default_llm = get_default_llm_alias(user)
     except ValueError:
         default_llm = None
 
@@ -206,13 +333,12 @@ def get_connection_aliases() -> dict[str, list[str] | str | None]:
     }
 
 
-def set_default_llm_alias(alias: str) -> str:
-    """Persist app.default_llm_alias in connections.json."""
+def set_default_llm_alias(user: "UserContext", alias: str) -> str:
     requested = alias.strip()
     if not requested:
         raise ValueError("LLM alias is required")
 
-    connections = load_connections()
+    connections = load_connections(user)
     if len(connections.llm) < 2:
         raise ValueError(
             "Default LLM alias can only be set when multiple LLM aliases are configured"
@@ -224,15 +350,17 @@ def set_default_llm_alias(alias: str) -> str:
             f"LLM alias '{requested}' is not configured. Available: {available}"
         )
 
-    path = _find_connections_file()
-    if path is None:
-        raise ValueError("connections.json not found")
-
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _load_raw_user_connections(user)
     app = raw.setdefault("app", {})
     app["default_llm_alias"] = requested
-    path.write_text(
-        json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    _save_raw_user_connections(user, raw)
     return requested
+
+
+def save_user_connections_raw(user: "UserContext", raw: dict[str, Any]) -> None:
+    _save_raw_user_connections(user, raw)
+
+
+# Legacy helpers for tests that patch _find_connections_file
+def _find_connections_file() -> Path | None:
+    return _find_legacy_connections_file()

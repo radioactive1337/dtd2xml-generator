@@ -1,5 +1,7 @@
-# Secrets
+# Secrets / local runtime config
 connections.json
+config/connections.json
+config/app.json
 
 # Python
 __pycache__/

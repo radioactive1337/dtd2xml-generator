@@ -168,6 +168,27 @@ export function applyAutoSuggestToFields(fields, columns, xmlAttributes) {
   return merged.length ? merged : [{ db_col: '', xml_attr: '' }]
 }
 
+/** One row per SQL column with db_col set; keeps existing xml_attr for matching columns. */
+export function buildFieldsFromSqlColumns(columns, existingFields = []) {
+  const attrByCol = new Map()
+  for (const field of existingFields || []) {
+    const col = field.db_col?.trim()
+    if (col) {
+      attrByCol.set(normalizeFieldName(col), field.xml_attr || '')
+    }
+  }
+
+  if (!columns?.length) {
+    const kept = (existingFields || []).filter((f) => f.db_col?.trim() || f.xml_attr?.trim())
+    return kept.length ? kept : [{ db_col: '', xml_attr: '' }]
+  }
+
+  return columns.map((col) => ({
+    db_col: col,
+    xml_attr: attrByCol.get(normalizeFieldName(col)) ?? '',
+  }))
+}
+
 /** Convert API mapping rows to editable field rows. */
 export function mappingsToFields(mappings) {
   if (!mappings?.length) return [{ db_col: '', xml_attr: '' }]

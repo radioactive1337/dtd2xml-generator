@@ -5,22 +5,32 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.routes.dtd import get_schema_registry
+from app.auth.sessions import get_current_user
 from app.core.xml_builder import BuildConfig, BuildResult, build_xml
+from app.user_context import UserContext
 
 router = APIRouter(prefix="/generate", tags=["generate"])
 logger = logging.getLogger(__name__)
 
-# In-memory cache of last generated XML per schema
-_last_generated: dict[str, str] = {}
+# user_id -> schema_id -> xml_text
+_last_generated: dict[str, dict[str, str]] = {}
+
+
+def _user_cache(user: UserContext) -> dict[str, str]:
+    if user.user_id not in _last_generated:
+        _last_generated[user.user_id] = {}
+    return _last_generated[user.user_id]
 
 
 @router.post("", response_model=BuildResult)
-async def generate_xml(config: BuildConfig) -> BuildResult:
-    """Generate XML skeleton from a registered DTD schema."""
-    registry = get_schema_registry()
+async def generate_xml(
+    config: BuildConfig,
+    user: UserContext = Depends(get_current_user),
+) -> BuildResult:
+    registry = get_schema_registry(user)
     if config.schema_id not in registry:
         raise HTTPException(status_code=404, detail=f"Schema '{config.schema_id}' not found")
 
@@ -41,15 +51,13 @@ async def generate_xml(config: BuildConfig) -> BuildResult:
         )
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    _last_generated[config.schema_id] = result.xml_text
+    _user_cache(user)[config.schema_id] = result.xml_text
     return result
 
 
-def get_last_generated(schema_id: str) -> str | None:
-    """Return the last generated XML for a schema."""
-    return _last_generated.get(schema_id)
+def get_last_generated(user: UserContext, schema_id: str) -> str | None:
+    return _user_cache(user).get(schema_id)
 
 
-def set_last_generated(schema_id: str, xml_text: str) -> None:
-    """Remember the latest XML for a schema (after generate or fill)."""
-    _last_generated[schema_id] = xml_text
+def set_last_generated(user: UserContext, schema_id: str, xml_text: str) -> None:
+    _user_cache(user)[schema_id] = xml_text

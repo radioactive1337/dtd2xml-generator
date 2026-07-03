@@ -1,20 +1,18 @@
-# QA XML Generator Tool
+# XML Generator Tool
 
-Локальный QA-инструмент для генерации XML по большим DTD-схемам, заполнения данными из БД и LLM и проверки результата.
+Локальный инструмент для генерации XML по большим DTD-схемам, заполнения данными из БД и LLM и проверки результата.
 
 ## Быстрый старт
-
-Типичный сценарий — за несколько минут получить валидный XML под вашу DTD.
 
 ### 1. Подготовка окружения
 
 1. Установите зависимости backend и frontend (см. [Установка](#установка)).
-2. Скопируйте `backend/connections.json.example` → `connections.json` в корне репозитория и укажите алиасы БД и LLM.
-3. Запустите оба процесса в dev-режиме и откройте [http://localhost:5173](http://localhost:5173).
+2. Скопируйте `config/app.json.example` → `config/app.json` и `config/connections.json.example` → `config/connections.json`; укажите алиасы БД и LLM.
+3. Запустите приложение в [режиме разработки](#разработка-два-терминала) и откройте [http://localhost:5173](http://localhost:5173).
 
 ### 2. Проверка подключений
 
-На странице **Настройки** нажмите «Проверить БД» и «Проверить LLM» для нужных алиасов. Секреты остаются в `connections.json` на сервере — в UI видны только имена алиасов.
+На странице **Настройки** нажмите «Проверить БД» и «Проверить LLM» для нужных алиасов. Секреты остаются в `config/connections.json` на сервере — в UI видны только имена алиасов.
 
 ### 3. Загрузка DTD
 
@@ -64,7 +62,7 @@
 cd backend
 python -m venv .venv
 .venv\Scripts\activate   # Windows
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
 ### Frontend
@@ -76,27 +74,43 @@ npm install
 
 ### Конфигурация
 
-Все учётные данные и настройки runtime хранятся в одном локальном файле — `**connections.json**`.
+Локальные файлы (в `.gitignore`, в репозитории только `*.example`):
+
+| Файл | Содержимое |
+| ---- | ---------- |
+| **`config/app.json`** | Глобальные настройки: host/port, `log_level`, Oracle Instant Client, `allow_self_registration`, `session_secret` |
+| **`config/connections.json`** | Legacy single-user: алиасы БД/LLM с паролями и API-ключами (в мультипользовательском режиме заменяется per-user файлами в `data/`) |
 
 ```bash
-copy backend\connections.json.example connections.json
+copy config\app.json.example config\app.json
+copy config\connections.json.example config\connections.json
 ```
 
-Файл добавлен в `.gitignore`.
+При первом запуске backend допишет в `app.json` сгенерированный **`session_secret`** (подпись cookie-сессий). На production задайте свой ключ через переменную окружения **`SESSION_SECRET`** — тогда секрет не попадёт в файл.
 
-Пример структуры:
+**`config/app.json`** — глобальные настройки. Thick mode для Oracle включается автоматически, если задан `oracle_client_lib_dir` (или `oracle_home`); отдельного флага нет.
 
 ```json
 {
   "app": {
     "host": "0.0.0.0",
     "port": 8080,
-    "log_level": "INFO"
+    "log_level": "INFO",
+    "allow_self_registration": true
   },
-  "oracle_thick_mode": true,
   "oracle_client_lib_dir": "C:\\Oracle\\client19_64\\bin",
   "oracle_home": "C:\\Oracle\\client19_64",
-  "ora_tzfile": null,
+  "ora_tzfile": null
+}
+```
+
+**`config/connections.json`** — алиасы БД и LLM. Секция `app` здесь хранит только `default_llm_alias` (какой LLM использовать по умолчанию при нескольких алиасах). Для локального запуска используйте `localhost`; для Docker — `host.docker.internal` (см. [Docker](#docker)).
+
+```json
+{
+  "app": {
+    "default_llm_alias": null
+  },
   "databases": {
     "PGSQL_DB": {
       "driver": "postgresql",
@@ -151,7 +165,7 @@ Backend использует **python-oracledb**. Есть два режима:
    dir C:\Oracle\client19_64\bin\oci.dll
   ```
 
-### 2. Настройка алиаса Oracle в `connections.json`
+### 2. Настройка алиаса Oracle в `config/connections.json`
 
 Используйте `"driver": "oracle"` (или `"oracledb"`).
 
@@ -184,22 +198,22 @@ Backend использует **python-oracledb**. Есть два режима:
 }
 ```
 
-### 4. Полный перезапуск backend
+### 3. Полный перезапуск backend
 
 Thick mode инициализируется при старте процесса (`bootstrap_oracle_client()` в `main.py`).
 
-После изменения `connections.json`:
+После изменения `config/connections.json`:
 
 1. Остановите все процессы backend (Ctrl+C; на Windows проверьте, не остались ли лишние `python.exe` после hot-reload).
 2. Запустите uvicorn заново.
 
 Одного hot-reload может быть недостаточно — Oracle client может не переинициализироваться.
 
-### 5. Файлы часовых поясов (`ORA-01804`)
+### 4. Файлы часовых поясов (`ORA-01804`)
 
 При ошибке `ORA-01804: failure to initialize timezone information`:
 
-- **Сначала попробуйте:** оставить `"ora_tzfile": null` в `connections.json`.
+- **Сначала попробуйте:** оставить `"ora_tzfile": null` в `config/app.json`.
 - Значение `v$timezone_file` на **сервере БД** не обязано совпадать с файлами в **локальном** Instant Client. У Client 19 часто есть `timezlrg_32.dat`, а не `timezlrg_1.dat`.
 - Если всё же нужно указать файл — используйте `.dat`, который реально лежит в:
   ```
@@ -230,6 +244,16 @@ Thick mode инициализируется при старте процесса
 
 ## Запуск
 
+Три сценария — выберите под задачу:
+
+| Сценарий | Когда использовать | UI | Backend |
+| -------- | ------------------ | -- | ------- |
+| [Разработка](#разработка-два-терминала) | Активная работа над кодом, hot-reload | `:5173` (Vite) | `:8080` (uvicorn `--reload`) |
+| [Docker](#docker) | Деплой, демо, окружение без Python/Node | `:8080` | в контейнере |
+| [Локальный production](#локальный-production) | Прод без Docker | `:8080` | `:8080` (статика из `frontend/dist`) |
+
+Конфиг для всех сценариев: **`config/app.json`** (глобально) и подключения к БД/LLM (per-user в `data/` через UI или legacy **`config/connections.json`**).
+
 ### Разработка (два терминала)
 
 ```bash
@@ -244,7 +268,74 @@ npm run dev
 
 Откройте [http://localhost:5173](http://localhost:5173)
 
-### Production (один процесс)
+### Docker
+
+Один контейнер собирает frontend и запускает backend на порту **8080**. Подходит для деплоя и демо, когда не нужен hot-reload.
+
+**Мультипользовательский режим:** при первом открытии введите логин. Если пользователя нет — система предложит подтвердить создание (защита от опечаток). У каждого пользователя своё пространство: DTD, пресеты, алиасы БД/LLM. Глобальные настройки Oracle — в `config/app.json`.
+
+**Требования:** Docker и Docker Compose.
+
+1. Подготовьте глобальную конфигурацию:
+
+```bash
+copy config\app.json.example config\app.json
+mkdir data
+```
+
+При первом старте `session_secret` сгенерируется автоматически и сохранится в смонтированный `config/app.json`. На production передайте свой ключ: `SESSION_SECRET` в `docker-compose.yml` или `.env`.
+
+В Docker `localhost` указывает на сам контейнер. Для сервисов на хосте (PostgreSQL, Ollama и т.д.) используйте `host.docker.internal` при настройке алиасов в UI (**Настройки**) или в per-user `connections.json`.
+
+2. Соберите и запустите:
+
+```bash
+docker compose up --build -d
+```
+
+Откройте [http://localhost:8080](http://localhost:8080) и войдите под своим логином.
+
+**Полезные команды:**
+
+```bash
+docker compose logs -f app    # логи
+docker compose down           # остановка
+docker compose up --build     # пересборка после изменений кода
+```
+
+**Тома:** `config/` (глобальные настройки) и `data/` (пользователи, их DTD и пресеты) монтируются с хоста.
+
+**Миграция со старой single-user версии:** при первой регистрации пользователя legacy-данные из корневых `dtd_schemas/`, `presets/`, `mapping_presets/` и `config/connections.json` автоматически копируются в его пространство (один раз).
+
+**Oracle в Docker (без volume):**
+
+1. Скачайте `instantclient-basic-linux.x64-19.31.0.0.0dbru.zip`.
+2. Положите архив в `docker/oracle/` (не распаковывайте).
+3. Пересоберите контейнер:
+   ```bash
+   docker compose build --no-cache
+   docker compose up -d
+   ```
+
+Во время сборки `Dockerfile` автоматически распакует клиент в `/opt/oracle/instantclient`.
+
+В `config/app.json` укажите:
+
+```json
+{
+  "oracle_client_lib_dir": "/opt/oracle/instantclient",
+  "oracle_home": "/opt/oracle/instantclient",
+  "ora_tzfile": null
+}
+```
+
+И добавьте алиас Oracle с `host: "host.docker.internal"` (или именем сервиса в compose-сети).
+
+> Для Docker не указывайте `ora_tzfile` вручную (оставьте `null`) — иначе Instant Client может не найти timezone-файл внутри контейнера.
+
+### Локальный production
+
+Альтернатива Docker: один процесс uvicorn раздаёт собранный frontend. Подходит, когда Docker недоступен.
 
 ```bash
 cd frontend && npm run build
@@ -257,6 +348,7 @@ cd ../backend && uvicorn app.main:app --host 0.0.0.0 --port 8080
 
 ```bash
 cd backend
+pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
@@ -269,8 +361,8 @@ pytest tests/ -v
 | `DPY-3010` / thin mode                   | Oracle 11g без Instant Client          | Установите Instant Client, задайте `oracle_client_lib_dir`, полный перезапуск                        |
 | `Oracle thick mode failed to initialize` | Неверный путь или нет `oci.dll`        | Исправьте `oracle_client_lib_dir`, проверьте наличие `oci.dll`                                       |
 | `ORA-01804`                              | Отсутствует или неверный timezone-файл | Сначала `"ora_tzfile": null`; если задаёте файл — только тот, что есть локально в `oracore\zoneinfo` |
-| `Database alias '…' not found`           | Опечатка или нет `connections.json`    | Скопируйте example, проверьте совпадение алиаса с пресетом                                           |
+| `Database alias '…' not found`           | Опечатка или нет `config/connections.json` | Скопируйте example, проверьте совпадение алиаса с пресетом                                           |
 | DTD пропала после перезапуска            | Пустая `dtd_schemas/`                  | Загрузите снова; папка должна сохраняться между запусками                                            |
 
 
-В логах backend при ошибках есть контекст: алиас, driver, host, усечённый SQL. Для подробностей задайте `"log_level": "DEBUG"` в `connections.json` → `app`.
+В логах backend при ошибках есть контекст: алиас, driver, host, усечённый SQL. Для подробностей задайте `"log_level": "DEBUG"` в `config/app.json` → `app`.

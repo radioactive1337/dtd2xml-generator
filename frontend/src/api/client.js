@@ -4,7 +4,10 @@ import { translateApiError } from '../utils/apiErrors'
 const client = axios.create({
   baseURL: '/api',
   timeout: 120000,
+  withCredentials: true,
 })
+
+let loginRedirectPending = false
 
 client.interceptors.response.use(
   (response) => response,
@@ -20,6 +23,19 @@ client.interceptors.response.use(
     const raw = typeof message === 'string' ? message : JSON.stringify(message)
     const text = translateApiError(raw)
 
+    if (
+      status === 401 &&
+      !url?.includes('/auth/login') &&
+      !url?.includes('/auth/me') &&
+      !loginRedirectPending &&
+      typeof window !== 'undefined' &&
+      !window.location.pathname.startsWith('/login')
+    ) {
+      loginRedirectPending = true
+      const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+      window.location.assign(`/login?redirect=${redirect}`)
+    }
+
     console.error(
       `[API] ${method || 'REQUEST'} ${url || ''} failed` +
         (status ? ` (${status})` : '') +
@@ -27,7 +43,9 @@ client.interceptors.response.use(
       detail && typeof detail !== 'string' ? { detail } : undefined,
     )
 
-    return Promise.reject(new Error(text))
+    const err = new Error(text)
+    err.response = error.response
+    return Promise.reject(err)
   },
 )
 

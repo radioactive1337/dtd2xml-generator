@@ -8,6 +8,7 @@ from typing import Any
 
 from app.core.dtd_models import DTDSchema, ElementDef
 from app.services.llm_service import LLMService
+from app.user_context import UserContext
 
 logger = logging.getLogger(__name__)
 
@@ -158,8 +159,8 @@ def _validate_llm_mappings(
 class FieldMappingService:
     """Orchestrate LLM-based field mapping suggestions."""
 
-    def __init__(self, llm_alias: str = "default") -> None:
-        self.llm = LLMService(alias=llm_alias)
+    def __init__(self, user: UserContext, llm_alias: str = "default") -> None:
+        self.llm = LLMService(user, alias=llm_alias)
 
     async def suggest_mappings(
         self,
@@ -168,7 +169,7 @@ class FieldMappingService:
         columns: list[str],
         existing_pairs: list[dict[str, str]],
     ) -> tuple[list[dict[str, str]], str]:
-        """Return merged field rows and the matcher used: ``llm`` or ``fuzzy``."""
+        """Return merged field rows and the matcher used: ``llm``, ``local``, or ``unavailable``."""
         if target_element not in schema.elements:
             raise ValueError(f"Element '{target_element}' not found in schema")
 
@@ -185,12 +186,13 @@ class FieldMappingService:
         ]
 
         if not cols_to_map:
-            return _merge_mappings_for_columns(kept, [], columns), "fuzzy"
+            return _merge_mappings_for_columns(kept, [], columns), "local"
 
         suggestions: list[dict[str, str]]
-        matcher = "fuzzy"
+        matcher = "local"
+        llm_configured = bool(available_attrs and self.llm.base_url)
 
-        if available_attrs and self.llm.base_url:
+        if llm_configured:
             try:
                 raw = await self.llm.suggest_field_mappings_json(
                     target_element=target_element,
@@ -220,6 +222,7 @@ class FieldMappingService:
                     kept,
                 )
         else:
+            matcher = "unavailable"
             suggestions = suggest_field_mappings_fuzzy(
                 cols_to_map,
                 available_attrs,
@@ -233,11 +236,12 @@ async def suggest_field_mappings(
     schema: DTDSchema,
     target_element: str,
     columns: list[str],
+    user: UserContext,
     existing_pairs: list[dict[str, str]] | None = None,
     llm_alias: str = "default",
 ) -> tuple[list[dict[str, str]], str]:
     """Suggest db_col → xml_attr rows for hybrid mapping UI."""
-    return await FieldMappingService(llm_alias=llm_alias).suggest_mappings(
+    return await FieldMappingService(user, llm_alias=llm_alias).suggest_mappings(
         schema,
         target_element,
         columns,

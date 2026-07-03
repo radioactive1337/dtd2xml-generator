@@ -1,26 +1,10 @@
 """Tests for mapping preset API endpoints."""
 
 import json
-from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app.api.routes import mapping_presets as mapping_presets_routes
-from app.main import app
-
-
-@pytest.fixture(autouse=True)
-def isolated_presets_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    presets_dir = tmp_path / "mapping_presets"
-    monkeypatch.setattr(mapping_presets_routes, "PRESETS_DIR", presets_dir)
-    yield
-
-
-@pytest.fixture
-def client() -> TestClient:
-    return TestClient(app)
-
+from app.user_context import dev_user_context
 
 SAMPLE_PRESET = {
     "name": "Customer mapping",
@@ -53,6 +37,10 @@ def test_save_and_load_mapping_preset(client: TestClient):
 
 
 def test_list_mapping_presets_filters_by_schema(client: TestClient):
+    presets_dir = dev_user_context().mapping_presets_dir
+    for path in presets_dir.glob("*.json"):
+        path.unlink()
+
     client.post("/api/mapping-presets", json=SAMPLE_PRESET)
     client.post(
         "/api/mapping-presets",
@@ -79,8 +67,8 @@ def test_delete_mapping_preset(client: TestClient):
     assert response.status_code == 404
 
 
-def test_load_legacy_dict_fields(client: TestClient, tmp_path: Path):
-    presets_dir = mapping_presets_routes.PRESETS_DIR
+def test_load_legacy_dict_fields(client: TestClient):
+    presets_dir = dev_user_context().mapping_presets_dir
     presets_dir.mkdir(parents=True, exist_ok=True)
     legacy = {
         "name": "Legacy",
