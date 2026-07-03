@@ -169,7 +169,7 @@ class FieldMappingService:
         columns: list[str],
         existing_pairs: list[dict[str, str]],
     ) -> tuple[list[dict[str, str]], str]:
-        """Return merged field rows and the matcher used: ``llm`` or ``fuzzy``."""
+        """Return merged field rows and the matcher used: ``llm``, ``local``, or ``unavailable``."""
         if target_element not in schema.elements:
             raise ValueError(f"Element '{target_element}' not found in schema")
 
@@ -186,12 +186,13 @@ class FieldMappingService:
         ]
 
         if not cols_to_map:
-            return _merge_mappings_for_columns(kept, [], columns), "fuzzy"
+            return _merge_mappings_for_columns(kept, [], columns), "local"
 
         suggestions: list[dict[str, str]]
-        matcher = "fuzzy"
+        matcher = "local"
+        llm_configured = bool(available_attrs and self.llm.base_url)
 
-        if available_attrs and self.llm.base_url:
+        if llm_configured:
             try:
                 raw = await self.llm.suggest_field_mappings_json(
                     target_element=target_element,
@@ -221,6 +222,7 @@ class FieldMappingService:
                     kept,
                 )
         else:
+            matcher = "unavailable"
             suggestions = suggest_field_mappings_fuzzy(
                 cols_to_map,
                 available_attrs,
