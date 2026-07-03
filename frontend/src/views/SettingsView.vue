@@ -86,18 +86,18 @@
     <div v-if="dbFormOpen" class="modal-overlay" @click.self="closeDbForm">
       <div class="card modal">
         <div class="panel-title">{{ dbForm.alias && dbFormEditing ? 'Изменить БД' : 'Новый алиас БД' }}</div>
-        <form @submit.prevent="saveDbForm">
+        <form novalidate @submit.prevent="saveDbForm">
           <label>Алиас</label>
-          <input v-model="dbForm.alias" :disabled="dbFormEditing" required />
+          <input v-model="dbForm.alias" :disabled="dbFormEditing" />
           <label>Драйвер</label>
-          <select v-model="dbForm.driver" required>
+          <select v-model="dbForm.driver">
             <option value="postgresql">postgresql</option>
             <option value="oracle">oracle</option>
           </select>
           <label>Хост</label>
-          <input v-model="dbForm.host" required />
+          <input v-model="dbForm.host" />
           <label>Порт</label>
-          <input v-model.number="dbForm.port" type="number" required />
+          <input v-model.number="dbForm.port" type="number" />
           <label>
             База / service name
             <span v-if="!dbDatabaseRequired" class="label-hint">(необязательно при SID)</span>
@@ -106,9 +106,9 @@
           <label>SID <span class="label-hint">(Oracle, опционально)</span></label>
           <input v-model="dbForm.sid" />
           <label>Пользователь</label>
-          <input v-model="dbForm.user" required />
+          <input v-model="dbForm.user" />
           <label>Пароль{{ dbFormEditing ? ' (оставьте пустым, чтобы не менять)' : '' }}</label>
-          <input v-model="dbForm.password" type="password" :required="!dbFormEditing" />
+          <input v-model="dbForm.password" type="password" />
           <p v-if="dbFormError" class="error-msg">{{ dbFormError }}</p>
           <div class="modal-actions">
             <button type="button" class="btn-secondary" @click="closeDbForm">Отмена</button>
@@ -288,10 +288,22 @@ function closeLlmForm() {
   llmFormOpen.value = false
 }
 
+function validateDbForm() {
+  const f = dbForm.value
+  if (!f.alias?.trim()) return 'Укажите алиас'
+  if (!f.host?.trim()) return 'Укажите хост'
+  if (!f.port) return 'Укажите порт'
+  if (dbDatabaseRequired.value && !f.database?.trim()) return 'Укажите базу / service name'
+  if (!f.user?.trim()) return 'Укажите пользователя'
+  if (!dbFormEditing.value && !f.password) return 'Укажите пароль'
+  return ''
+}
+
 async function saveDbForm() {
   dbFormError.value = ''
-  if (dbDatabaseRequired.value && !dbForm.value.database?.trim()) {
-    dbFormError.value = 'Укажите базу / service name'
+  const validationError = validateDbForm()
+  if (validationError) {
+    dbFormError.value = validationError
     return
   }
   savingForm.value = true
