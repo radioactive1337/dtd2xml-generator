@@ -98,13 +98,19 @@
           <input v-model="dbForm.host" />
           <label>Порт</label>
           <input v-model.number="dbForm.port" type="number" />
-          <label>
-            База / service name
-            <span v-if="!dbDatabaseRequired" class="label-hint">(необязательно при SID)</span>
-          </label>
-          <input v-model="dbForm.database" />
-          <label>SID <span class="label-hint">(Oracle, опционально)</span></label>
-          <input v-model="dbForm.sid" />
+          <template v-if="isOracleDriver(dbForm.driver)">
+            <label>SID <span class="label-hint">(опционально)</span></label>
+            <input v-model="dbForm.sid" autocomplete="off" />
+            <label>
+              База / service name
+              <span v-if="dbForm.sid?.trim()" class="label-hint">(необязательно при SID)</span>
+            </label>
+            <input v-model="dbForm.database" autocomplete="off" />
+          </template>
+          <template v-else>
+            <label>База</label>
+            <input v-model="dbForm.database" />
+          </template>
           <label>Пользователь</label>
           <input v-model="dbForm.user" />
           <label>Пароль{{ dbFormEditing ? ' (оставьте пустым, чтобы не менять)' : '' }}</label>
@@ -143,7 +149,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import {
   getConnections,
   setDefaultLlmAlias,
@@ -191,18 +197,13 @@ const emptyLlmForm = () => ({
   timeout: 120,
 })
 
-const dbForm = ref(emptyDbForm())
+const dbForm = reactive(emptyDbForm())
 const llmForm = ref(emptyLlmForm())
 
 function isOracleDriver(driver) {
-  const d = (driver || '').toLowerCase()
+  const d = String(driver ?? '').toLowerCase().trim()
   return d === 'oracle' || d === 'oracledb'
 }
-
-const dbDatabaseRequired = computed(() => {
-  if (!isOracleDriver(dbForm.value.driver)) return true
-  return !dbForm.value.sid?.trim()
-})
 
 function dbStatus(alias) {
   return dbTests.value[alias] ?? null
@@ -265,9 +266,10 @@ async function saveDefaultLlm() {
 function openDbForm(existing = null) {
   dbFormEditing.value = !!existing
   dbFormError.value = ''
-  dbForm.value = existing
-    ? { ...existing, password: '', sid: existing.sid || '' }
+  const next = existing
+    ? { ...emptyDbForm(), ...existing, password: '', sid: existing.sid || '' }
     : emptyDbForm()
+  Object.assign(dbForm, next)
   dbFormOpen.value = true
 }
 
@@ -289,13 +291,19 @@ function closeLlmForm() {
 }
 
 function validateDbForm() {
-  const f = dbForm.value
-  if (!f.alias?.trim()) return 'Укажите алиас'
-  if (!f.host?.trim()) return 'Укажите хост'
-  if (!f.port) return 'Укажите порт'
-  if (dbDatabaseRequired.value && !f.database?.trim()) return 'Укажите базу / service name'
-  if (!f.user?.trim()) return 'Укажите пользователя'
-  if (!dbFormEditing.value && !f.password) return 'Укажите пароль'
+  const sid = String(dbForm.sid ?? '').trim()
+  const database = String(dbForm.database ?? '').trim()
+
+  if (!dbForm.alias?.trim()) return 'Укажите алиас'
+  if (!dbForm.host?.trim()) return 'Укажите хост'
+  if (!dbForm.port) return 'Укажите порт'
+  if (isOracleDriver(dbForm.driver)) {
+    if (!database && !sid) return 'Укажите базу / service name или SID'
+  } else if (!database) {
+    return 'Укажите базу'
+  }
+  if (!dbForm.user?.trim()) return 'Укажите пользователя'
+  if (!dbFormEditing.value && !dbForm.password) return 'Укажите пароль'
   return ''
 }
 
@@ -309,8 +317,9 @@ async function saveDbForm() {
   savingForm.value = true
   error.value = ''
   try {
-    const payload = { ...dbForm.value }
-    if (!payload.sid) payload.sid = null
+    const payload = { ...dbForm }
+    if (!payload.sid?.trim()) payload.sid = null
+    else payload.sid = payload.sid.trim()
     if (dbFormEditing.value) {
       const { alias, password, ...rest } = payload
       const update = { ...rest }
