@@ -102,13 +102,14 @@
             База / service name
             <span v-if="!dbDatabaseRequired" class="label-hint">(необязательно при SID)</span>
           </label>
-          <input v-model="dbForm.database" :required="dbDatabaseRequired" />
+          <input v-model="dbForm.database" />
           <label>SID <span class="label-hint">(Oracle, опционально)</span></label>
           <input v-model="dbForm.sid" />
           <label>Пользователь</label>
           <input v-model="dbForm.user" required />
           <label>Пароль{{ dbFormEditing ? ' (оставьте пустым, чтобы не менять)' : '' }}</label>
           <input v-model="dbForm.password" type="password" :required="!dbFormEditing" />
+          <p v-if="dbFormError" class="error-msg">{{ dbFormError }}</p>
           <div class="modal-actions">
             <button type="button" class="btn-secondary" @click="closeDbForm">Отмена</button>
             <button type="submit" class="btn-primary" :disabled="savingForm">Сохранить</button>
@@ -169,6 +170,7 @@ const llmFormOpen = ref(false)
 const dbFormEditing = ref(false)
 const llmFormEditing = ref(false)
 const savingForm = ref(false)
+const dbFormError = ref('')
 
 const emptyDbForm = () => ({
   alias: '',
@@ -192,8 +194,13 @@ const emptyLlmForm = () => ({
 const dbForm = ref(emptyDbForm())
 const llmForm = ref(emptyLlmForm())
 
+function isOracleDriver(driver) {
+  const d = (driver || '').toLowerCase()
+  return d === 'oracle' || d === 'oracledb'
+}
+
 const dbDatabaseRequired = computed(() => {
-  if (dbForm.value.driver === 'postgresql') return true
+  if (!isOracleDriver(dbForm.value.driver)) return true
   return !dbForm.value.sid?.trim()
 })
 
@@ -257,6 +264,7 @@ async function saveDefaultLlm() {
 
 function openDbForm(existing = null) {
   dbFormEditing.value = !!existing
+  dbFormError.value = ''
   dbForm.value = existing
     ? { ...existing, password: '', sid: existing.sid || '' }
     : emptyDbForm()
@@ -265,6 +273,7 @@ function openDbForm(existing = null) {
 
 function closeDbForm() {
   dbFormOpen.value = false
+  dbFormError.value = ''
 }
 
 function openLlmForm(existing = null) {
@@ -280,6 +289,11 @@ function closeLlmForm() {
 }
 
 async function saveDbForm() {
+  dbFormError.value = ''
+  if (dbDatabaseRequired.value && !dbForm.value.database?.trim()) {
+    dbFormError.value = 'Укажите базу / service name'
+    return
+  }
   savingForm.value = true
   error.value = ''
   try {
