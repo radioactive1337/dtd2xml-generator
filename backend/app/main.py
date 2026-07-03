@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import Scope
 
 from app.api.routes import config, db, dtd, export, fill, generate, mapping_presets, presets, validate
 from app.auth import routes as auth
@@ -21,6 +22,22 @@ from app.services.db_service import close_db_pools
 from app.services.llm_service import close_llm_http_client
 from app.services.oracle_client import bootstrap_oracle_client
 from app.user_context import UserContext
+
+
+class SPAStaticFiles(StaticFiles):
+    """Static files with index.html fallback for Vue Router history mode."""
+
+    async def get_response(self, path: str, scope: Scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            if scope["method"] not in {"GET", "HEAD"}:
+                raise
+            if "." in path.rsplit("/", 1)[-1]:
+                raise
+            return await super().get_response("index.html", scope)
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -112,7 +129,7 @@ async def config_aliases_legacy(
 
 _frontend_dist = PROJECT_ROOT / "frontend" / "dist"
 if _frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
+    app.mount("/", SPAStaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
 
 
 if __name__ == "__main__":
