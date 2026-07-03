@@ -1,10 +1,8 @@
-# QA XML Generator Tool
+# XML Generator Tool
 
-Локальный QA-инструмент для генерации XML по большим DTD-схемам, заполнения данными из БД и LLM и проверки результата.
+Локальный инструмент для генерации XML по большим DTD-схемам, заполнения данными из БД и LLM и проверки результата.
 
 ## Быстрый старт
-
-Типичный сценарий — за несколько минут получить валидный XML под вашу DTD.
 
 ### 1. Подготовка окружения
 
@@ -80,8 +78,8 @@ npm install
 
 | Файл | Содержимое |
 | ---- | ---------- |
-| **`config/app.json`** | Глобальные настройки: host/port, Oracle Instant Client, `allow_self_registration` |
-| **`config/connections.json`** | Legacy single-user: алиасы БД/LLM с паролями и API-ключами |
+| **`config/app.json`** | Глобальные настройки: host/port, `log_level`, Oracle Instant Client, `allow_self_registration`, `session_secret` |
+| **`config/connections.json`** | Legacy single-user: алиасы БД/LLM с паролями и API-ключами (в мультипользовательском режиме заменяется per-user файлами в `data/`) |
 
 ```bash
 copy config\app.json.example config\app.json
@@ -90,21 +88,29 @@ copy config\connections.json.example config\connections.json
 
 При первом запуске backend допишет в `app.json` сгенерированный **`session_secret`** (подпись cookie-сессий). На production задайте свой ключ через переменную окружения **`SESSION_SECRET`** — тогда секрет не попадёт в файл.
 
-Пример в `config/connections.json.example` настроен для **локального запуска** (`localhost`). Для Docker замените хосты на `host.docker.internal` (см. [Docker](#docker)).
-
-Пример структуры:
+**`config/app.json`** — глобальные настройки. Thick mode для Oracle включается автоматически, если задан `oracle_client_lib_dir` (или `oracle_home`); отдельного флага нет.
 
 ```json
 {
   "app": {
     "host": "0.0.0.0",
     "port": 8080,
-    "log_level": "INFO"
+    "log_level": "INFO",
+    "allow_self_registration": true
   },
-  "oracle_thick_mode": true,
   "oracle_client_lib_dir": "C:\\Oracle\\client19_64\\bin",
   "oracle_home": "C:\\Oracle\\client19_64",
-  "ora_tzfile": null,
+  "ora_tzfile": null
+}
+```
+
+**`config/connections.json`** — алиасы БД и LLM. Секция `app` здесь хранит только `default_llm_alias` (какой LLM использовать по умолчанию при нескольких алиасах). Для локального запуска используйте `localhost`; для Docker — `host.docker.internal` (см. [Docker](#docker)).
+
+```json
+{
+  "app": {
+    "default_llm_alias": null
+  },
   "databases": {
     "PGSQL_DB": {
       "driver": "postgresql",
@@ -192,7 +198,7 @@ Backend использует **python-oracledb**. Есть два режима:
 }
 ```
 
-### 4. Полный перезапуск backend
+### 3. Полный перезапуск backend
 
 Thick mode инициализируется при старте процесса (`bootstrap_oracle_client()` в `main.py`).
 
@@ -203,7 +209,7 @@ Thick mode инициализируется при старте процесса
 
 Одного hot-reload может быть недостаточно — Oracle client может не переинициализироваться.
 
-### 5. Файлы часовых поясов (`ORA-01804`)
+### 4. Файлы часовых поясов (`ORA-01804`)
 
 При ошибке `ORA-01804: failure to initialize timezone information`:
 
@@ -359,4 +365,4 @@ pytest tests/ -v
 | DTD пропала после перезапуска            | Пустая `dtd_schemas/`                  | Загрузите снова; папка должна сохраняться между запусками                                            |
 
 
-В логах backend при ошибках есть контекст: алиас, driver, host, усечённый SQL. Для подробностей задайте `"log_level": "DEBUG"` в `config/connections.json` → `app`.
+В логах backend при ошибках есть контекст: алиас, driver, host, усечённый SQL. Для подробностей задайте `"log_level": "DEBUG"` в `config/app.json` → `app`.
