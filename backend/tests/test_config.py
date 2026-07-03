@@ -144,6 +144,48 @@ def test_app_and_oracle_settings(app_config_file: Path):
     assert get_ora_tzfile() == "timezlrg_1.dat"
 
 
+def test_oracle_client_lib_dir_treats_json_null_as_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    path = config_dir / "app.json"
+    path.write_text(
+        json.dumps(
+            {
+                "app": {"host": "0.0.0.0", "port": 8080},
+                "oracle_client_lib_dir": None,
+                "oracle_home": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("app.config.APP_CONFIG_FILE", path)
+    monkeypatch.setattr("app.config.CONFIG_DIR", config_dir)
+
+    assert get_oracle_client_lib_dir() is None
+
+
+def test_oracle_client_lib_dir_derives_from_linux_oracle_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    client_dir = tmp_path / "instantclient"
+    client_dir.mkdir(parents=True)
+    (client_dir / "libclntsh.so").write_bytes(b"oci")
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    path = config_dir / "app.json"
+    path.write_text(
+        json.dumps({"app": {"host": "0.0.0.0", "port": 8080}, "oracle_home": str(client_dir)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("app.config.APP_CONFIG_FILE", path)
+    monkeypatch.setattr("app.config.CONFIG_DIR", config_dir)
+
+    assert get_oracle_client_lib_dir() == str(client_dir)
+
+
 def test_ensure_app_config_generates_session_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)

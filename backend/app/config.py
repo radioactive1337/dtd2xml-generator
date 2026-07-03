@@ -274,17 +274,37 @@ def has_oracle_databases(user: "UserContext") -> bool:
     )
 
 
+def _optional_config_str(value: Any) -> str | None:
+    """Normalize optional JSON config values; treat null and empty as unset."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == "none":
+        return None
+    return text
+
+
+def _dir_has_oracle_client_lib(directory: Path) -> bool:
+    if not directory.is_dir():
+        return False
+    for name in ("oci.dll", "libclntsh.so"):
+        if (directory / name).is_file():
+            return True
+    return any(directory.glob("libclntsh.so*"))
+
+
 def get_oracle_client_lib_dir() -> str | None:
     raw = _load_raw_app_config()
-    lib_dir = str(raw.get("oracle_client_lib_dir", "")).strip()
+    lib_dir = _optional_config_str(raw.get("oracle_client_lib_dir"))
     if lib_dir:
         return lib_dir
 
-    oracle_home = str(raw.get("oracle_home", "")).strip()
+    oracle_home = _optional_config_str(raw.get("oracle_home"))
     if oracle_home:
-        bin_dir = Path(oracle_home) / "bin"
-        if (bin_dir / "oci.dll").is_file():
-            return str(bin_dir)
+        home = Path(oracle_home)
+        for candidate in (home, home / "bin"):
+            if _dir_has_oracle_client_lib(candidate):
+                return str(candidate)
 
     return None
 

@@ -76,7 +76,7 @@ def resolve_ora_tzfile(oracle_home: Path, ora_tzfile: str | None) -> str | None:
 
     available = list_timezone_files(oracle_home)
     hint = (
-        "Remove ora_tzfile from connections.json to use the client default timezone file, "
+        "Remove ora_tzfile from app.json to use the client default timezone file, "
         "or copy the file from the DB server into oracore\\zoneinfo."
     )
     if available:
@@ -92,7 +92,7 @@ def resolve_ora_tzfile(oracle_home: Path, ora_tzfile: str | None) -> str | None:
 def _missing_client_config_error() -> ValueError:
     return ValueError(
         "Oracle thick mode is required for Oracle 11g. "
-        "Set oracle_client_lib_dir in connections.json."
+        "Set oracle_client_lib_dir in config/app.json on the server and restart the backend."
     )
 
 
@@ -173,7 +173,7 @@ def ensure_oracle_thick_mode(*, required: bool = False) -> None:
         )
         raise RuntimeError(
             "Oracle thick mode failed to initialize. "
-            f"Check oracle_client_lib_dir={lib_dir!r} in connections.json and restart backend."
+            f"Check oracle_client_lib_dir={lib_dir!r} in config/app.json and restart backend."
         )
 
 
@@ -203,7 +203,7 @@ def map_oracle_client_error(exc: Exception) -> ValueError | None:
         if oracledb.is_thin_mode():
             return ValueError(
                 "Oracle 11g requires thick mode. "
-                "Set oracle_client_lib_dir in connections.json "
+                "Set oracle_client_lib_dir in config/app.json "
                 "and restart backend. "
                 f"Original error: {message}"
             )
@@ -221,7 +221,7 @@ def map_oracle_client_error(exc: Exception) -> ValueError | None:
         return ValueError(
             "Oracle Client cannot load timezone files (ORA-01804). "
             f"ORACLE_HOME={oracle_home or '(not set)'}, ORA_TZFILE={ora_tzfile or '(not set)'}. "
-            "Try removing ora_tzfile from connections.json first."
+            "Try removing ora_tzfile from config/app.json first."
             f"{available_hint} "
             f"Original error: {message}"
         )
