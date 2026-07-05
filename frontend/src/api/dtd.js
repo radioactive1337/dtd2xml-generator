@@ -28,7 +28,30 @@ export async function listElements(schemaId) {
   return data
 }
 
+const elementTreeCache = new Map()
+
+function cacheKey(schemaId, elementName) {
+  return `${schemaId}:${elementName}`
+}
+
+/** Drop cached element trees for one schema or the entire session. */
+export function clearElementTreeCache(schemaId = null) {
+  if (!schemaId) {
+    elementTreeCache.clear()
+    return
+  }
+  const prefix = `${schemaId}:`
+  for (const key of elementTreeCache.keys()) {
+    if (key.startsWith(prefix)) elementTreeCache.delete(key)
+  }
+}
+
 export async function getElementTree(schemaId, elementName) {
+  const key = cacheKey(schemaId, elementName)
+  if (elementTreeCache.has(key)) {
+    return elementTreeCache.get(key)
+  }
   const { data } = await client.get(`/dtd/${schemaId}/elements/${elementName}/tree`)
+  elementTreeCache.set(key, data)
   return data
 }

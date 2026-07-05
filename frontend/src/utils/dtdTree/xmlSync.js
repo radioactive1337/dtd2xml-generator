@@ -1,4 +1,4 @@
-import { normalizeTreePath } from '../xmlPaths'
+import { normalizeElementPathsForTreeSync, normalizeTreePath } from '../xmlPaths'
 import {
   applyLoadedChildren,
   findChoiceAlternative,
@@ -157,6 +157,7 @@ export async function ensureTreeLoadedForElementPaths(
   getElementTree,
   isStale,
   modelOptions,
+  selections = new Map(),
 ) {
   if (!treeRoot || isStale()) return
   const pathSet = new Set(elementPaths)
@@ -175,6 +176,10 @@ export async function ensureTreeLoadedForElementPaths(
       node.expanded = true
     }
     for (const child of node.children || []) {
+      if (node._isChoiceGroup) {
+        const selectedAltPath = selections.get(node.path)
+        if (selectedAltPath && child.path !== selectedAltPath) continue
+      }
       await walkLoad(child)
     }
   }
@@ -190,9 +195,8 @@ export async function buildCheckedPathsFromElementPaths({
   preferPaths,
   modelOptions,
 }) {
-  const elPathSet = new Set(elementPaths)
-  await ensureTreeLoadedForElementPaths(elementPaths, treeRoot, getElementTree, isStale, modelOptions)
-  if (isStale()) return null
+  const syncPaths = normalizeElementPathsForTreeSync(elementPaths)
+  const elPathSet = new Set(syncPaths)
 
   let choiceSelections = resolveChoiceSelectionsFromXml(
     treeRoot,
@@ -201,10 +205,24 @@ export async function buildCheckedPathsFromElementPaths({
     preferPaths,
   )
 
-  const sortedPaths = [...elPathSet].sort(
-    (a, b) => a.split('.').length - b.split('.').length,
+  await ensureTreeLoadedForElementPaths(
+    syncPaths,
+    treeRoot,
+    getElementTree,
+    isStale,
+    modelOptions,
+    choiceSelections,
   )
-  for (const elPath of sortedPaths) {
+  if (isStale()) return null
+
+  choiceSelections = resolveChoiceSelectionsFromXml(
+    treeRoot,
+    elPathSet,
+    new Map(),
+    preferPaths,
+  )
+
+  for (const elPath of syncPaths) {
     await ensureElementPathLoaded(
       elPath,
       treeRoot,
@@ -212,12 +230,6 @@ export async function buildCheckedPathsFromElementPaths({
       isStale,
       choiceSelections,
       modelOptions,
-    )
-    choiceSelections = resolveChoiceSelectionsFromXml(
-      treeRoot,
-      elPathSet,
-      new Map(),
-      preferPaths,
     )
   }
   if (isStale()) return null
@@ -230,15 +242,9 @@ export async function buildCheckedPathsFromElementPaths({
   )
 
   const nextChecked = new Set()
-  for (const elPath of elPathSet) {
-    const node = await ensureElementPathLoaded(
-      elPath,
-      treeRoot,
-      getElementTree,
-      isStale,
-      choiceSelections,
-      modelOptions,
-    )
+  for (const elPath of syncPaths) {
+    const candidates = findNodesForElementPath(elPath, treeRoot)
+    const node = pickNodeForElementPath(candidates, choiceSelections, treeRoot)
     if (!node || !isNodeUnderChoiceSelections(node, choiceSelections, treeRoot)) continue
     nextChecked.add(node.path)
     addCheckedAncestors(nextChecked, node, treeRoot)

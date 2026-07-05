@@ -1,7 +1,7 @@
 import { ref, watch, onBeforeUnmount, onMounted, nextTick } from 'vue'
-import { getElementTree } from '../api/dtd'
+import { getElementTree, clearElementTreeCache } from '../api/dtd'
 import { listPresets, savePreset as apiSavePreset, loadPreset as apiLoadPreset } from '../api/presets'
-import { inferRootFromElementPaths } from '../utils/xmlPaths'
+import { inferRootFromElementPaths, normalizeElementPathsForTreeSync } from '../utils/xmlPaths'
 import { findPathsToElement } from '../utils/dtdTreeNavigation'
 import {
   applyLoadedChildren,
@@ -97,7 +97,8 @@ export function useDtdTree(props, emit) {
 
   watch(
     () => props.schemaId,
-    async (id) => {
+    async (id, oldId) => {
+      if (oldId) clearElementTreeCache(oldId)
       if (!id) return
       loadPresetName.value = ''
       await refreshPresets()
@@ -272,7 +273,13 @@ export function useDtdTree(props, emit) {
   async function applyElementPathsToTree(elementPaths, seq = loadSeq) {
     if (!treeRoot.value || !elementPaths?.length || isStale(seq)) return
 
-    beginLoad('Синхронизация выбора из XML…')
+    const syncPaths = normalizeElementPathsForTreeSync(elementPaths)
+    const count = syncPaths.length
+    beginLoad(
+      count === 1
+        ? 'Синхронизация 1 структурного пути…'
+        : `Синхронизация ${count} структурных путей…`,
+    )
     try {
       const getTree = (elementName) => getElementTree(props.schemaId, elementName)
       const nextChecked = await buildCheckedPathsFromElementPaths({

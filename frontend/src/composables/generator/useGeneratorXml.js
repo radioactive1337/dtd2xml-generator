@@ -22,7 +22,6 @@ export function useGeneratorXml({
 
   let ignoreNextXmlWatch = false
   let skipModeSync = false
-  let xmlSyncTimer = null
 
   const availableElementPaths = computed(() => {
     const text = (liveXmlText.value || xmlText.value || '').trim()
@@ -58,8 +57,6 @@ export function useGeneratorXml({
   }
 
   async function setProgrammaticXml(text, { dirty = false } = {}) {
-    clearTimeout(xmlSyncTimer)
-    xmlSyncTimer = null
     ignoreNextXmlWatch = true
     const xml = text || ''
     liveXmlText.value = xml
@@ -70,22 +67,11 @@ export function useGeneratorXml({
     ignoreNextXmlWatch = false
   }
 
-  function scheduleXmlSync(text, delay = 150) {
-    if (!schemaId.value || generating.value || filling.value || ignoreNextXmlWatch) return
-    clearTimeout(xmlSyncTimer)
-    const snapshot = text ?? getEditorXmlText()
-    xmlSyncTimer = setTimeout(() => {
-      if (generating.value || filling.value || ignoreNextXmlWatch) return
-      syncFromPastedXml(snapshot || getEditorXmlText())
-    }, delay)
-  }
-
   function onEditorContentChange(text) {
     if (ignoreNextXmlWatch || generating.value || filling.value) return
     liveXmlText.value = text || ''
     xmlText.value = text || ''
     xmlDirty.value = true
-    scheduleXmlSync(text)
   }
 
   async function onXmlFileImported({ text }) {
@@ -135,8 +121,6 @@ export function useGeneratorXml({
         await nextTick()
       }
       const treeRef = await waitForDtdTreeRef()
-      await treeRef?.applyXmlElementPaths(elementPaths)
-      await nextTick()
       await treeRef?.applyXmlElementPaths(elementPaths)
     } catch (e) {
       xmlSyncHint.value = e.message || 'Не удалось разобрать пути элементов в XML'
@@ -197,9 +181,7 @@ export function useGeneratorXml({
     xmlSyncHint.value = ''
   }
 
-  function dispose() {
-    clearTimeout(xmlSyncTimer)
-  }
+  function dispose() {}
 
   return {
     xmlText,

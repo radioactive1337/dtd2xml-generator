@@ -96,3 +96,17 @@ export function inferRootFromElementPaths(paths) {
   const first = paths[0]
   return first.includes('.') ? first.split('.')[0] : first
 }
+
+/**
+ * Collapse indexed XML instance paths to structural DTD paths for tree sync.
+ * Strips sibling [N] indices and UI-only group-N segments, dedupes, sorts shallow→deep.
+ */
+export function normalizeElementPathsForTreeSync(paths) {
+  const normalized = new Set()
+  for (const path of paths || []) {
+    if (!path) continue
+    const segments = path.split('.').map(stripPathIndex)
+    normalized.add(normalizeTreePath(segments.join('.')))
+  }
+  return [...normalized].sort((a, b) => a.split('.').length - b.split('.').length)
+}
