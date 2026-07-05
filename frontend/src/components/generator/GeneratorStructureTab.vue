@@ -5,6 +5,7 @@
       <ElementPicker
         :model-value="rootElement"
         :elements="elements"
+        :element-docs="elementDocs"
         placeholder="Имя элемента (введите или выберите из списка)"
         @update:model-value="$emit('update:rootElement', $event)"
       />
@@ -41,6 +42,7 @@
         <ElementPicker
           v-model="treeSearchQuery"
           :elements="elements"
+          :element-docs="elementDocs"
           placeholder="Имя элемента (введите или выберите из списка)"
           @confirm="onTreeSearch"
         />
@@ -50,6 +52,7 @@
         ref="dtdTreeRef"
         :schema-id="schemaId"
         :root-element="rootElement"
+        :element-docs="elementDocs"
         @update:paths="$emit('update:customPaths', $event)"
         @update:root-element="$emit('update:rootElement', $event)"
       />
@@ -67,6 +70,7 @@ const props = defineProps({
   schemaId: { type: String, required: true },
   rootElement: { type: String, default: '' },
   elements: { type: Array, default: () => [] },
+  elementDocs: { type: Object, default: () => ({}) },
   mode: { type: String, default: 'minimal' },
   repeatCount: { type: Number, default: 1 },
 })

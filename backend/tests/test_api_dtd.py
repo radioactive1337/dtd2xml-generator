@@ -57,6 +57,9 @@ def test_list_elements(client: TestClient):
     elements = response.json()
     names = [e["name"] for e in elements]
     assert "PayDoc" in names
+    paydoc = next(e for e in elements if e["name"] == "PayDoc")
+    assert "Основной корневой элемент" in paydoc["doc"]
+    assert paydoc["attribute_docs"].get("kladr") == "код КЛАДР"
 
 
 def test_get_element_detail(client: TestClient):

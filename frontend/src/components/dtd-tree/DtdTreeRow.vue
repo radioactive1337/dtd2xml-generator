@@ -17,7 +17,14 @@
       role="checkbox"
       @click="$emit('toggle-check', item.path)"
     />
+    <DocTooltip v-if="nodeDoc" :text="nodeDoc" class="node-name-wrap">
+      <span
+        class="node-name"
+        :class="{ required: item.required, 'group-expr': item.isGroupLabel, 'has-doc': nodeDoc }"
+      >{{ item.displayName }}</span>
+    </DocTooltip>
     <span
+      v-else
       class="node-name"
       :class="{ required: item.required, 'group-expr': item.isGroupLabel }"
       :title="item.displayName"
@@ -27,12 +34,21 @@
 </template>
 
 <script setup>
-defineProps({
+import { computed } from 'vue'
+import DocTooltip from '../DocTooltip.vue'
+
+const props = defineProps({
   item: { type: Object, required: true },
   highlightedPath: { type: String, default: null },
+  elementDocs: { type: Object, default: () => ({}) },
 })
 
 defineEmits(['toggle-expand', 'toggle-check'])
+
+const nodeDoc = computed(() => {
+  if (props.item.isGroupLabel) return ''
+  return props.elementDocs[props.item.name] || ''
+})
 </script>
 
 <style scoped>
@@ -125,13 +141,23 @@ defineEmits(['toggle-expand', 'toggle-check'])
   cursor: default;
 }
 
+.node-name-wrap {
+  flex: 1;
+  min-width: 0;
+  margin-right: 4px;
+}
+
 .node-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-right: 4px;
+}
+
+.node-name.has-doc {
+  border-bottom: 1px dotted color-mix(in srgb, var(--text-muted) 50%, transparent);
+  cursor: help;
 }
 
 .node-name.required { font-weight: 600; }

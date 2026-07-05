@@ -17,6 +17,7 @@
       @keydown="onKeydown"
     />
     <p v-if="error" class="picker-error">{{ error }}</p>
+    <p v-else-if="selectedDoc" class="picker-doc">{{ selectedDoc }}</p>
     <Teleport to="body">
       <div
         v-if="isOpen"
@@ -37,7 +38,8 @@
             :aria-selected="i === highlightedIndex"
             @mousedown.prevent="selectElement(el)"
           >
-            {{ el }}
+            <span class="picker-option-name">{{ el }}</span>
+            <span v-if="docFor(el)" class="picker-option-doc">{{ docFor(el) }}</span>
           </li>
         </ul>
         <p class="picker-counter">{{ displayed.matches.length }} из {{ displayed.total }}</p>
@@ -54,6 +56,7 @@ import { filterElements, resolveElementName } from '../utils/elementFilter'
 const props = defineProps({
   modelValue: { type: String, default: '' },
   elements: { type: Array, default: () => [] },
+  elementDocs: { type: Object, default: () => ({}) },
   placeholder: { type: String, default: '' },
   invalid: { type: Boolean, default: false },
   error: { type: String, default: '' },
@@ -70,6 +73,15 @@ const dropdownStyle = ref({})
 let closeTimer = null
 
 const displayed = computed(() => filterElements(props.elements, props.modelValue))
+
+const selectedDoc = computed(() => {
+  const resolved = resolveElementName(props.modelValue, props.elements)
+  return resolved ? docFor(resolved) : ''
+})
+
+function docFor(name) {
+  return props.elementDocs[name] || ''
+}
 
 watch(
   () => props.modelValue,
@@ -236,6 +248,13 @@ function onKeydown(event) {
   margin: 4px 0 0;
 }
 
+.picker-doc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 4px 0 0;
+  line-height: 1.4;
+}
+
 .picker-dropdown {
   position: fixed;
   z-index: 200;
@@ -262,6 +281,23 @@ function onKeydown(event) {
   font-size: 13px;
   cursor: pointer;
   color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.picker-option-name {
+  font-size: 13px;
+}
+
+.picker-option-doc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .picker-option.highlighted,

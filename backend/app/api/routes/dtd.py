@@ -226,6 +226,7 @@ class ElementSummary(BaseModel):
     content_raw: str
     attributes: list[str]
     required_attributes: list[str]
+    attribute_docs: dict[str, str] = {}
 
 
 class SchemaResponse(BaseModel):
@@ -252,6 +253,9 @@ def _element_to_summary(elem: ElementDef) -> ElementSummary:
         content_raw=elem.content_raw,
         attributes=list(elem.attributes.keys()),
         required_attributes=required,
+        attribute_docs={
+            name: attr.doc for name, attr in elem.attributes.items() if attr.doc
+        },
     )
 
 

@@ -22,6 +22,7 @@
           :key="item.id"
           :item="item"
           :highlighted-path="highlightedPath"
+          :element-docs="elementDocs"
           @toggle-expand="toggleExpand"
           @toggle-check="toggleCheck"
         />
@@ -53,6 +54,7 @@ import { useDtdTree } from '../composables/useDtdTree'
 const props = defineProps({
   schemaId: { type: String, required: true },
   rootElement: { type: String, default: '' },
+  elementDocs: { type: Object, default: () => ({}) },
 })
 
 const emit = defineEmits(['update:paths', 'update:rootElement'])

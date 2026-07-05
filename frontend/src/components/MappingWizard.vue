@@ -26,9 +26,11 @@
           <ElementPicker
             v-model="draft.target_element"
             :elements="elements"
+            :element-docs="elementDocs"
             placeholder="Имя элемента (введите или выберите из списка)"
             @update:model-value="onTargetElementChange"
           />
+          <p v-if="targetElementDoc" class="wizard-doc">{{ targetElementDoc }}</p>
           <p class="wizard-hint">Выберите XML-элемент, атрибуты которого будут заполнены из SQL.</p>
         </div>
 
@@ -116,20 +118,33 @@
             </button>
           </div>
           <p v-if="autoMapHint" class="wizard-hint">{{ autoMapHint }}</p>
-          <div v-for="(field, fi) in draft.fields" :key="fi" class="field-row">
-            <input
-              v-model="field.db_col"
-              class="field-input"
-              placeholder="Столбец БД"
-            />
-            <span class="field-arrow">→</span>
-            <input
-              v-model="field.xml_attr"
-              class="field-input"
-              :list="'wizard-attrs-list'"
-              placeholder="Атрибут XML"
-            />
-            <button class="btn-icon-remove" title="Удалить" @click="removeField(fi)">×</button>
+          <div v-if="targetAttributeDocEntries.length" class="attr-docs-panel">
+            <p class="attr-docs-title">Документация атрибутов DTD</p>
+            <ul class="attr-docs-list">
+              <li v-for="entry in targetAttributeDocEntries" :key="entry.name">
+                <code>{{ entry.name }}</code>
+                <span>{{ entry.doc }}</span>
+              </li>
+            </ul>
+          </div>
+          <div v-for="(field, fi) in draft.fields" :key="fi" class="field-block">
+            <div class="field-row">
+              <input
+                v-model="field.db_col"
+                class="field-input"
+                placeholder="Столбец БД"
+              />
+              <span class="field-arrow">→</span>
+              <input
+                v-model="field.xml_attr"
+                class="field-input"
+                :list="'wizard-attrs-list'"
+                :title="attributeDoc(field.xml_attr)"
+                placeholder="Атрибут XML"
+              />
+              <button class="btn-icon-remove" title="Удалить" @click="removeField(fi)">×</button>
+            </div>
+            <p v-if="attributeDoc(field.xml_attr)" class="field-doc">{{ attributeDoc(field.xml_attr) }}</p>
           </div>
           <datalist id="wizard-attrs-list">
             <option v-for="attr in xmlAttrs" :key="attr" :value="attr" />
@@ -209,6 +224,8 @@ const props = defineProps({
   schemaId: { type: String, default: '' },
   xmlText: { type: String, default: '' },
   elements: { type: Array, default: () => [] },
+  elementDocs: { type: Object, default: () => ({}) },
+  elementAttributeDocs: { type: Object, default: () => ({}) },
   elementAttributes: { type: Object, default: () => ({}) },
   dbAliases: { type: Array, default: () => [] },
   llmAlias: { type: String, default: '' },
@@ -259,6 +276,27 @@ const xmlAttrs = computed(() => {
   const attrs = el ? props.elementAttributes[el] : null
   return attrs?.length ? attrs : []
 })
+
+const targetElementDoc = computed(() => {
+  const el = draft.value.target_element?.trim()
+  return el ? props.elementDocs[el] || '' : ''
+})
+
+const targetAttributeDocEntries = computed(() => {
+  const el = draft.value.target_element?.trim()
+  if (!el) return []
+  const docs = props.elementAttributeDocs[el]
+  if (!docs) return []
+  return Object.entries(docs)
+    .map(([name, doc]) => ({ name, doc }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+})
+
+function attributeDoc(attrName) {
+  const el = draft.value.target_element?.trim()
+  if (!el || !attrName?.trim()) return ''
+  return props.elementAttributeDocs[el]?.[attrName.trim()] || ''
+}
 
 const filledFields = computed(() =>
   draft.value.fields.filter((f) => f.db_col && f.xml_attr),
@@ -668,10 +706,76 @@ function finish() {
   color: var(--warning);
 }
 
+.field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .field-row {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.field-doc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+  margin: 0 0 4px;
+  padding-left: 2px;
+}
+
+.wizard-doc {
+  font-size: 12px;
+  color: var(--text);
+  margin: 0;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  line-height: 1.45;
+}
+
+.attr-docs-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  background: var(--surface2);
+}
+
+.attr-docs-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 0 0 6px;
+}
+
+.attr-docs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.attr-docs-list li {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.attr-docs-list code {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.attr-docs-list span {
+  color: var(--text-muted);
 }
 
 .field-input {

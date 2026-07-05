@@ -8,6 +8,8 @@ export function useGeneratorSchema() {
   const dtdMeta = ref({ fileName: '', elementCount: 0 })
   const elements = ref([])
   const elementAttributes = ref({})
+  const elementDocs = ref({})
+  const elementAttributeDocs = ref({})
   const rootElement = ref('')
   const mode = ref('minimal')
   const repeatCount = ref(1)
@@ -45,8 +47,18 @@ export function useGeneratorSchema() {
     try {
       const summaries = await listElements(result.schema_id)
       elementAttributes.value = Object.fromEntries(summaries.map((s) => [s.name, s.attributes]))
+      elementDocs.value = Object.fromEntries(
+        summaries.filter((s) => s.doc).map((s) => [s.name, s.doc]),
+      )
+      elementAttributeDocs.value = Object.fromEntries(
+        summaries
+          .filter((s) => s.attribute_docs && Object.keys(s.attribute_docs).length)
+          .map((s) => [s.name, s.attribute_docs]),
+      )
     } catch {
       elementAttributes.value = {}
+      elementDocs.value = {}
+      elementAttributeDocs.value = {}
     }
   }
 
@@ -55,6 +67,8 @@ export function useGeneratorSchema() {
     dtdMeta,
     elements,
     elementAttributes,
+    elementDocs,
+    elementAttributeDocs,
     rootElement,
     mode,
     repeatCount,

@@ -33,6 +33,7 @@
             ref="structureTabRef"
             :schema-id="schemaId"
             :elements="elements"
+            :element-docs="elementDocs"
             v-model:root-element="rootElement"
             v-model:mode="mode"
             v-model:repeat-count="repeatCount"
@@ -102,6 +103,8 @@
         :schema-id="schemaId"
         :xml-text="liveXmlText || xmlText"
         :elements="elements"
+        :element-docs="elementDocs"
+        :element-attribute-docs="elementAttributeDocs"
         :element-attributes="elementAttributes"
         :db-aliases="dbAliases"
         :llm-alias="llmAlias"
@@ -149,6 +152,8 @@ const {
   dtdMeta,
   elementCountLabel,
   elements,
+  elementDocs,
+  elementAttributeDocs,
   elementAttributes,
   rootElement,
   mode,
