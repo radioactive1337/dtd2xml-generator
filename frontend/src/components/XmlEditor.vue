@@ -42,6 +42,7 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import loader from '@monaco-editor/loader'
 import { registerXmlFormatter } from '../utils/formatXml'
+import { readXmlFileAsText } from '../utils/readXmlFile'
 import { useTheme } from '../composables/useTheme'
 
 const props = defineProps({
@@ -165,15 +166,6 @@ function triggerImport() {
   fileInput.value?.click()
 }
 
-function readFileAsText(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result ?? ''))
-    reader.onerror = () => reject(new Error('Не удалось прочитать файл'))
-    reader.readAsText(file, 'UTF-8')
-  })
-}
-
 async function onFileSelect(e) {
   const file = e.target.files?.[0]
   e.target.value = ''
@@ -181,7 +173,7 @@ async function onFileSelect(e) {
 
   importError.value = ''
   try {
-    const text = await readFileAsText(file)
+    const text = await readXmlFileAsText(file)
     if (!text.trim()) {
       importError.value = 'Файл пуст'
       return
