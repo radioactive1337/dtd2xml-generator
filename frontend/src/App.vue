@@ -6,19 +6,21 @@
         <span class="logo-text">Генератор XML</span>
       </div>
       <nav class="nav">
-        <router-link to="/" class="nav-link">Генератор</router-link>
-        <router-link to="/settings" class="nav-link">Настройки</router-link>
+        <router-link to="/" class="header-btn">Генератор</router-link>
+        <router-link to="/settings" class="header-btn">Настройки</router-link>
         <span v-if="user" class="user-badge" :title="user.display_name">{{ user.display_name }}</span>
         <button
           v-if="user"
-          class="btn-secondary btn-logout"
+          type="button"
+          class="header-btn"
           title="Сменить пользователя"
           @click="handleLogout"
         >
           Выйти
         </button>
         <button
-          class="theme-toggle"
+          type="button"
+          class="header-btn header-btn--icon"
           :title="isDark ? 'Светлая тема' : 'Тёмная тема'"
           :aria-label="isDark ? 'Включить светлую тему' : 'Включить тёмную тему'"
           @click="toggleTheme"
@@ -98,60 +100,53 @@ async function handleLogout() {
   gap: 8px;
 }
 
-.nav-link {
-  color: var(--text-muted);
-  text-decoration: none;
-  padding: 6px 14px;
-  border-radius: var(--radius);
-  font-size: 14px;
-  transition: all 0.15s;
-}
-
-.nav-link:hover,
-.nav-link.router-link-active {
-  color: var(--text);
-  background: var(--surface2);
-}
-
-.user-badge {
-  font-size: 13px;
-  color: var(--text-muted);
-  padding: 4px 10px;
-  background: var(--surface2);
-  border-radius: var(--radius);
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.btn-logout {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
-.theme-toggle {
-  display: flex;
+.header-btn {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  background: transparent;
-  color: var(--text-muted);
+  min-height: 34px;
+  padding: 6px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  transition: all 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
-.theme-toggle:hover {
-  color: var(--text);
-  background: var(--surface2);
+.header-btn:hover,
+.header-btn.router-link-active {
+  background: var(--border);
+}
+
+.header-btn--icon {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
 }
 
 .theme-icon {
   font-size: 16px;
   line-height: 1;
+}
+
+.user-badge {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 6px 12px;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-main {
