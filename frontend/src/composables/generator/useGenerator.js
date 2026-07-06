@@ -133,6 +133,15 @@ export function useGenerator() {
     if (id) xmlLibrary.refreshPersonalDocuments(id)
   })
 
+  watch(tabs.activeTab, (tab) => {
+    if (tab === 'library') {
+      xmlLibrary.refreshSharedCategories()
+      if (schema.schemaId.value) {
+        xmlLibrary.refreshPersonalDocuments(schema.schemaId.value)
+      }
+    }
+  })
+
   const actions = useGeneratorActions({
     schemaId: schema.schemaId,
     rootElement: schema.rootElement,

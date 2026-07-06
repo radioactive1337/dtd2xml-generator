@@ -13,13 +13,16 @@ def reference_tree(tmp_path: Path) -> Path:
     root = tmp_path / "xml-library"
     add_card = root / "add-card"
     add_card.mkdir(parents=True)
-    (add_card / "add-card.txt").write_text("<root>add-card</root>", encoding="utf-8")
+    (add_card / "add-card.txt").write_text("<AddCard>add-card</AddCard>", encoding="utf-8")
 
     free_doc = root / "free-document"
     free_doc.mkdir(parents=True)
     (
         free_doc / "free-document_ПП_c_диплинком_.txt"
-    ).write_text("<root>pp</root>", encoding="utf-8")
+    ).write_text("<PayDoc>pp</PayDoc>", encoding="utf-8")
+
+    (root / ".git").mkdir()
+    (root / "empty-dir").mkdir()
 
     return root
 
@@ -44,6 +47,12 @@ def test_list_categories(reference_tree: Path):
     assert names == {"add-card", "free-document"}
     free = next(c for c in categories if c.name == "free-document")
     assert free.document_count == 1
+    assert free.root_element == "PayDoc"
+
+
+def test_list_categories_filter_by_root_element(reference_tree: Path):
+    categories = svc.list_categories(reference_tree, root_element="PayDoc")
+    assert [c.name for c in categories] == ["free-document"]
 
 
 def test_list_documents(reference_tree: Path):
@@ -58,7 +67,7 @@ def test_load_document(reference_tree: Path):
         "free-document",
         "free-document_ПП_c_диплинком_",
     )
-    assert entry.xml_text == "<root>pp</root>"
+    assert entry.xml_text == "<PayDoc>pp</PayDoc>"
     assert entry.title == "ПП c диплинком"
 
 

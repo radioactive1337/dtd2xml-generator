@@ -78,6 +78,14 @@
             :xml-sync-hint="xmlSyncHint"
             :history="generationHistory"
             :max-entries="historyMaxEntries"
+            @go-to-error="goToValidationError"
+            @restore="restoreFromHistory"
+            @remove="removeHistoryEntry"
+            @clear-history="clearGenerationHistory"
+          />
+
+          <GeneratorLibraryTab
+            v-show="activeTab === 'library'"
             v-model:library-active-scope="libraryActiveScope"
             :shared-categories="sharedCategories"
             :personal-documents="personalDocuments"
@@ -88,10 +96,9 @@
             :can-save-library-document="canSaveLibraryDocument"
             :category-documents="categoryDocuments"
             :loading-category="loadingCategory"
-            @go-to-error="goToValidationError"
-            @restore="restoreFromHistory"
-            @remove="removeHistoryEntry"
-            @clear-history="clearGenerationHistory"
+            :elements="elements"
+            :element-docs="elementDocs"
+            :root-element="rootElement"
             @library-sync="handleLibrarySync"
             @library-expand-category="handleLibraryExpandCategory"
             @library-open-shared="handleLibraryOpenShared"
@@ -160,6 +167,7 @@ import GeneratorLeftTabs from '../components/generator/GeneratorLeftTabs.vue'
 import GeneratorStructureTab from '../components/generator/GeneratorStructureTab.vue'
 import GeneratorDataTab from '../components/generator/GeneratorDataTab.vue'
 import GeneratorResultsTab from '../components/generator/GeneratorResultsTab.vue'
+import GeneratorLibraryTab from '../components/generator/GeneratorLibraryTab.vue'
 import GeneratorActionFooter from '../components/generator/GeneratorActionFooter.vue'
 import { useGenerator } from '../composables/generator/useGenerator'
 

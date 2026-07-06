@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 from fastapi import HTTPException
 
@@ -15,6 +16,7 @@ _CATEGORY_RE = re.compile(r"^[\w\-.]+$")
 class CategorySummary:
     name: str
     document_count: int
+    root_element: str | None = None
 
 
 @dataclass(frozen=True)
@@ -66,15 +68,63 @@ def _resolve_document_path(root: Path, category: str, doc_id: str) -> Path:
     return path
 
 
-def list_categories(root: Path) -> list[CategorySummary]:
+def _normalize_element_key(text: str) -> str:
+    return re.sub(r"[\s_\-]+", "", (text or "").lower())
+
+
+def _peek_root_element(category_dir: Path) -> str | None:
+    for path in sorted(category_dir.glob("*.txt")):
+        if not path.is_file():
+            continue
+        try:
+            root = ET.fromstring(path.read_text(encoding="utf-8"))
+        except ET.ParseError:
+            continue
+        tag = root.tag
+        if "}" in tag:
+            tag = tag.split("}", 1)[1]
+        return tag or None
+    return None
+
+
+def _is_reference_category_dir(entry: Path) -> bool:
+    if not entry.is_dir():
+        return False
+    if entry.name.startswith("."):
+        return False
+    return any(path.is_file() for path in entry.glob("*.txt"))
+
+
+def list_categories(
+    root: Path,
+    *,
+    root_element: str | None = None,
+) -> list[CategorySummary]:
     if not root.is_dir():
         return []
+    filter_key = _normalize_element_key(root_element) if root_element else ""
     categories: list[CategorySummary] = []
     for entry in sorted(root.iterdir()):
-        if not entry.is_dir():
+        if not _is_reference_category_dir(entry):
             continue
         count = sum(1 for f in entry.glob("*.txt") if f.is_file())
-        categories.append(CategorySummary(name=entry.name, document_count=count))
+        peeked = _peek_root_element(entry)
+        if filter_key:
+            candidate_keys = {
+                _normalize_element_key(peeked or ""),
+                _normalize_element_key(entry.name),
+            }
+            if filter_key not in candidate_keys and not any(
+                filter_key in key or key in filter_key for key in candidate_keys if key
+            ):
+                continue
+        categories.append(
+            CategorySummary(
+                name=entry.name,
+                document_count=count,
+                root_element=peeked,
+            )
+        )
     return categories
 
 

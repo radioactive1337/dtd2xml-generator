@@ -43,6 +43,7 @@ class SyncResponse(BaseModel):
 class CategoryResponse(BaseModel):
     name: str
     document_count: int
+    root_element: str | None = None
 
 
 class DocumentSummaryResponse(BaseModel):
@@ -152,12 +153,17 @@ async def shared_sync(
 
 @router.get("/shared/categories", response_model=list[CategoryResponse])
 async def list_shared_categories(
+    root_element: str | None = Query(default=None),
     _user: UserContext = Depends(get_current_user),
 ) -> list[CategoryResponse]:
     root = _require_root()
     return [
-        CategoryResponse(name=c.name, document_count=c.document_count)
-        for c in ref_service.list_categories(root)
+        CategoryResponse(
+            name=c.name,
+            document_count=c.document_count,
+            root_element=c.root_element,
+        )
+        for c in ref_service.list_categories(root, root_element=root_element)
     ]
 
 

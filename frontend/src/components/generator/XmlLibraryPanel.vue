@@ -1,7 +1,6 @@
 <template>
   <section class="library-section">
     <div class="library-header">
-      <h3 class="library-title">Библиотека XML</h3>
       <div class="library-tabs" role="tablist">
         <button
           type="button"
@@ -49,8 +48,23 @@
         Каталог эталонов пуст. Нажмите «Обновить из Git» для первой загрузки.
       </div>
 
-      <ul v-if="sharedCategories.length" class="category-list">
-        <li v-for="cat in sharedCategories" :key="cat.name" class="category-item">
+      <div v-if="syncStatus?.enabled" class="field category-search-field">
+        <label>Корневой элемент</label>
+        <ElementPicker
+          v-model="categoryRootFilter"
+          :elements="pickerElements"
+          :element-docs="elementDocs"
+          :show-selected-doc="false"
+          placeholder="Имя элемента (введите или выберите из списка)"
+          @confirm="onCategoryRootConfirm"
+        />
+        <p v-if="categoryRootFilter && !filteredCategories.length" class="library-hint">
+          Нет папок для выбранного корневого элемента.
+        </p>
+      </div>
+
+      <ul v-if="filteredCategories.length" class="category-list">
+        <li v-for="cat in filteredCategories" :key="cat.name" class="category-item">
           <button
             type="button"
             class="category-toggle"
@@ -59,6 +73,7 @@
           >
             <span class="category-chevron" :class="{ 'category-chevron--open': expandedCategory === cat.name }">▶</span>
             <span class="category-name">{{ cat.name }}</span>
+            <span v-if="cat.root_element" class="category-root">{{ cat.root_element }}</span>
             <span class="category-count">({{ cat.document_count }})</span>
           </button>
           <ul v-if="expandedCategory === cat.name" class="doc-list">
@@ -138,7 +153,12 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, watch } from 'vue'
+import ElementPicker from '../ElementPicker.vue'
+import {
+  normalizeElementSearchKey,
+  resolveElementName,
+} from '../../utils/elementFilter'
 
 const props = defineProps({
   activeScope: { type: String, default: 'shared' },
@@ -151,6 +171,9 @@ const props = defineProps({
   canSave: { type: Boolean, default: false },
   categoryDocuments: { type: Object, default: () => ({}) },
   loadingCategory: { type: String, default: null },
+  elements: { type: Array, default: () => [] },
+  elementDocs: { type: Object, default: () => ({}) },
+  rootElement: { type: String, default: '' },
 })
 
 const emit = defineEmits([
@@ -164,10 +187,57 @@ const emit = defineEmits([
 ])
 
 const expandedCategory = ref(null)
+const categoryRootFilter = ref('')
 
 const showSaveDialog = ref(false)
 const saveName = ref('')
 const saveDescription = ref('')
+
+const pickerElements = computed(() => {
+  const fromSchema = props.elements || []
+  const fromCategories = (props.sharedCategories || [])
+    .map((cat) => cat.root_element)
+    .filter(Boolean)
+  return [...new Set([...fromSchema, ...fromCategories])].sort()
+})
+
+function categoryMatchesRoot(cat, query) {
+  const trimmed = (query || '').trim()
+  if (!trimmed) return true
+  const resolved = resolveElementName(trimmed, pickerElements.value)
+  const key = normalizeElementSearchKey(resolved || trimmed)
+  const roots = [
+    normalizeElementSearchKey(cat.root_element || ''),
+    normalizeElementSearchKey(cat.name || ''),
+  ].filter(Boolean)
+  return roots.some((rootKey) => rootKey === key || rootKey.includes(key) || key.includes(rootKey))
+}
+
+const filteredCategories = computed(() => {
+  if (!categoryRootFilter.value.trim()) return props.sharedCategories
+  return props.sharedCategories.filter((cat) => categoryMatchesRoot(cat, categoryRootFilter.value))
+})
+
+watch(
+  () => props.rootElement,
+  (val) => {
+    if (val && !categoryRootFilter.value) {
+      categoryRootFilter.value = val
+    }
+  },
+  { immediate: true },
+)
+
+function onCategoryRootConfirm(name) {
+  categoryRootFilter.value = name
+  const first = filteredCategories.value[0]
+  if (first) {
+    expandedCategory.value = first.name
+    if (!props.categoryDocuments[first.name]) {
+      emit('expand-category', first.name)
+    }
+  }
+}
 
 function setScope(scope) {
   emit('update:activeScope', scope)
@@ -217,27 +287,18 @@ function submitSave() {
 
 <style scoped>
 .library-section {
-  margin-top: 4px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .library-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   margin-bottom: 8px;
   flex-wrap: wrap;
-}
-
-.library-title {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .library-tabs {
@@ -334,6 +395,12 @@ function submitSave() {
 .category-name {
   font-family: var(--font-mono, monospace);
   font-weight: 500;
+}
+
+.category-root {
+  font-size: 11px;
+  color: var(--accent);
+  font-family: var(--font-mono, monospace);
 }
 
 .category-count {
@@ -460,5 +527,19 @@ function submitSave() {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+
+.category-search-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 </style>
