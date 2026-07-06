@@ -729,6 +729,8 @@ function finish() {
   font-size: 11px;
   margin-top: 2px;
 }
+
+.attr-docs-panel {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 8px 10px;
