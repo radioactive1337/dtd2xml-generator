@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeElementPathsForTreeSync } from './xmlPaths'
+import {
+  canonicalizeXmlElementName,
+  canonicalizeXmlElementPaths,
+  normalizeElementPathsForTreeSync,
+} from './xmlPaths'
 
 describe('normalizeElementPathsForTreeSync', () => {
   it('collapses sibling indices to one structural path', () => {
@@ -23,5 +27,23 @@ describe('normalizeElementPathsForTreeSync', () => {
   it('dedupes and sorts shallow to deep', () => {
     const result = normalizeElementPathsForTreeSync(['A.B.C', 'A', 'A.B'])
     expect(result).toEqual(['A', 'A.B', 'A.B.C'])
+  })
+})
+
+describe('canonicalizeXmlElementPaths', () => {
+  const elements = ['PayDoc', 'cs:update-object', 'cs:add-field']
+
+  it('maps local XML names to qualified DTD names', () => {
+    expect(canonicalizeXmlElementName('update-object', elements)).toBe('cs:update-object')
+    expect(
+      canonicalizeXmlElementPaths(
+        ['update-object', 'update-object.add-field[0]'],
+        elements,
+      ),
+    ).toEqual(['cs:update-object', 'cs:update-object.cs:add-field[0]'])
+  })
+
+  it('keeps unknown XML names unchanged', () => {
+    expect(canonicalizeXmlElementName('unknown', elements)).toBe('unknown')
   })
 })

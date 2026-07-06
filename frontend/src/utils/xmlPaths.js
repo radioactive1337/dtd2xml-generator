@@ -1,4 +1,5 @@
 import { formatXml } from './formatXml'
+import { resolveElementName } from './elementFilter'
 
 function localTagName(el) {
   const raw = el.localName || el.tagName || ''
@@ -95,6 +96,24 @@ export function inferRootFromElementPaths(paths) {
   if (!paths?.length) return ''
   const first = paths[0]
   return first.includes('.') ? first.split('.')[0] : first
+}
+
+export function canonicalizeXmlElementName(name, elements) {
+  const segment = name || ''
+  const index = segment.match(/\[\d+\]$/)?.[0] || ''
+  const base = stripPathIndex(segment)
+  const resolved = resolveElementName(base, elements)
+  return `${resolved}${index}`
+}
+
+export function canonicalizeXmlElementPaths(paths, elements) {
+  if (!paths?.length) return []
+  return paths.map((path) =>
+    path
+      .split('.')
+      .map((segment) => canonicalizeXmlElementName(segment, elements))
+      .join('.'),
+  )
 }
 
 /**

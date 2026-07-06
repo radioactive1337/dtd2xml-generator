@@ -1,5 +1,9 @@
 import { ref, computed, watch, nextTick } from 'vue'
-import { extractXmlElementPaths } from '../../utils/xmlPaths'
+import {
+  canonicalizeXmlElementName,
+  canonicalizeXmlElementPaths,
+  extractXmlElementPaths,
+} from '../../utils/xmlPaths'
 
 export function useGeneratorXml({
   schemaId,
@@ -28,7 +32,9 @@ export function useGeneratorXml({
     if (!text) return dtdElementPaths.value
     try {
       const parsed = extractXmlElementPaths(text, { skipFormat: true })
-      if (parsed?.elementPaths?.length) return parsed.elementPaths
+      if (parsed?.elementPaths?.length) {
+        return canonicalizeXmlElementPaths(parsed.elementPaths, elements.value)
+      }
     } catch {
       // malformed or partial XML in editor
     }
@@ -104,24 +110,26 @@ export function useGeneratorXml({
       if (!parsed) return
 
       const { rootTag, elementPaths } = parsed
+      const canonicalRootTag = canonicalizeXmlElementName(rootTag, elements.value)
+      const canonicalElementPaths = canonicalizeXmlElementPaths(elementPaths, elements.value)
 
       if (!rootTag) {
         xmlSyncHint.value = 'В XML нет корневого элемента — выберите корень вручную'
         return
       }
 
-      if (!elements.value.includes(rootTag)) {
+      if (!elements.value.includes(canonicalRootTag)) {
         xmlSyncHint.value = `Корневой элемент «${rootTag}» не описан в DTD`
         return
       }
 
       xmlSyncHint.value = ''
-      if (rootTag && rootElement.value !== rootTag) {
-        rootElement.value = rootTag
+      if (canonicalRootTag && rootElement.value !== canonicalRootTag) {
+        rootElement.value = canonicalRootTag
         await nextTick()
       }
       const treeRef = await waitForDtdTreeRef()
-      await treeRef?.applyXmlElementPaths(elementPaths)
+      await treeRef?.applyXmlElementPaths(canonicalElementPaths)
     } catch (e) {
       xmlSyncHint.value = e.message || 'Не удалось разобрать пути элементов в XML'
     }
@@ -139,13 +147,14 @@ export function useGeneratorXml({
       if (!parsed) return
 
       const { rootTag } = parsed
+      const canonicalRootTag = canonicalizeXmlElementName(rootTag, elements.value)
 
       if (!rootTag) {
         xmlSyncHint.value = 'В XML нет корневого элемента — выберите корень вручную'
         return
       }
 
-      if (!elements.value.includes(rootTag)) {
+      if (!elements.value.includes(canonicalRootTag)) {
         xmlSyncHint.value = `Корневой элемент «${rootTag}» не описан в DTD`
         return
       }
