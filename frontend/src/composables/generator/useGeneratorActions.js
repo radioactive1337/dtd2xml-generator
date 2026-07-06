@@ -15,6 +15,7 @@ export function useGeneratorActions({
   llmAlias,
   isHybridStrategy,
   sqlMappings,
+  fieldOverrides,
   xmlText,
   xmlDirty,
   buildInfo,
@@ -159,6 +160,17 @@ export function useGeneratorActions({
             ),
             db_alias: m.db_alias || null,
           }))
+      }
+      const activeOverrides = fieldOverrides.value
+        .filter((o) => o.target_path?.trim() && o.xml_attr?.trim())
+        .map(({ _presetSource, ...o }) => ({
+          target_path: o.target_path.trim(),
+          xml_attr: o.xml_attr.trim(),
+          value: o.value ?? '',
+          target_element: o.target_element?.trim() || null,
+        }))
+      if (activeOverrides.length) {
+        request.field_overrides = activeOverrides
       }
       const result = await fillXmlStream(
         request,

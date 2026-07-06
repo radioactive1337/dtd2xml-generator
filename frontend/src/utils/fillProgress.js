@@ -4,6 +4,7 @@ const FILL_STEP_MESSAGES = {
   xml_upload: 'Загрузка XML…',
   db_query: 'Запрос к БД…',
   db_done: 'Данные из БД применены',
+  manual_overrides: 'Применение фиксированных значений…',
   faker: 'Генерация через Faker…',
   llm_request: 'Ожидание ответа LLM…',
   llm_prepare: 'Подготовка запросов к LLM…',

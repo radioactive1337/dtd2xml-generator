@@ -36,6 +36,27 @@ def test_save_and_load_mapping_preset(client: TestClient):
     assert data["mappings"][0]["fields"][0]["db_col"] == "id"
 
 
+def test_save_and_load_mapping_preset_with_field_overrides(client: TestClient):
+    preset = {
+        **SAMPLE_PRESET,
+        "field_overrides": [
+            {
+                "target_path": "PayDoc.Body.client[0]",
+                "xml_attr": "inn",
+                "value": "7707083893",
+            }
+        ],
+    }
+    response = client.post("/api/mapping-presets", json=preset)
+    assert response.status_code == 200
+    assert response.json()["field_overrides"][0]["value"] == "7707083893"
+
+    response = client.get("/api/mapping-presets/Customer%20mapping")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["field_overrides"][0]["xml_attr"] == "inn"
+
+
 def test_list_mapping_presets_filters_by_schema(client: TestClient):
     presets_dir = dev_user_context().mapping_presets_dir
     for path in presets_dir.glob("*.json"):

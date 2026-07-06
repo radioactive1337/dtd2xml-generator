@@ -20,6 +20,15 @@ export async function deleteMappingPreset(name) {
   return data
 }
 
+function normalizeImportFieldOverride(entry) {
+  return {
+    target_path: entry?.target_path || '',
+    xml_attr: entry?.xml_attr || '',
+    value: entry?.value ?? '',
+    target_element: entry?.target_element || '',
+  }
+}
+
 function normalizeImportFields(rawFields) {
   if (!rawFields) return []
   if (Array.isArray(rawFields)) {
@@ -69,6 +78,9 @@ export function parseMappingPresetFile(text) {
     name,
     schema_id: data.schema_id || '',
     mappings: data.mappings.map((mapping) => normalizeImportMapping(mapping, legacyDbAlias)),
+    field_overrides: Array.isArray(data.field_overrides)
+      ? data.field_overrides.map(normalizeImportFieldOverride)
+      : [],
   }
 }
 

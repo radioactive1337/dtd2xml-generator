@@ -37,6 +37,12 @@
       Проверять DTD после заполнения
     </label>
 
+    <FieldOverridesPanel
+      :model-value="fieldOverrides"
+      :xml-text="xmlText"
+      @update:model-value="$emit('update:fieldOverrides', $event)"
+    />
+
     <div v-if="isHybridStrategy" class="db-overrides-panel">
       <div class="overrides-header">
         <div class="overrides-header-top">
@@ -130,7 +136,7 @@
             </button>
           </span>
         </div>
-        <span class="overrides-hint">Этап 1 — сначала БД, затем Faker/AI для остального</span>
+        <span class="overrides-hint">Этап 1 — сначала БД, затем фиксированные поля, затем Faker/AI</span>
       </div>
 
       <div v-for="(mapping, mi) in sqlMappings" :key="mi" class="mapping-card">
@@ -190,6 +196,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { formatMappings } from '../../utils/ruPlural'
+import FieldOverridesPanel from './FieldOverridesPanel.vue'
 
 const props = defineProps({
   fillStrategy: { type: String, default: 'faker' },
@@ -203,6 +210,8 @@ const props = defineProps({
   mappingPresets: { type: Array, default: () => [] },
   presetDropdownLabel: { type: String, default: '' },
   sqlMappings: { type: Array, default: () => [] },
+  fieldOverrides: { type: Array, default: () => [] },
+  xmlText: { type: String, default: '' },
   mappingPreview: { type: Object, default: () => ({}) },
   mappingValidation: { type: Array, default: () => [] },
 })
@@ -217,6 +226,7 @@ const emit = defineEmits([
   'update:autoValidateAfterFill',
   'update:mappingPresetName',
   'update:selectedMappingPresetNames',
+  'update:fieldOverrides',
   'save-mapping-preset',
   'import-mapping-preset',
   'export-mapping-preset',

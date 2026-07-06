@@ -19,6 +19,7 @@ from app.auth.sessions import get_current_user
 from app.config import resolve_llm_alias
 from app.core.xml_tree import ProtectedAttrs
 from app.services.db_service import SqlMapping, apply_db_overrides
+from app.services.field_override_service import FieldOverride, apply_field_overrides
 from app.services.field_mapping_service import suggest_field_mappings as suggest_field_mappings_service
 from app.services.faker_service import populate_with_faker
 from app.services.llm_service import populate_with_llm
@@ -46,6 +47,7 @@ class FillRequest(BaseModel):
     xml_text: str | None = None
     strategy: Strategy = "faker"
     sql_mappings: list[SqlMapping] = Field(default_factory=list)
+    field_overrides: list[FieldOverride] = Field(default_factory=list)
     llm_alias: str = "default"
     faker_locale: str = "ru_RU"
 
@@ -160,6 +162,23 @@ async def execute_fill(
         await on_progress("db_done", "Database values applied", 35)
         for warning in fill_warnings:
             await on_progress("db_warning", warning, 35)
+
+    active_overrides = [
+        o
+        for o in request.field_overrides
+        if o.target_path.strip() and o.xml_attr.strip()
+    ]
+    if active_overrides:
+        await on_progress("manual_overrides", "Applying fixed field values...", 38)
+        xml, manual_protected, manual_warnings = await asyncio.to_thread(
+            apply_field_overrides,
+            xml,
+            active_overrides,
+        )
+        protected_attrs = protected_attrs | manual_protected
+        fill_warnings.extend(manual_warnings)
+        for warning in manual_warnings:
+            await on_progress("manual_warning", warning, 38)
 
     fill_empty_only = request.strategy in _HYBRID
     try:
