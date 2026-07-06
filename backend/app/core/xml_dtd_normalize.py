@@ -17,11 +17,24 @@ def _is_namespace_attr(name: str) -> bool:
     return name == "xmlns" or name.startswith("xmlns:") or name.startswith(f"{{{_XMLNS_URI}}}")
 
 
+def _own_nsmap(element: etree._Element) -> dict[str | None, str]:
+    """Namespace declarations introduced on this element (not inherited)."""
+    parent = element.getparent()
+    parent_map = dict(parent.nsmap) if parent is not None else {}
+    current_map = dict(element.nsmap or {})
+    own: dict[str | None, str] = {}
+    for prefix, uri in current_map.items():
+        if parent_map.get(prefix) != uri:
+            own[prefix] = uri
+    return own
+
+
 def normalize_xml_for_dtd_validation(root: etree._Element) -> etree._Element:
-    """Return a namespace-free tree with local element and attribute names."""
+    """Return a tree with local element names while preserving declared xmlns bindings."""
 
     def clone(element: etree._Element) -> etree._Element:
-        node = etree.Element(_local_name(element.tag))
+        own_nsmap = _own_nsmap(element)
+        node = etree.Element(_local_name(element.tag), nsmap=own_nsmap or None)
 
         for key, value in element.attrib.items():
             if _is_namespace_attr(key):

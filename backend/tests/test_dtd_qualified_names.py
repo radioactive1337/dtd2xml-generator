@@ -17,14 +17,18 @@ def qualified_dtd_dir(tmp_path: Path) -> Path:
     dtd_dir.mkdir()
     (dtd_dir / "action.ent").write_text(
         '<!ENTITY % action.content "(cs:add-field*)">\n'
-        '<!ENTITY % action.attributes "name CDATA #REQUIRED">\n',
+        '<!ENTITY % action.attributes "\n'
+        "    source CDATA #REQUIRED\n"
+        "    document_type CDATA #REQUIRED\n"
+        '">\n',
         encoding="utf-8",
     )
     (dtd_dir / "cs.dtd").write_text(
         '<!ENTITY % action SYSTEM "action.ent">\n'
+        '<!ENTITY % cs.namespace \'xmlns:cs CDATA #FIXED "http://www.faktura.ru/cs"\'>\n'
         "%action;\n"
         "<!ELEMENT cs:add-object %action.content;>\n"
-        "<!ATTLIST cs:add-object %action.attributes;>\n"
+        "<!ATTLIST cs:add-object %action.attributes; %cs.namespace;>\n"
         "<!ELEMENT cs:add-field EMPTY>\n",
         encoding="utf-8",
     )
@@ -56,6 +60,16 @@ def test_export_flat_dtd_uses_local_names(qualified_dtd_dir: Path):
     assert "<!ELEMENT add-object" in dtd_text
     assert "<!ELEMENT add-field" in dtd_text
     assert "cs:add-object" not in dtd_text
+    assert 'xmlns:cs CDATA #FIXED "http://www.faktura.ru/cs"' in dtd_text
+
+
+def test_parser_reads_fixed_xmlns_attribute(qualified_dtd_dir: Path):
+    parser = DTDParser(base_dir=qualified_dtd_dir)
+    schema = parser.parse_file(qualified_dtd_dir / "cs.dtd")
+
+    xmlns_attr = schema.elements["cs:add-object"].attributes["xmlns:cs"]
+    assert xmlns_attr.default_decl.startswith("#FIXED")
+    assert "http://www.faktura.ru/cs" in xmlns_attr.default_decl
 
 
 def test_validate_namespaced_xml_with_qualified_dtd(qualified_dtd_dir: Path):
@@ -68,13 +82,55 @@ def test_validate_namespaced_xml_with_qualified_dtd(qualified_dtd_dir: Path):
     merged = merge_dtd_schemas([root_schema, module_schema])
     xml_text = (
         '<?xml version="1.0"?>\n'
-        '<PayDoc id="doc-1" xmlns:cs="http://example.com/cs">'
-        '<cs:add-object name="obj"><cs:add-field/></cs:add-object>'
+        '<PayDoc id="doc-1">'
+        '<cs:add-object xmlns:cs="http://www.faktura.ru/cs" source="interpay" document_type="d">'
+        "<cs:add-field/>"
+        "</cs:add-object>"
         "</PayDoc>"
     )
 
     result = validate_xml(xml_text, merged)
     assert result.valid is True, result.errors
+
+
+def test_validate_rejects_wrong_fixed_xmlns(qualified_dtd_dir: Path):
+    parser = DTDParser(base_dir=qualified_dtd_dir)
+    root_schema = parser.parse_file(qualified_dtd_dir / "root.dtd")
+    module_schema = parser.parse_file(qualified_dtd_dir / "cs.dtd")
+
+    from app.core.dtd_merge import merge_dtd_schemas
+
+    merged = merge_dtd_schemas([root_schema, module_schema])
+    xml_text = (
+        '<?xml version="1.0"?>\n'
+        '<PayDoc id="doc-1">'
+        '<cs:add-object xmlns:cs="http://wrong.example/cs" source="interpay" document_type="d"/>'
+        "</PayDoc>"
+    )
+
+    result = validate_xml(xml_text, merged)
+    assert result.valid is False
+    assert any("namespace" in error.message.lower() for error in result.errors)
+
+
+def test_validate_user_xmlns_case(qualified_dtd_dir: Path):
+    parser = DTDParser(base_dir=qualified_dtd_dir)
+    root_schema = parser.parse_file(qualified_dtd_dir / "root.dtd")
+    module_schema = parser.parse_file(qualified_dtd_dir / "cs.dtd")
+
+    from app.core.dtd_merge import merge_dtd_schemas
+
+    merged = merge_dtd_schemas([root_schema, module_schema])
+    valid_xml = (
+        '<PayDoc id="doc-1">'
+        '<cs:add-object xmlns:cs="http://www.faktura.ru/cs" '
+        'source="interpay" document_type="d"><cs:add-field/></cs:add-object>'
+        "</PayDoc>"
+    )
+    invalid_xml = valid_xml.replace("http://www.faktura.ru/cs", "http://evil.example/cs")
+
+    assert validate_xml(valid_xml, merged).valid is True
+    assert validate_xml(invalid_xml, merged).valid is False
 
 
 def test_dtd_local_name_helper():

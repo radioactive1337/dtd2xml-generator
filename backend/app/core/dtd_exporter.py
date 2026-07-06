@@ -16,6 +16,13 @@ def dtd_local_name(name: str) -> str:
     return name
 
 
+def dtd_attr_name(name: str) -> str:
+    """Keep xmlns declarations intact; strip element-style prefixes elsewhere."""
+    if name == "xmlns" or name.startswith("xmlns:"):
+        return name
+    return dtd_local_name(name)
+
+
 def normalize_dtd_name_in_fragment(text: str) -> str:
     """Replace qualified DTD names in content models with local names."""
 
@@ -71,7 +78,7 @@ def _format_element_def(
     for name, attr in elem.attributes.items():
         attr_type = _format_attr_type(attr, param_entities)
         default_decl = _resolve_param_refs(attr.default_decl, param_entities)
-        attr_lines.append(f"    {dtd_local_name(name)} {attr_type} {default_decl}")
+        attr_lines.append(f"    {dtd_attr_name(name)} {attr_type} {default_decl}")
 
     lines.append(f"<!ATTLIST {local_name}\n" + "\n".join(attr_lines) + "\n>")
     return lines
