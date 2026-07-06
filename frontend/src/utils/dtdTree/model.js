@@ -1,5 +1,5 @@
 import { resolveChildTreePaths } from '../dtdTreeNavigation'
-import { normalizeTreePath } from '../xmlPaths'
+import { normalizeTreePath, stripPathIndex } from '../xmlPaths'
 
 export const GROUP_LABEL_MAX = 72
 
@@ -138,6 +138,8 @@ export function buildNodeFromModel({
       })
     })
     node._loaded = true
+  } else if (model.kind === 'ANY') {
+    node._isAnyContainer = true
   }
 
   return node
@@ -184,9 +186,70 @@ export function buildChildrenFromModel({ model, parentPath, depth, rootElement, 
   return []
 }
 
+/** Direct child element names under parentPath found in pasted XML paths. */
+export function collectDirectChildNamesFromXmlPaths(parentPath, elementPaths) {
+  const parentNorm = normalizeTreePath(parentPath || '')
+  const prefix = parentNorm ? `${parentNorm}.` : ''
+  const names = new Set()
+
+  for (const rawPath of elementPaths || []) {
+    const norm = normalizeTreePath(rawPath)
+    if (parentNorm) {
+      if (norm !== parentNorm && !norm.startsWith(prefix)) continue
+    }
+    const rest = parentNorm ? norm.slice(prefix.length) : norm
+    if (!rest) continue
+    const name = stripPathIndex(rest.split('.')[0])
+    if (name) names.add(name)
+  }
+
+  return [...names].sort()
+}
+
+/** Build tree children for ANY content from element paths in a pasted XML document. */
+export function injectXmlChildrenIntoAnyNode(node, elementPaths, options) {
+  const childNames = collectDirectChildNamesFromXmlPaths(node.path, elementPaths)
+  node.children = childNames.map((childName) => {
+    const childPath = node.path ? `${node.path}.${childName}` : childName
+    const childNode = buildNodeFromModel({
+      name: childName,
+      model: { kind: 'REF', ref: childName },
+      path: childPath,
+      depth: node.depth + 1,
+      required: false,
+      elementPath: childPath,
+      ...options,
+    })
+    const hasDeeperPaths = (elementPaths || []).some((p) => {
+      const norm = normalizeTreePath(p)
+      return norm !== childPath && norm.startsWith(`${childPath}.`)
+    })
+    if (hasDeeperPaths) {
+      childNode.hasChildren = true
+    }
+    return childNode
+  })
+  node._isAnyContainer = true
+  node._loaded = true
+  node.hasChildren = node.children.length > 0
+  node._isChoiceGroup = false
+}
+
 /** Apply lazy-loaded content model; mark REF parent as CHOICE container when needed. */
 export function applyLoadedChildren(node, contentModel, options) {
   const model = normalizeContentModelForTree(contentModel)
+  if (model.kind === 'ANY') {
+    node._isAnyContainer = true
+    if (options.xmlElementPaths?.length) {
+      injectXmlChildrenIntoAnyNode(node, options.xmlElementPaths, options)
+    } else {
+      node.children = []
+      node._loaded = true
+      node.hasChildren = false
+      node._isChoiceGroup = false
+    }
+    return
+  }
   node.children = buildChildrenFromModel({
     model,
     parentPath: node.path,

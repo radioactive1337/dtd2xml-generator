@@ -5,6 +5,7 @@ import {
   findNodeByPath,
   findNodesForElementPath,
   findParentNode,
+  injectXmlChildrenIntoAnyNode,
   walkTree,
 } from './model'
 import {
@@ -169,11 +170,16 @@ export async function ensureTreeLoadedForElementPaths(
 
   async function walkLoad(node) {
     if (isStale()) return
-    if (subtreeNeeded(node) && node._refName && !node._loaded) {
-      const data = await getElementTree(node._refName)
-      if (isStale()) return
-      applyLoadedChildren(node, data.content_model, modelOptions)
-      node.expanded = true
+    if (subtreeNeeded(node)) {
+      if (node._refName && !node._loaded) {
+        const data = await getElementTree(node._refName)
+        if (isStale()) return
+        applyLoadedChildren(node, data.content_model, modelOptions)
+        node.expanded = true
+      } else if (node._isAnyContainer && !node._loaded) {
+        injectXmlChildrenIntoAnyNode(node, elementPaths, modelOptions)
+        node.expanded = true
+      }
     }
     for (const child of node.children || []) {
       if (node._isChoiceGroup) {
@@ -197,6 +203,7 @@ export async function buildCheckedPathsFromElementPaths({
 }) {
   const syncPaths = normalizeElementPathsForTreeSync(elementPaths)
   const elPathSet = new Set(syncPaths)
+  const modelOptionsWithXml = { ...modelOptions, xmlElementPaths: syncPaths }
 
   let choiceSelections = resolveChoiceSelectionsFromXml(
     treeRoot,
@@ -210,7 +217,7 @@ export async function buildCheckedPathsFromElementPaths({
     treeRoot,
     getElementTree,
     isStale,
-    modelOptions,
+    modelOptionsWithXml,
     choiceSelections,
   )
   if (isStale()) return null
@@ -229,7 +236,7 @@ export async function buildCheckedPathsFromElementPaths({
       getElementTree,
       isStale,
       choiceSelections,
-      modelOptions,
+      modelOptionsWithXml,
     )
   }
   if (isStale()) return null
