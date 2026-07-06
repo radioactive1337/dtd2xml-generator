@@ -8,8 +8,8 @@ from pathlib import Path
 from app.core.content_model import ContentModelParseError, parse_content_model
 from app.core.dtd_models import AttributeDef, DTDSchema, ElementDef
 
-# DTD names: elements/attrs use hyphens and underscores; param entities also allow dots
-_ELEMENT_NAME = r"[a-zA-Z][-a-zA-Z0-9_]*"
+# DTD names: elements/attrs use hyphens, underscores, and optional namespace prefixes
+_ELEMENT_NAME = r"(?:[a-zA-Z][-a-zA-Z0-9_]*:)?[a-zA-Z][-a-zA-Z0-9_]*"
 _PARAM_ENTITY_NAME = r"[a-zA-Z][-a-zA-Z0-9_.]*"
 
 # Parameter entity declarations

@@ -3,8 +3,20 @@ export function schemaFileName(schema) {
   return source.split(/[/\\]/).pop() || 'schema'
 }
 
+export function dtdLocalName(name) {
+  const colon = name.indexOf(':')
+  return colon > 0 ? name.slice(colon + 1) : name
+}
+
 export function collectElementsFromSchemas(schemas) {
-  return [...new Set(schemas.flatMap((schema) => schema.elements || []))].sort()
+  const names = new Set()
+  for (const schema of schemas) {
+    for (const name of schema.elements || []) {
+      names.add(name)
+      names.add(dtdLocalName(name))
+    }
+  }
+  return [...names].sort()
 }
 
 export function pickPrimarySchema(schemas) {

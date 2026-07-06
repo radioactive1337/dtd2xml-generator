@@ -7,6 +7,14 @@ from fastapi.testclient import TestClient
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def _seed_types_dtd() -> None:
+    from app.user_context import dev_user_context
+
+    dtd_dir = dev_user_context().dtd_dir
+    dtd_dir.mkdir(parents=True, exist_ok=True)
+    (dtd_dir / "types.dtd").write_bytes((FIXTURES / "types.dtd").read_bytes())
+
+
 def test_health(client: TestClient):
     response = client.get("/api/health")
     assert response.status_code == 200
@@ -23,6 +31,7 @@ def test_config_aliases_no_secrets(client: TestClient):
 
 
 def test_upload_dtd(client: TestClient):
+    _seed_types_dtd()
     dtd_path = FIXTURES / "main.dtd"
     with dtd_path.open("rb") as f:
         response = client.post(
@@ -40,12 +49,7 @@ def test_upload_dtd(client: TestClient):
 
 
 def test_upload_multiple_dtd(client: TestClient, tmp_path):
-    from app.user_context import dev_user_context
-
-    dtd_dir = dev_user_context().dtd_dir
-    dtd_dir.mkdir(parents=True, exist_ok=True)
-    (dtd_dir / "types.dtd").write_bytes((FIXTURES / "types.dtd").read_bytes())
-
+    _seed_types_dtd()
     uploads = [
         ("v1.dtd", FIXTURES / "v1.dtd"),
         ("v2.dtd", FIXTURES / "v2.dtd"),
@@ -134,6 +138,7 @@ def test_schema_not_found(client: TestClient):
 
 
 def _upload_fixture(client: TestClient) -> str:
+    _seed_types_dtd()
     dtd_path = FIXTURES / "main.dtd"
     with dtd_path.open("rb") as f:
         response = client.post(

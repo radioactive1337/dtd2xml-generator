@@ -33,7 +33,7 @@ def _default_auth_disabled(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True)
 def _dev_user_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    from app.auth import sessions as auth_sessions
+    from app.auth.sessions import get_current_user
     from app.user_context import UserContext
 
     root = tmp_path / "dev-user-root"
@@ -46,19 +46,17 @@ def _dev_user_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     async def _dev_user(_request=None):
         return ctx
 
-    original_get_current_user = auth_sessions.get_current_user
-
-    async def _get_current_user(request):
-        if is_auth_disabled():
-            return ctx
-        return await original_get_current_user(request)
-
-    monkeypatch.setattr(auth_sessions, "get_current_user", _get_current_user)
+    app.dependency_overrides[get_current_user] = _dev_user
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.fixture
 def auth_enabled(monkeypatch: pytest.MonkeyPatch):
+    from app.auth.sessions import get_current_user
+
     monkeypatch.delenv("AUTH_DISABLED", raising=False)
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.fixture

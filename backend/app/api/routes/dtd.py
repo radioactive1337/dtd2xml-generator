@@ -284,13 +284,22 @@ def _pick_primary_schema_id(schemas: list[SchemaResponse]) -> str:
     return max(schemas, key=lambda schema: schema.element_count).schema_id
 
 
+def _known_element_names(schema: DTDSchema) -> list[str]:
+    names: set[str] = set()
+    for name in schema.elements:
+        names.add(name)
+        if ":" in name:
+            names.add(name.split(":", 1)[1])
+    return sorted(names)
+
+
 def _schema_response(user: UserContext, schema_id: str) -> SchemaResponse:
     schema = _user_registry(user)[schema_id]
     return SchemaResponse(
         schema_id=schema_id,
         source_files=schema.source_files,
         element_count=len(schema.elements),
-        elements=schema.root_elements(),
+        elements=_known_element_names(schema),
     )
 
 
@@ -446,7 +455,7 @@ async def list_schemas(user: UserContext = Depends(get_current_user)) -> list[Sc
             schema_id=sid,
             source_files=schema.source_files,
             element_count=len(schema.elements),
-            elements=schema.root_elements(),
+            elements=_known_element_names(schema),
         )
         for sid, schema in registry.items()
     ]
