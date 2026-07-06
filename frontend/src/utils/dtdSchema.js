@@ -3,6 +3,10 @@ export function schemaFileName(schema) {
   return source.split(/[/\\]/).pop() || 'schema'
 }
 
+export function collectElementsFromSchemas(schemas) {
+  return [...new Set(schemas.flatMap((schema) => schema.elements || []))].sort()
+}
+
 export function pickPrimarySchema(schemas) {
   if (!schemas.length) return null
   for (const preferred of ['main.dtd', 'v2.dtd']) {

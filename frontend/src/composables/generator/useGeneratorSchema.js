@@ -1,6 +1,6 @@
 import { ref, watch } from 'vue'
 import { listElements, getElementTree } from '../../api/dtd'
-import { schemaFileName, normalizeDtdUploadResult } from '../../utils/dtdSchema'
+import { schemaFileName, normalizeDtdUploadResult, collectElementsFromSchemas } from '../../utils/dtdSchema'
 import { collectDtdElementPaths } from '../../utils/mappingUtils'
 import { loadRepeatablePaths } from '../../utils/repeatablePaths'
 
@@ -62,13 +62,14 @@ export function useGeneratorSchema() {
 
   async function applyDtdUpload(result) {
     const primary = normalizeDtdUploadResult(result)
+    const allSchemas = primary.schemas?.length ? primary.schemas : [primary]
     schemaId.value = primary.schema_id
     dtdMeta.value = {
       fileName: schemaFileName(primary),
-      elementCount: primary.element_count,
-      schemaCount: primary.schemas?.length || 1,
+      elementCount: collectElementsFromSchemas(allSchemas).length,
+      schemaCount: allSchemas.length,
     }
-    elements.value = primary.elements
+    elements.value = collectElementsFromSchemas(allSchemas)
     rootElement.value = ''
     try {
       const summaries = await listElements(primary.schema_id)

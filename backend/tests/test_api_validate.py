@@ -52,6 +52,34 @@ def test_validate_schema_not_found(client: TestClient):
     assert response.status_code == 404
 
 
+def test_validate_uses_merged_schemas_from_registry(client: TestClient):
+    dtd_dir = dev_user_context().dtd_dir
+    dtd_dir.mkdir(parents=True, exist_ok=True)
+
+    uploads = [
+        ("root.dtd", b'<!ELEMENT Root (add-object)>\n<!ATTLIST Root id ID #REQUIRED>\n'),
+        (
+            "cs.dtd",
+            b'<!ELEMENT add-object (add-field*)>\n'
+            b'<!ATTLIST add-object name CDATA #REQUIRED>\n'
+            b'<!ELEMENT add-field EMPTY>\n',
+        ),
+    ]
+    files = [("files", (name, content, "application/xml-dtd")) for name, content in uploads]
+    upload_response = client.post("/api/dtd/upload", files=files)
+    assert upload_response.status_code == 200
+    schema_id = upload_response.json()["primary_schema_id"]
+
+    xml_text = '<Root id="doc-1"><add-object name="obj"><add-field/></add-object></Root>'
+    response = client.post(
+        "/api/validate",
+        json={"schema_id": schema_id, "xml_text": xml_text},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["valid"] is True
+
+
 def _upload_fixture(client: TestClient) -> str:
     dtd_dir = dev_user_context().dtd_dir
     dtd_dir.mkdir(parents=True, exist_ok=True)

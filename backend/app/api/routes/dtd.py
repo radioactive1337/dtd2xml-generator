@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from app.auth.sessions import get_current_user
 from app.core.dtd_archive import extract_jar_dtd_files
+from app.core.dtd_merge import merge_dtd_schemas
 from app.core.dtd_models import DTDSchema, ElementDef
 from app.core.dtd_parser import DTDParser
 from app.user_context import UserContext
@@ -513,3 +514,11 @@ def get_schema_registry(user: UserContext) -> dict[str, DTDSchema]:
     """Expose registry for other modules."""
     ensure_user_registry_loaded(user)
     return _user_registry(user)
+
+
+def get_merged_schema(user: UserContext, schema_id: str) -> DTDSchema:
+    """Return a schema that includes elements from all loaded DTD entry points."""
+    registry = get_schema_registry(user)
+    if schema_id not in registry:
+        raise HTTPException(status_code=404, detail=f"Schema '{schema_id}' not found")
+    return merge_dtd_schemas(list(registry.values()))
