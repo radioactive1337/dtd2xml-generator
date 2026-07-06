@@ -203,8 +203,11 @@ function onKeydown(event) {
   }
 
   if (event.key === 'Escape') {
-    closeDropdown()
-    event.preventDefault()
+    if (isOpen.value) {
+      closeDropdown()
+      event.preventDefault()
+      event.stopPropagation()
+    }
     return
   }
 

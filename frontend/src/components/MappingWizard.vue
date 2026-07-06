@@ -1,5 +1,5 @@
 <template>
-  <div v-if="open" class="wizard-overlay" @click.self="close">
+  <div v-if="open" class="wizard-overlay" @keydown.escape.window="close">
     <div class="wizard-dialog" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
       <div class="wizard-header">
         <h3 id="wizard-title">{{ isEditMode ? 'Изменить маппинг' : 'Добавить маппинг' }}</h3>
