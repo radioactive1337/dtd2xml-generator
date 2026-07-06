@@ -55,6 +55,32 @@ describe('loadRepeatablePaths', () => {
       'PayDoc.Header.Meta',
     ])
   })
+
+  it('stops at recursive element references', async () => {
+    const models = {
+      node: {
+        content_model: {
+          kind: 'SEQUENCE',
+          children: [
+            { kind: 'REF', ref: 'node', quantifier: '*' },
+            { kind: 'REF', ref: 'leaf', quantifier: '+' },
+          ],
+        },
+      },
+      leaf: {
+        content_model: { kind: 'EMPTY' },
+      },
+    }
+
+    getElementTree.mockImplementation(async (_schemaId, name) => models[name])
+
+    const paths = await loadRepeatablePaths('schema', 'node')
+
+    expect(paths.map((p) => p.path)).toEqual([
+      'node.leaf',
+      'node.node',
+    ])
+  })
 })
 
 describe('formatRepeatableLabel', () => {

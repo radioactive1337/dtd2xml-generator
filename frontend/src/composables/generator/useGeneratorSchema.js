@@ -18,16 +18,19 @@ export function useGeneratorSchema() {
   const repeatablePaths = ref([])
   const customPaths = ref([])
   const dtdElementPaths = ref([])
+  let repeatableRequestSeq = 0
 
   async function refreshRepeatablePaths() {
-    if (!schemaId.value || !rootElement.value) {
+    const requestSeq = ++repeatableRequestSeq
+    if (!schemaId.value || !rootElement.value || mode.value === 'minimal') {
       repeatablePaths.value = []
       return
     }
     try {
-      repeatablePaths.value = await loadRepeatablePaths(schemaId.value, rootElement.value)
+      const paths = await loadRepeatablePaths(schemaId.value, rootElement.value)
+      if (requestSeq === repeatableRequestSeq) repeatablePaths.value = paths
     } catch {
-      repeatablePaths.value = []
+      if (requestSeq === repeatableRequestSeq) repeatablePaths.value = []
     }
   }
 
@@ -49,8 +52,12 @@ export function useGeneratorSchema() {
 
   watch([schemaId, rootElement], () => {
     refreshDtdElementPaths()
-    refreshRepeatablePaths()
     repeatOverrides.value = {}
+  })
+
+  watch([schemaId, rootElement, mode], () => {
+    refreshRepeatablePaths()
+    if (mode.value === 'minimal') repeatOverrides.value = {}
   })
 
   async function applyDtdUpload(result) {
