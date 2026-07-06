@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.core.dtd_exporter import export_flat_dtd
 from app.core.dtd_models import DTDSchema
+from app.core.xml_dtd_normalize import normalize_xml_for_dtd_validation
 
 _compiled_dtd_cache: dict[int, etree.DTD] = {}
 _dtd_cache_lock = threading.Lock()
@@ -82,8 +83,10 @@ def validate_xml(xml_text: str, schema: DTDSchema) -> ValidationResult:
             errors=[ValidationError(line=0, column=0, message=f"DTD error: {exc}")],
         )
 
+    validation_root = normalize_xml_for_dtd_validation(root)
+
     try:
-        dtd.assertValid(root)
+        dtd.assertValid(validation_root)
     except etree.DocumentInvalid:
         errors = [
             ValidationError(

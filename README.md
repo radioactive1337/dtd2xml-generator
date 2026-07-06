@@ -54,6 +54,36 @@
 - Редактируйте XML вручную в правой панели.
 - Скачайте результат или восстановите предыдущую версию из истории генераций.
 
+### 7. Библиотека XML
+
+На вкладке **Результат** доступна **Библиотека XML**:
+
+- **Эталоны** — документы из внешнего Git-репозитория (`xml-library/{category}/{name}.txt`). Обновление вручную кнопкой «Обновить из Git».
+- **Мои документы** — личные сохранённые XML на сервере (`data/users/{id}/xml_documents/`).
+
+Кнопка **Открыть** подставляет XML в редактор и обновляет staging cache для заполнения. История генераций в браузере (`localStorage`) не затрагивается.
+
+Настройка эталонов в `config/app.json`:
+
+```json
+{
+  "reference_xml": {
+    "enabled": true,
+    "repo_url": "git@github.com:org/xml-library.git",
+    "branch": "main",
+    "subdir": "xml-library",
+    "cache_dir": "data/reference-xml"
+  }
+}
+```
+
+- **`cache_dir`** — путь относительно корня проекта; клон Git хранится здесь.
+- **`subdir`** — подпапка внутри клона с категориями эталонов.
+- Для private HTTPS-репозиториев задайте **`REFERENCE_XML_GIT_TOKEN`** в окружении (токен не хранится в конфиге). Для GitLab используется формат `oauth2:<token>`; при необходимости переопределите логин через **`REFERENCE_XML_GIT_USER`** (по умолчанию `oauth2`).
+- Для SSH используйте deploy key в контейнере/на сервере.
+
+При первом запуске нажмите «Обновить из Git» в UI или выполните `git clone` в `data/reference-xml/` вручную.
+
 ## Установка
 
 ### Backend
@@ -78,7 +108,7 @@ npm install
 
 | Файл | Содержимое |
 | ---- | ---------- |
-| **`config/app.json`** | Глобальные настройки: host/port, `log_level`, Oracle Instant Client, `allow_self_registration`, `session_secret` |
+| **`config/app.json`** | Глобальные настройки: host/port, `log_level`, Oracle Instant Client, `allow_self_registration`, `session_secret`, `reference_xml` (эталонная библиотека) |
 | **`config/connections.json`** | Legacy single-user: алиасы БД/LLM с паролями и API-ключами (в мультипользовательском режиме заменяется per-user файлами в `data/`) |
 
 ```bash

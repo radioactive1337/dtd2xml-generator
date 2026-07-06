@@ -1,10 +1,12 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { listSchemas } from '../../api/dtd'
 import { getConfigAliases } from '../../api/config'
-import { pickPrimarySchema } from '../../utils/dtdSchema'
+import { stageFillXml } from '../../api/fill'
+import { pickPrimarySchema, normalizeDtdUploadResult } from '../../utils/dtdSchema'
 import { clearAllDatalistState } from '../../utils/datalistInput'
 import { formatElements } from '../../utils/ruPlural'
 import { useGenerationHistory } from '../useGenerationHistory'
+import { useXmlLibrary } from '../useXmlLibrary'
 import { useGeneratorLayout } from './useGeneratorLayout'
 import { useGeneratorTabs, leftTabs } from './useGeneratorTabs'
 import { useGeneratorMapping } from './useGeneratorMapping'
@@ -65,6 +67,79 @@ export function useGenerator() {
     buildInfo: xml.buildInfo,
     xmlSyncHint: xml.xmlSyncHint,
     fillStrategy,
+  })
+
+  async function onLoadLibraryDocument(xmlText) {
+    await xml.setProgrammaticXml(xmlText, { dirty: true })
+    if (schema.schemaId.value) {
+      await stageFillXml(schema.schemaId.value, xmlText)
+    }
+    xml.clearGenerationState()
+  }
+
+  const xmlLibrary = useXmlLibrary({ onLoadDocument: onLoadLibraryDocument })
+  const categoryDocuments = ref({})
+  const loadingCategory = ref(null)
+
+  const canSaveLibraryDocument = computed(
+    () => Boolean(xml.getEditorXmlText()?.trim() || xml.xmlText.value?.trim()),
+  )
+
+  async function handleLibraryExpandCategory(category) {
+    loadingCategory.value = category
+    try {
+      await xmlLibrary.loadCategoryDocuments(category)
+      categoryDocuments.value = {
+        ...categoryDocuments.value,
+        [category]: [...xmlLibrary.sharedDocuments.value],
+      }
+    } finally {
+      loadingCategory.value = null
+    }
+  }
+
+  async function handleLibrarySync() {
+    try {
+      await xmlLibrary.syncFromGit()
+      categoryDocuments.value = {}
+    } catch {
+      // Error surfaced via libraryError.
+    }
+  }
+
+  async function handleLibrarySave({ name, description }) {
+    const xmlText = xml.getEditorXmlText() || xml.xmlText.value || ''
+    try {
+      await xmlLibrary.saveCurrentDocument({
+        name,
+        schemaId: schema.schemaId.value,
+        xmlText,
+        description,
+      })
+    } catch (err) {
+      xmlLibrary.libraryError.value = err?.response?.data?.detail || err?.message || String(err)
+    }
+  }
+
+  async function handleLibraryDeletePersonal(name) {
+    try {
+      await xmlLibrary.removePersonalDocument(name, schema.schemaId.value)
+    } catch (err) {
+      xmlLibrary.libraryError.value = err?.response?.data?.detail || err?.message || String(err)
+    }
+  }
+
+  watch(schema.schemaId, (id) => {
+    if (id) xmlLibrary.refreshPersonalDocuments(id)
+  })
+
+  watch(tabs.activeTab, (tab) => {
+    if (tab === 'library') {
+      xmlLibrary.refreshSharedCategories()
+      if (schema.schemaId.value) {
+        xmlLibrary.refreshPersonalDocuments(schema.schemaId.value)
+      }
+    }
   })
 
   const actions = useGeneratorActions({
@@ -128,7 +203,7 @@ export function useGenerator() {
     try {
       const schemas = await listSchemas()
       const primary = pickPrimarySchema(schemas)
-      if (primary) await onDtdUploaded(primary)
+      if (primary) await onDtdUploaded(normalizeDtdUploadResult({ schemas, primary_schema_id: primary.schema_id }))
     } catch {
       // No saved schemas or API unavailable.
     }
@@ -144,6 +219,11 @@ export function useGenerator() {
       mapping.llmAliases.value = []
       mapping.defaultLlmAlias.value = ''
       mapping.llmAlias.value = ''
+    }
+
+    await xmlLibrary.refreshSharedCategories()
+    if (schema.schemaId.value) {
+      await xmlLibrary.refreshPersonalDocuments(schema.schemaId.value)
     }
   })
 
@@ -174,6 +254,22 @@ export function useGenerator() {
     goToValidationError: xml.goToValidationError,
     onEditorContentChange: xml.onEditorContentChange,
     onXmlFileImported: xml.onXmlFileImported,
+    libraryActiveScope: xmlLibrary.activeScope,
+    sharedCategories: xmlLibrary.sharedCategories,
+    personalDocuments: xmlLibrary.personalDocuments,
+    syncStatus: xmlLibrary.syncStatus,
+    librarySyncing: xmlLibrary.syncing,
+    libraryLoading: xmlLibrary.loading,
+    libraryError: xmlLibrary.libraryError,
+    canSaveLibraryDocument,
+    categoryDocuments,
+    loadingCategory,
+    handleLibrarySync,
+    handleLibraryExpandCategory,
+    handleLibraryOpenShared: xmlLibrary.openSharedDocument,
+    handleLibraryOpenPersonal: xmlLibrary.openPersonalDocument,
+    handleLibrarySave,
+    handleLibraryDeletePersonal,
     ...schema,
     ...mapping,
     ...xml,

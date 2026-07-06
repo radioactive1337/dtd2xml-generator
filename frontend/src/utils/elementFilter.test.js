@@ -27,3 +27,17 @@ describe('resolveElementName', () => {
     expect(resolveElementName('payment', elements)).toBe('Payment')
   })
 })
+
+describe('qualified DTD names', () => {
+  const qualified = ['PayDoc', 'cs:add-object', 'cs:add-field']
+
+  it('finds qualified element by local name without duplicate entries', () => {
+    const { matches, total } = filterElements(qualified, 'add-object')
+    expect(matches).toEqual(['cs:add-object'])
+    expect(total).toBe(1)
+  })
+
+  it('resolves local name to qualified element', () => {
+    expect(resolveElementName('add-object', qualified)).toBe('cs:add-object')
+  })
+})

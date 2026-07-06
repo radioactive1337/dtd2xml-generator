@@ -33,7 +33,7 @@ def _default_auth_disabled(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True)
 def _dev_user_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    from app.auth import sessions as auth_sessions
+    from app.auth.sessions import get_current_user
     from app.user_context import UserContext
 
     root = tmp_path / "dev-user-root"
@@ -46,19 +46,17 @@ def _dev_user_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     async def _dev_user(_request=None):
         return ctx
 
-    original_get_current_user = auth_sessions.get_current_user
-
-    async def _get_current_user(request):
-        if is_auth_disabled():
-            return ctx
-        return await original_get_current_user(request)
-
-    monkeypatch.setattr(auth_sessions, "get_current_user", _get_current_user)
+    app.dependency_overrides[get_current_user] = _dev_user
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.fixture
 def auth_enabled(monkeypatch: pytest.MonkeyPatch):
+    from app.auth.sessions import get_current_user
+
     monkeypatch.delenv("AUTH_DISABLED", raising=False)
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.fixture
@@ -107,3 +105,38 @@ def user_b_client(auth_enabled: None) -> TestClient:
     client = TestClient(app)
     login_as(client, "bob")
     return client
+
+
+@pytest.fixture
+def reference_xml_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Tmp xml-library tree with config monkeypatched for reference XML tests."""
+    cache = tmp_path / "reference-xml"
+    root = cache / "xml-library"
+    add_card = root / "add-card"
+    add_card.mkdir(parents=True)
+    (add_card / "add-card.txt").write_text("<root/>", encoding="utf-8")
+
+    settings = {
+        "enabled": True,
+        "repo_url": "https://github.com/org/xml-library.git",
+        "branch": "main",
+        "subdir": "xml-library",
+        "cache_dir": str(cache),
+    }
+
+    from app.config import ReferenceXmlSettings
+
+    ref_settings = ReferenceXmlSettings(**settings)
+
+    monkeypatch.setattr("app.config.get_reference_xml_settings", lambda: ref_settings)
+
+    def _cache_dir():
+        return cache
+
+    def _root():
+        return root
+
+    monkeypatch.setattr("app.config.reference_xml_cache_dir", _cache_dir)
+    monkeypatch.setattr("app.config.reference_xml_root", _root)
+
+    return root

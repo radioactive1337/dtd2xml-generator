@@ -14,10 +14,10 @@ def _upload_dtd(client: TestClient) -> str:
     with dtd_path.open("rb") as f:
         response = client.post(
             "/api/dtd/upload",
-            files={"file": ("main.dtd", f, "application/xml-dtd")},
+            files=[("files", ("main.dtd", f, "application/xml-dtd"))],
         )
     assert response.status_code == 200
-    return response.json()["schema_id"]
+    return response.json()["primary_schema_id"]
 
 
 def test_dtd_schemas_isolated_between_users(user_a_client: TestClient, user_b_client: TestClient):

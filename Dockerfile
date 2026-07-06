@@ -19,6 +19,7 @@ WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        git \
         libxml2 \
         libxslt1.1 \
         libaio1t64 \
