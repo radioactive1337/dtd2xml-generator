@@ -9,6 +9,7 @@ from lxml import etree
 from pydantic import BaseModel, Field
 
 from app.core.dtd_models import AttributeDef, ContentNode, DTDSchema, ElementDef
+from app.core.xml_dtd_element import create_element_for_dtd_name
 
 BuildMode = Literal["minimal", "maximal", "custom"]
 
@@ -64,7 +65,7 @@ class XMLBuilder:
         self.node_count += 1
         current_path = f"{parent_path}.{elem_name}" if parent_path else elem_name
 
-        el = etree.Element(elem_name)
+        el = create_element_for_dtd_name(self.schema, None, elem_name, elem_def)
         self._apply_attributes(el, elem_def, current_path)
         self._build_content(el, elem_def.content_model, current_path, {elem_name})
         return el
@@ -76,6 +77,8 @@ class XMLBuilder:
         current_path: str,
     ) -> None:
         for name, attr in elem_def.attributes.items():
+            if name == "xmlns" or name.startswith("xmlns:"):
+                continue
             if not self._should_include_attribute(attr, current_path, name):
                 continue
             value = self._attribute_placeholder(attr)
@@ -206,13 +209,13 @@ class XMLBuilder:
         child_def = self.schema.elements.get(ref_name)
         if child_def is None:
             self.warnings.append(f"Unknown element reference: {ref_name}")
-            child_el = etree.SubElement(parent_el, ref_name)
+            create_element_for_dtd_name(self.schema, parent_el, ref_name)
             self.node_count += 1
             return
 
         new_ancestry = set(ancestry)
         new_ancestry.add(ref_name)
-        child_el = etree.SubElement(parent_el, ref_name)
+        child_el = create_element_for_dtd_name(self.schema, parent_el, ref_name, child_def)
         self.node_count += 1
         self._apply_attributes(child_el, child_def, child_path)
 

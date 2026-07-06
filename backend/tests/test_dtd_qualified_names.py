@@ -7,6 +7,7 @@ import pytest
 from app.core.dtd_exporter import dtd_local_name, export_flat_dtd
 from app.core.dtd_parser import DTDParser
 from app.core.dtd_validator import validate_xml
+from app.core.xml_builder import BuildConfig, build_xml
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -148,3 +149,41 @@ def test_known_element_names_keep_qualified_names_only(qualified_dtd_dir: Path):
 
     assert "cs:add-object" in names
     assert "add-object" not in names
+
+
+def test_build_xml_qualified_root_element(qualified_dtd_dir: Path):
+    from lxml import etree
+
+    parser = DTDParser(base_dir=qualified_dtd_dir)
+    schema = parser.parse_file(qualified_dtd_dir / "cs.dtd")
+
+    result = build_xml(
+        schema,
+        BuildConfig(root_element="cs:add-object", mode="minimal"),
+    )
+
+    assert "<cs:add-object" in result.xml_text
+    assert 'xmlns:cs="http://www.faktura.ru/cs"' in result.xml_text
+    root = etree.fromstring(result.xml_text.encode("utf-8"))
+    assert root.tag == "{http://www.faktura.ru/cs}add-object"
+
+
+def test_build_xml_qualified_children_under_root(qualified_dtd_dir: Path):
+    from app.core.dtd_merge import merge_dtd_schemas
+
+    parser = DTDParser(base_dir=qualified_dtd_dir)
+    merged = merge_dtd_schemas(
+        [
+            parser.parse_file(qualified_dtd_dir / "root.dtd"),
+            parser.parse_file(qualified_dtd_dir / "cs.dtd"),
+        ]
+    )
+
+    result = build_xml(
+        merged,
+        BuildConfig(root_element="PayDoc", mode="maximal", repeat_count=1),
+    )
+
+    assert "<cs:add-object" in result.xml_text
+    assert "<cs:add-field" in result.xml_text
+    assert validate_xml(result.xml_text, merged).valid is True
