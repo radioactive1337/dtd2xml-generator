@@ -1,8 +1,8 @@
 <template>
-  <details class="field-overrides" :open="detailsOpen" @toggle="onToggle">
+  <details class="field-overrides" :open="expanded" @toggle="onToggle">
     <summary class="overrides-summary">
       <span>Фиксированные значения полей</span>
-      <span v-if="hasOverrides" class="override-badge">
+      <span v-if="filledCount" class="override-badge">
         {{ overrideBadge }}
       </span>
     </summary>
@@ -23,7 +23,7 @@
             :list="datalistListFor(`fo-path-${index}`, 'field-override-paths')"
             class="path-input"
             placeholder="PayDoc.Body.client[0]"
-            @input="updateRow(index, 'target_path', $event.target.value)"
+            @input="$emit('update-row', index, 'target_path', $event.target.value)"
             @focus="openDatalist(`fo-path-${index}`)"
             @blur="scheduleCloseDatalist(`fo-path-${index}`)"
           />
@@ -31,15 +31,15 @@
             :value="row.xml_attr"
             class="attr-input"
             placeholder="inn"
-            @input="updateRow(index, 'xml_attr', $event.target.value)"
+            @input="$emit('update-row', index, 'xml_attr', $event.target.value)"
           />
           <input
             :value="row.value"
             class="value-input"
             placeholder="7707083893"
-            @input="updateRow(index, 'value', $event.target.value)"
+            @input="$emit('update-row', index, 'value', $event.target.value)"
           />
-          <button type="button" class="remove-btn" title="Удалить" @click="removeRow(index)">
+          <button type="button" class="remove-btn" title="Удалить" @click="$emit('remove-row', index)">
             ×
           </button>
         </li>
@@ -49,7 +49,7 @@
         <option v-for="p in pathOptions" :key="p" :value="p" />
       </datalist>
 
-      <button type="button" class="add-btn" @click.stop="addRow">+ Добавить поле</button>
+      <button type="button" class="add-btn" @click.stop="onAddRow">+ Добавить поле</button>
     </div>
   </details>
 </template>
@@ -61,13 +61,12 @@ import { formatCount } from '../../utils/ruPlural'
 import { datalistListFor, openDatalist, scheduleCloseDatalist } from '../../utils/datalistInput'
 
 const props = defineProps({
-  modelValue: { type: Array, default: () => [] },
+  rows: { type: Array, required: true },
   xmlText: { type: String, default: '' },
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['add-row', 'remove-row', 'update-row'])
 
-const rows = computed(() => props.modelValue || [])
 const expanded = ref(false)
 
 const pathOptions = computed(() => {
@@ -76,10 +75,8 @@ const pathOptions = computed(() => {
 })
 
 const filledCount = computed(
-  () => rows.value.filter((r) => r.target_path?.trim() && r.xml_attr?.trim()).length,
+  () => props.rows.filter((r) => r.target_path?.trim() && r.xml_attr?.trim()).length,
 )
-const hasOverrides = computed(() => filledCount.value > 0)
-const detailsOpen = computed(() => expanded.value || rows.value.length > 0 || hasOverrides.value)
 const overrideBadge = computed(() =>
   formatCount(filledCount.value, 'поле', 'поля', 'полей'),
 )
@@ -88,27 +85,9 @@ function onToggle(event) {
   expanded.value = event.target.open
 }
 
-function emitRows(next) {
-  emit('update:modelValue', next)
-}
-
-function addRow() {
+function onAddRow() {
   expanded.value = true
-  emitRows([
-    ...rows.value,
-    { target_path: '', xml_attr: '', value: '', target_element: '' },
-  ])
-}
-
-function removeRow(index) {
-  emitRows(rows.value.filter((_, i) => i !== index))
-}
-
-function updateRow(index, key, value) {
-  const next = rows.value.map((row, i) =>
-    i === index ? { ...row, [key]: value } : row,
-  )
-  emitRows(next)
+  emit('add-row')
 }
 </script>
 

@@ -92,6 +92,25 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
     })
   }
 
+  function emptyFieldOverride() {
+    return { target_path: '', xml_attr: '', value: '', target_element: '' }
+  }
+
+  function addFieldOverride() {
+    fieldOverrides.value.push(emptyFieldOverride())
+  }
+
+  function removeFieldOverride(index) {
+    if (index < 0 || index >= fieldOverrides.value.length) return
+    fieldOverrides.value.splice(index, 1)
+  }
+
+  function updateFieldOverride(index, key, value) {
+    const row = fieldOverrides.value[index]
+    if (!row) return
+    fieldOverrides.value[index] = { ...row, [key]: value }
+  }
+
   function normalizeFieldOverrides(overrides, presetSource = null) {
     if (!overrides?.length) return []
     return overrides.map((o) => ({
@@ -310,6 +329,9 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
     openMappingWizard,
     onWizardClose,
     removeMapping,
+    addFieldOverride,
+    removeFieldOverride,
+    updateFieldOverride,
     saveMappingPreset,
     removeSelectedPreset,
     deleteMappingPreset,

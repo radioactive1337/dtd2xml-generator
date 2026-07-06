@@ -51,7 +51,7 @@
             v-model:auto-validate-after-fill="autoValidateAfterFill"
             v-model:mapping-preset-name="mappingPresetName"
             v-model:selected-mapping-preset-names="selectedMappingPresetNames"
-            v-model:field-overrides="fieldOverrides"
+            :field-overrides="fieldOverrides"
             :is-hybrid-strategy="isHybridStrategy"
             :mapping-presets="mappingPresets"
             :preset-dropdown-label="presetDropdownLabel"
@@ -63,6 +63,9 @@
             @import-mapping-preset="importMappingPreset"
             @export-mapping-preset="exportMappingPreset"
             @open-mapping-wizard="openMappingWizard"
+            @add-field-override="addFieldOverride"
+            @remove-field-override="removeFieldOverride"
+            @update-field-override="updateFieldOverride"
             @remove-mapping="removeMapping"
             @delete-mapping-preset="deleteMappingPreset"
             @remove-selected-preset="removeSelectedPreset"
@@ -210,6 +213,9 @@ const {
   openMappingWizard,
   onWizardClose,
   removeMapping,
+  addFieldOverride,
+  removeFieldOverride,
+  updateFieldOverride,
   saveMappingPreset,
   removeSelectedPreset,
   deleteMappingPreset,

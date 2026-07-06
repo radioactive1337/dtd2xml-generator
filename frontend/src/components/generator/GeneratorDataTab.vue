@@ -38,9 +38,11 @@
     </label>
 
     <FieldOverridesPanel
-      :model-value="fieldOverrides"
+      :rows="fieldOverrides"
       :xml-text="xmlText"
-      @update:model-value="$emit('update:fieldOverrides', $event)"
+      @add-row="$emit('add-field-override')"
+      @remove-row="$emit('remove-field-override', $event)"
+      @update-row="(index, key, value) => $emit('update-field-override', index, key, value)"
     />
 
     <div v-if="isHybridStrategy" class="db-overrides-panel">
@@ -226,7 +228,9 @@ const emit = defineEmits([
   'update:autoValidateAfterFill',
   'update:mappingPresetName',
   'update:selectedMappingPresetNames',
-  'update:fieldOverrides',
+  'add-field-override',
+  'remove-field-override',
+  'update-field-override',
   'save-mapping-preset',
   'import-mapping-preset',
   'export-mapping-preset',
