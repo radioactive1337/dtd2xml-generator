@@ -7,6 +7,14 @@ export function normalizeElementSearchKey(text) {
   return (text || '').toLowerCase().replace(/[\s_\-]+/g, '')
 }
 
+/** Lower rank = better match (exact, then prefix, then substring). */
+function elementMatchRank(el, key) {
+  const nk = normalizeElementSearchKey(el)
+  if (nk === key) return 0
+  if (nk.startsWith(key)) return 1
+  return 2
+}
+
 /**
  * Map typed query to a DTD element name when the match is unambiguous.
  * @param {string} query
@@ -51,7 +59,15 @@ export function filterElements(elements, query) {
   }
 
   const key = normalizeElementSearchKey(q)
-  const allMatches = list.filter((el) => normalizeElementSearchKey(el).includes(key))
+  const allMatches = list
+    .map((el, index) => ({ el, index }))
+    .filter(({ el }) => normalizeElementSearchKey(el).includes(key))
+    .sort((a, b) => {
+      const rankDiff = elementMatchRank(a.el, key) - elementMatchRank(b.el, key)
+      if (rankDiff !== 0) return rankDiff
+      return a.index - b.index
+    })
+    .map(({ el }) => el)
   return {
     matches: allMatches.slice(0, ELEMENT_FILTER_MAX_DISPLAY),
     total: allMatches.length,
