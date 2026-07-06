@@ -190,6 +190,11 @@ export function useGeneratorXml({
     xmlSyncHint.value = ''
   }
 
+  async function onEditorClear() {
+    clearGenerationState()
+    await setProgrammaticXml('', { dirty: false })
+  }
+
   function dispose() {}
 
   return {
@@ -205,6 +210,7 @@ export function useGeneratorXml({
     getEditorXmlText,
     setProgrammaticXml,
     onEditorContentChange,
+    onEditorClear,
     onXmlFileImported,
     syncFromPastedXml,
     restoreFromHistory,

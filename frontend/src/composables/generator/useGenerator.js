@@ -253,6 +253,7 @@ export function useGenerator() {
     restoreFromHistory: (entry) => xml.restoreFromHistory(entry, error),
     goToValidationError: xml.goToValidationError,
     onEditorContentChange: xml.onEditorContentChange,
+    onEditorClear: xml.onEditorClear,
     onXmlFileImported: xml.onXmlFileImported,
     libraryActiveScope: xmlLibrary.activeScope,
     sharedCategories: xmlLibrary.sharedCategories,

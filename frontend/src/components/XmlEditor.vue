@@ -31,6 +31,14 @@
         <button class="btn-secondary" :disabled="!modelValue" @click="downloadXml">
           Скачать .xml
         </button>
+        <button
+          class="btn-secondary"
+          :disabled="!modelValue"
+          title="Очистить содержимое редактора"
+          @click="clearEditor"
+        >
+          Очистить
+        </button>
       </div>
     </div>
     <p v-if="importError" class="import-error">{{ importError }}</p>
@@ -51,7 +59,7 @@ const props = defineProps({
   validationErrors: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['content-change', 'import'])
+const emit = defineEmits(['content-change', 'import', 'clear'])
 
 const { isDark } = useTheme()
 
@@ -187,6 +195,11 @@ async function onFileSelect(e) {
 async function formatDocument() {
   if (!editor) return
   await editor.getAction('editor.action.formatDocument')?.run()
+}
+
+function clearEditor() {
+  if (!props.modelValue) return
+  emit('clear')
 }
 
 function goToPosition(line, column) {

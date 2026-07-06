@@ -153,6 +153,7 @@
         :filename="`${rootElement || 'generated'}.xml`"
         :validation-errors="validationResult?.valid === false ? validationResult.errors : []"
         @content-change="onEditorContentChange"
+        @clear="onEditorClear"
         @import="onXmlFileImported"
       />
     </div>
@@ -248,6 +249,7 @@ const {
   onWizardFinish,
   goToValidationError,
   onEditorContentChange,
+  onEditorClear,
   onXmlFileImported,
   restoreFromHistory,
   removeHistoryEntry,
