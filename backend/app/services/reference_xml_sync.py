@@ -56,7 +56,9 @@ def _resolve_repo_url(settings: ReferenceXmlSettings) -> str:
     token = os.getenv("REFERENCE_XML_GIT_TOKEN", "").strip()
     if token and url.startswith("https://"):
         if "@" not in url.split("://", 1)[1]:
-            url = url.replace("https://", f"https://{token}@", 1)
+            # GitLab and similar: https://oauth2:<token>@host/... (not https://<token>@...)
+            user = os.getenv("REFERENCE_XML_GIT_USER", "oauth2").strip() or "oauth2"
+            url = url.replace("https://", f"https://{user}:{token}@", 1)
     return url
 
 
