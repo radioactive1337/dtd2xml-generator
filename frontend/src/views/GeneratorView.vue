@@ -178,6 +178,7 @@ const {
   wizardInitialMapping,
   mappingPreview,
   sqlMappings,
+  fieldOverrides,
   presetDropdownLabel,
   mappingValidation,
   hasMappingBlockers,
