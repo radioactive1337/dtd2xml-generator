@@ -2,7 +2,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { listSchemas } from '../../api/dtd'
 import { getConfigAliases } from '../../api/config'
 import { stageFillXml } from '../../api/fill'
-import { pickPrimarySchema } from '../../utils/dtdSchema'
+import { pickPrimarySchema, normalizeDtdUploadResult } from '../../utils/dtdSchema'
 import { clearAllDatalistState } from '../../utils/datalistInput'
 import { formatElements } from '../../utils/ruPlural'
 import { useGenerationHistory } from '../useGenerationHistory'
@@ -203,7 +203,7 @@ export function useGenerator() {
     try {
       const schemas = await listSchemas()
       const primary = pickPrimarySchema(schemas)
-      if (primary) await onDtdUploaded(primary)
+      if (primary) await onDtdUploaded(normalizeDtdUploadResult({ schemas, primary_schema_id: primary.schema_id }))
     } catch {
       // No saved schemas or API unavailable.
     }

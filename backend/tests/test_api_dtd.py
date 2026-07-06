@@ -27,14 +27,59 @@ def test_upload_dtd(client: TestClient):
     with dtd_path.open("rb") as f:
         response = client.post(
             "/api/dtd/upload",
-            files={"file": ("main.dtd", f, "application/xml-dtd")},
+            files=[("files", ("main.dtd", f, "application/xml-dtd"))],
         )
 
     assert response.status_code == 200
     data = response.json()
-    assert "schema_id" in data
-    assert data["element_count"] > 0
-    assert "PayDoc" in data["elements"]
+    assert "primary_schema_id" in data
+    assert len(data["schemas"]) == 1
+    assert data["primary_schema_id"] == data["schemas"][0]["schema_id"]
+    assert data["schemas"][0]["element_count"] > 0
+    assert "PayDoc" in data["schemas"][0]["elements"]
+
+
+def test_upload_multiple_dtd(client: TestClient, tmp_path):
+    from app.user_context import dev_user_context
+
+    dtd_dir = dev_user_context().dtd_dir
+    dtd_dir.mkdir(parents=True, exist_ok=True)
+    (dtd_dir / "types.dtd").write_bytes((FIXTURES / "types.dtd").read_bytes())
+
+    uploads = [
+        ("v1.dtd", FIXTURES / "v1.dtd"),
+        ("v2.dtd", FIXTURES / "v2.dtd"),
+    ]
+    files = []
+    for name, path in uploads:
+        files.append(("files", (name, path.open("rb"), "application/xml-dtd")))
+
+    try:
+        response = client.post("/api/dtd/upload", files=files)
+    finally:
+        for _, (_, handle, _) in files:
+            handle.close()
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["schemas"]) == 2
+    roots = {tuple(schema["elements"]) for schema in data["schemas"]}
+    assert ("Legacy",) in roots
+    assert "PayDoc" in {element for schema in data["schemas"] for element in schema["elements"]}
+
+
+def test_upload_more_than_three_dtd_rejected(client: TestClient):
+    files = [
+        ("files", (f"v{i}.dtd", (FIXTURES / "v1.dtd").open("rb"), "application/xml-dtd"))
+        for i in range(4)
+    ]
+    try:
+        response = client.post("/api/dtd/upload", files=files)
+    finally:
+        for _, (_, handle, _) in files:
+            handle.close()
+
+    assert response.status_code == 400
 
 
 def test_list_schemas(client: TestClient):
@@ -93,6 +138,6 @@ def _upload_fixture(client: TestClient) -> str:
     with dtd_path.open("rb") as f:
         response = client.post(
             "/api/dtd/upload",
-            files={"file": ("main.dtd", f, "application/xml-dtd")},
+            files=[("files", ("main.dtd", f, "application/xml-dtd"))],
         )
-    return response.json()["schema_id"]
+    return response.json()["primary_schema_id"]

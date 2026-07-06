@@ -61,6 +61,6 @@ def _upload_fixture(client: TestClient) -> str:
     with dtd_path.open("rb") as f:
         response = client.post(
             "/api/dtd/upload",
-            files={"file": ("main.dtd", f, "application/xml-dtd")},
+            files=[("files", ("main.dtd", f, "application/xml-dtd"))],
         )
-    return response.json()["schema_id"]
+    return response.json()["primary_schema_id"]

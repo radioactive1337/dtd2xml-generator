@@ -11,7 +11,8 @@
       <input
         ref="fileInput"
         type="file"
-        accept=".dtd,.ent,.mod,.jar"
+        accept=".dtd,.jar"
+        multiple
         style="display: none"
         @change="onFileSelect"
       />
@@ -26,7 +27,7 @@
       <template v-else>
         <span class="drop-icon">↑</span>
         <span class="drop-text">Перетащите DTD или JAR сюда или нажмите для выбора</span>
-        <span class="drop-sub">.dtd, .ent, .mod, .jar</span>
+        <span class="drop-sub">до 3 .dtd или один .jar</span>
       </template>
     </div>
     <p v-if="error" class="error-msg">{{ error }}</p>
@@ -36,6 +37,7 @@
 <script setup>
 import { ref } from 'vue'
 import { uploadDtd, uploadDtdJar } from '../api/dtd'
+import { normalizeDtdUploadResult } from '../utils/dtdSchema'
 
 defineProps({
   isLoaded: { type: Boolean, default: false },
@@ -54,13 +56,41 @@ function isJarFile(file) {
   return file.name.toLowerCase().endsWith('.jar')
 }
 
-async function processFile(file) {
-  if (!file) return
+function isDtdFile(file) {
+  return file.name.toLowerCase().endsWith('.dtd')
+}
+
+function collectUploadFiles(fileList) {
+  const files = [...fileList]
+  if (!files.length) return null
+
+  if (files.length === 1 && isJarFile(files[0])) {
+    return { kind: 'jar', files: [files[0]] }
+  }
+
+  const dtdFiles = files.filter(isDtdFile)
+  if (!dtdFiles.length) {
+    throw new Error('Выберите до 3 файлов .dtd или один .jar')
+  }
+  if (dtdFiles.length > 3) {
+    throw new Error('Можно загрузить не более 3 DTD файлов за раз')
+  }
+  return { kind: 'dtd', files: dtdFiles }
+}
+
+async function processFiles(fileList) {
+  if (!fileList?.length) return
   loading.value = true
   error.value = ''
   try {
-    const result = isJarFile(file) ? await uploadDtdJar(file) : await uploadDtd(file)
-    emit('uploaded', result)
+    const selection = collectUploadFiles(fileList)
+    if (!selection) return
+
+    const result =
+      selection.kind === 'jar'
+        ? await uploadDtdJar(selection.files[0])
+        : await uploadDtd(selection.files)
+    emit('uploaded', normalizeDtdUploadResult(result))
   } catch (e) {
     error.value = e.message
   } finally {
@@ -70,13 +100,12 @@ async function processFile(file) {
 
 function onDrop(e) {
   isDragging.value = false
-  const file = e.dataTransfer.files[0]
-  processFile(file)
+  processFiles(e.dataTransfer.files)
 }
 
 function onFileSelect(e) {
-  const file = e.target.files[0]
-  processFile(file)
+  processFiles(e.target.files)
+  e.target.value = ''
 }
 </script>
 

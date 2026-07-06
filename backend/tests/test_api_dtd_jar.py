@@ -35,40 +35,21 @@ def _upload_jar_from_bytes(
     jar_bytes: bytes,
     *,
     inner_path: str = "META-INF/dtd/",
-    entry_file: str = "v2.dtd",
-) -> dtd_routes.SchemaResponse:
-    entry_basename = Path(entry_file).name
+) -> dtd_routes.MultiSchemaResponse:
     extracted = extract_jar_dtd_files(jar_bytes, dtd_user.dtd_dir, prefix=inner_path)
+    entry_points = dtd_routes._entry_point_paths(dtd_user.dtd_dir)
+    if not entry_points:
+        raise LookupError(f"No .dtd entry points found in {inner_path}")
 
-    if entry_basename not in extracted:
-        raise LookupError(
-            f"entry_file '{entry_basename}' not found in {inner_path}"
-        )
-
-    entry_path = extracted[entry_basename]
-    dtd_routes._validate_dtd_references(entry_path, set(extracted))
-
-    schema_id = dtd_routes._parse_and_register(
+    schema_ids = dtd_routes._parse_entry_points(
         dtd_user,
-        entry_path,
-        schema_id=dtd_routes._read_schema_id(entry_path),
+        entry_points,
+        available_basenames=set(extracted),
     )
-    schema = dtd_routes._user_registry(dtd_user)[schema_id]
-    dtd_routes._cleanup_schema_storage(
-        dtd_user,
-        keep_basenames=dtd_routes._source_basenames(schema),
-        keep_schema_ids={schema_id},
-    )
-
-    return dtd_routes.SchemaResponse(
-        schema_id=schema_id,
-        source_files=schema.source_files,
-        element_count=len(schema.elements),
-        elements=schema.root_elements(),
-    )
+    return dtd_routes._multi_schema_response(dtd_user, schema_ids)
 
 
-def test_upload_jar_parses_entry_and_cleans_stale_files(dtd_user: UserContext):
+def test_upload_jar_parses_all_entry_points_and_cleans_stale_files(dtd_user: UserContext):
     jar_bytes = _build_jar(
         {
             "META-INF/dtd/v2.dtd": (FIXTURES / "v2.dtd").read_bytes(),
@@ -77,28 +58,39 @@ def test_upload_jar_parses_entry_and_cleans_stale_files(dtd_user: UserContext):
         }
     )
 
-    result = _upload_jar_from_bytes(dtd_user, jar_bytes, entry_file="v2.dtd")
+    result = _upload_jar_from_bytes(dtd_user, jar_bytes)
 
-    assert result.element_count > 0
-    assert "PayDoc" in result.elements
+    assert len(result.schemas) == 2
+    assert result.primary_schema_id
 
-    source_basenames = {Path(path).name for path in result.source_files}
-    assert source_basenames == {"v2.dtd", "types.dtd"}
+    by_source = {
+        Path(schema.source_files[0]).name: schema for schema in result.schemas
+    }
+    assert by_source["v2.dtd"].element_count > 0
+    assert "PayDoc" in by_source["v2.dtd"].elements
+    assert by_source["v1.dtd"].elements == ["Legacy"]
+
+    source_basenames = {
+        Path(path).name
+        for schema in result.schemas
+        for path in schema.source_files
+    }
+    assert source_basenames == {"v1.dtd", "v2.dtd", "types.dtd"}
 
     assert (dtd_user.dtd_dir / "v2.dtd").is_file()
+    assert (dtd_user.dtd_dir / "v1.dtd").is_file()
     assert (dtd_user.dtd_dir / "types.dtd").is_file()
-    assert not (dtd_user.dtd_dir / "v1.dtd").exists()
 
 
-def test_upload_jar_entry_file_not_found(dtd_user: UserContext):
+def test_upload_jar_no_entry_points(dtd_user: UserContext):
     jar_bytes = _build_jar(
         {
-            "META-INF/dtd/v1.dtd": (FIXTURES / "v1.dtd").read_bytes(),
+            "META-INF/dtd/types.ent": b"<!ENTITY % Boolean \"(true|false)\">",
         }
     )
 
-    with pytest.raises(LookupError, match="entry_file 'v2.dtd' not found"):
-        _upload_jar_from_bytes(dtd_user, jar_bytes, entry_file="v2.dtd")
+    with pytest.raises(LookupError, match="No .dtd entry points found"):
+        _upload_jar_from_bytes(dtd_user, jar_bytes)
 
 
 def test_upload_jar_missing_referenced_file(dtd_user: UserContext):
@@ -109,4 +101,4 @@ def test_upload_jar_missing_referenced_file(dtd_user: UserContext):
     )
 
     with pytest.raises(ValueError, match="types.dtd"):
-        _upload_jar_from_bytes(dtd_user, jar_bytes, entry_file="v2.dtd")
+        _upload_jar_from_bytes(dtd_user, jar_bytes)
