@@ -73,11 +73,32 @@
       </ul>
       <p class="history-hint">Сохраняются последние {{ maxEntries }} результатов в браузере.</p>
     </section>
+
+    <XmlLibraryPanel
+      :active-scope="libraryActiveScope"
+      :shared-categories="sharedCategories"
+      :personal-documents="personalDocuments"
+      :sync-status="syncStatus"
+      :syncing="librarySyncing"
+      :loading="libraryLoading"
+      :library-error="libraryError"
+      :can-save="canSaveLibraryDocument"
+      :category-documents="categoryDocuments"
+      :loading-category="loadingCategory"
+      @update:active-scope="$emit('update:library-active-scope', $event)"
+      @sync="$emit('library-sync')"
+      @expand-category="(cat) => $emit('library-expand-category', cat)"
+      @open-shared="(cat, id) => $emit('library-open-shared', cat, id)"
+      @open-personal="(name) => $emit('library-open-personal', name)"
+      @delete-personal="(name) => $emit('library-delete-personal', name)"
+      @save="(payload) => $emit('library-save', payload)"
+    />
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
+import XmlLibraryPanel from './XmlLibraryPanel.vue'
 import { formatErrors, formatNodes, formatWarnings } from '../../utils/ruPlural'
 
 const props = defineProps({
@@ -86,9 +107,31 @@ const props = defineProps({
   xmlSyncHint: { type: String, default: '' },
   history: { type: Array, default: () => [] },
   maxEntries: { type: Number, default: 20 },
+  libraryActiveScope: { type: String, default: 'shared' },
+  sharedCategories: { type: Array, default: () => [] },
+  personalDocuments: { type: Array, default: () => [] },
+  syncStatus: { type: Object, default: null },
+  librarySyncing: { type: Boolean, default: false },
+  libraryLoading: { type: Boolean, default: false },
+  libraryError: { type: String, default: '' },
+  canSaveLibraryDocument: { type: Boolean, default: false },
+  categoryDocuments: { type: Object, default: () => ({}) },
+  loadingCategory: { type: String, default: null },
 })
 
-defineEmits(['go-to-error', 'restore', 'remove', 'clear-history'])
+defineEmits([
+  'go-to-error',
+  'restore',
+  'remove',
+  'clear-history',
+  'update:library-active-scope',
+  'library-sync',
+  'library-expand-category',
+  'library-open-shared',
+  'library-open-personal',
+  'library-delete-personal',
+  'library-save',
+])
 
 const TYPE_LABELS = {
   generate: 'Генерация',

@@ -7,5 +7,12 @@
   },
   "oracle_client_lib_dir": null,
   "oracle_home": null,
-  "ora_tzfile": null
+  "ora_tzfile": null,
+  "reference_xml": {
+    "enabled": true,
+    "repo_url": "git@github.com:org/xml-library.git",
+    "branch": "main",
+    "subdir": "xml-library",
+    "cache_dir": "data/reference-xml"
+  }
 }

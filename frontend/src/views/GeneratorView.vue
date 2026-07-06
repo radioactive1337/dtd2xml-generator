@@ -78,10 +78,26 @@
             :xml-sync-hint="xmlSyncHint"
             :history="generationHistory"
             :max-entries="historyMaxEntries"
+            v-model:library-active-scope="libraryActiveScope"
+            :shared-categories="sharedCategories"
+            :personal-documents="personalDocuments"
+            :sync-status="syncStatus"
+            :library-syncing="librarySyncing"
+            :library-loading="libraryLoading"
+            :library-error="libraryError"
+            :can-save-library-document="canSaveLibraryDocument"
+            :category-documents="categoryDocuments"
+            :loading-category="loadingCategory"
             @go-to-error="goToValidationError"
             @restore="restoreFromHistory"
             @remove="removeHistoryEntry"
             @clear-history="clearGenerationHistory"
+            @library-sync="handleLibrarySync"
+            @library-expand-category="handleLibraryExpandCategory"
+            @library-open-shared="handleLibraryOpenShared"
+            @library-open-personal="handleLibraryOpenPersonal"
+            @library-save="handleLibrarySave"
+            @library-delete-personal="handleLibraryDeletePersonal"
           />
         </div>
 
@@ -228,6 +244,22 @@ const {
   restoreFromHistory,
   removeHistoryEntry,
   clearGenerationHistory,
+  libraryActiveScope,
+  sharedCategories,
+  personalDocuments,
+  syncStatus,
+  librarySyncing,
+  libraryLoading,
+  libraryError,
+  canSaveLibraryDocument,
+  categoryDocuments,
+  loadingCategory,
+  handleLibrarySync,
+  handleLibraryExpandCategory,
+  handleLibraryOpenShared,
+  handleLibraryOpenPersonal,
+  handleLibrarySave,
+  handleLibraryDeletePersonal,
   generate,
   fill,
   cancelFill,

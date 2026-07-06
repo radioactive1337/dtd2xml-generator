@@ -107,3 +107,38 @@ def user_b_client(auth_enabled: None) -> TestClient:
     client = TestClient(app)
     login_as(client, "bob")
     return client
+
+
+@pytest.fixture
+def reference_xml_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Tmp xml-library tree with config monkeypatched for reference XML tests."""
+    cache = tmp_path / "reference-xml"
+    root = cache / "xml-library"
+    add_card = root / "add-card"
+    add_card.mkdir(parents=True)
+    (add_card / "add-card.txt").write_text("<root/>", encoding="utf-8")
+
+    settings = {
+        "enabled": True,
+        "repo_url": "https://github.com/org/xml-library.git",
+        "branch": "main",
+        "subdir": "xml-library",
+        "cache_dir": str(cache),
+    }
+
+    from app.config import ReferenceXmlSettings
+
+    ref_settings = ReferenceXmlSettings(**settings)
+
+    monkeypatch.setattr("app.config.get_reference_xml_settings", lambda: ref_settings)
+
+    def _cache_dir():
+        return cache
+
+    def _root():
+        return root
+
+    monkeypatch.setattr("app.config.reference_xml_cache_dir", _cache_dir)
+    monkeypatch.setattr("app.config.reference_xml_root", _root)
+
+    return root

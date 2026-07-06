@@ -52,6 +52,14 @@ class ConnectionsConfig(BaseModel):
     llm: dict[str, LLMConfig] = Field(default_factory=dict)
 
 
+class ReferenceXmlSettings(BaseModel):
+    enabled: bool = False
+    repo_url: str = ""
+    branch: str = "main"
+    subdir: str = "xml-library"
+    cache_dir: str = "data/reference-xml"
+
+
 def is_auth_disabled() -> bool:
     return os.getenv("AUTH_DISABLED", "").strip().lower() in {"1", "true", "yes"}
 
@@ -359,6 +367,37 @@ def set_default_llm_alias(user: "UserContext", alias: str) -> str:
 
 def save_user_connections_raw(user: "UserContext", raw: dict[str, Any]) -> None:
     _save_raw_user_connections(user, raw)
+
+
+def get_reference_xml_settings() -> ReferenceXmlSettings | None:
+    raw = _load_raw_app_config()
+    ref = raw.get("reference_xml")
+    if not ref or not isinstance(ref, dict):
+        return None
+    settings = ReferenceXmlSettings(**ref)
+    if not settings.enabled:
+        return None
+    return settings
+
+
+def reference_xml_root() -> Path | None:
+    settings = get_reference_xml_settings()
+    if settings is None:
+        return None
+    cache = Path(settings.cache_dir)
+    if not cache.is_absolute():
+        cache = PROJECT_ROOT / cache
+    return cache / settings.subdir
+
+
+def reference_xml_cache_dir() -> Path | None:
+    settings = get_reference_xml_settings()
+    if settings is None:
+        return None
+    cache = Path(settings.cache_dir)
+    if not cache.is_absolute():
+        cache = PROJECT_ROOT / cache
+    return cache
 
 
 # Legacy helpers for tests that patch _find_connections_file

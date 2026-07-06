@@ -38,11 +38,16 @@ class UserContext:
     def mapping_presets_dir(self) -> Path:
         return self.root / "mapping_presets"
 
+    @property
+    def xml_documents_dir(self) -> Path:
+        return self.root / "xml_documents"
+
     def ensure_workspace(self) -> None:
         """Create user directories and seed connections.json if missing."""
         self.dtd_dir.mkdir(parents=True, exist_ok=True)
         self.presets_dir.mkdir(parents=True, exist_ok=True)
         self.mapping_presets_dir.mkdir(parents=True, exist_ok=True)
+        self.xml_documents_dir.mkdir(parents=True, exist_ok=True)
         if not self.connections_path.is_file():
             if USER_CONNECTIONS_TEMPLATE.is_file():
                 shutil.copyfile(USER_CONNECTIONS_TEMPLATE, self.connections_path)
