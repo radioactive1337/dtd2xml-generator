@@ -25,16 +25,14 @@
       </div>
     </div>
 
-    <div v-if="mode === 'maximal' || mode === 'custom'" class="field">
-      <label>Число повторов (+ / *)</label>
-      <input
-        :value="repeatCount"
-        type="number"
-        min="1"
-        max="100"
-        @input="$emit('update:repeatCount', Number($event.target.value))"
-      />
-    </div>
+    <RepeatOverridesPanel
+      v-if="mode === 'maximal' || mode === 'custom'"
+      :repeat-count="repeatCount"
+      :repeat-overrides="repeatOverrides"
+      :repeatable-paths="repeatablePaths"
+      @update:repeat-count="$emit('update:repeatCount', $event)"
+      @update:repeat-overrides="$emit('update:repeatOverrides', $event)"
+    />
 
     <div v-if="mode === 'custom'" class="structure-tree-host">
       <div class="field tree-search-field">
@@ -64,6 +62,7 @@
 import { ref, watch } from 'vue'
 import DtdTreeView from '../DtdTreeView.vue'
 import ElementPicker from '../ElementPicker.vue'
+import RepeatOverridesPanel from './RepeatOverridesPanel.vue'
 import { resolveElementName } from '../../utils/elementFilter'
 
 const props = defineProps({
@@ -73,9 +72,17 @@ const props = defineProps({
   elementDocs: { type: Object, default: () => ({}) },
   mode: { type: String, default: 'minimal' },
   repeatCount: { type: Number, default: 1 },
+  repeatOverrides: { type: Object, default: () => ({}) },
+  repeatablePaths: { type: Array, default: () => [] },
 })
 
-defineEmits(['update:rootElement', 'update:mode', 'update:repeatCount', 'update:customPaths'])
+defineEmits([
+  'update:rootElement',
+  'update:mode',
+  'update:repeatCount',
+  'update:repeatOverrides',
+  'update:customPaths',
+])
 
 const modes = [
   { value: 'minimal', label: 'Минимальный' },

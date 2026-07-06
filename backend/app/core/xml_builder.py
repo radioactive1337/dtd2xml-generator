@@ -18,6 +18,7 @@ class BuildConfig(BaseModel):
     root_element: str
     mode: BuildMode = "minimal"
     repeat_count: int = Field(default=1, ge=1, le=100)
+    repeat_overrides: dict[str, int] = Field(default_factory=dict)
     custom_paths: set[str] = Field(default_factory=set)
 
 
@@ -147,7 +148,7 @@ class XMLBuilder:
         parent_path: str,
         ancestry: set[str],
     ) -> None:
-        count = self._repeat_count(node)
+        count = self._repeat_count(node, parent_path)
         if count == 0:
             return
         for _ in range(count):
@@ -156,18 +157,32 @@ class XMLBuilder:
             else:
                 self._build_content(parent_el, node, parent_path, ancestry)
 
-    def _repeat_count(self, node: ContentNode) -> int:
+    def _node_repeat_path(self, node: ContentNode, context_path: str) -> str:
+        if node.kind == "REF" and node.ref:
+            return f"{context_path}.{node.ref}" if context_path else node.ref
+        return context_path
+
+    def _lookup_repeat_override(self, path: str) -> int | None:
+        if path in self.config.repeat_overrides:
+            return self.config.repeat_overrides[path]
+        normalized = self._normalize_custom_path(path)
+        for override_path, count in self.config.repeat_overrides.items():
+            if self._normalize_custom_path(override_path) == normalized:
+                return count
+        return None
+
+    def _repeat_count(self, node: ContentNode, context_path: str) -> int:
         q = node.quantifier
         if self.config.mode == "minimal":
             if q in ("?", "*"):
                 return 0
             return 1
-        # maximal / custom
-        if q in ("*", "+"):
-            return self.config.repeat_count
-        if q == "?":
+        if q not in ("*", "+"):
             return 1
-        return 1
+        repeat_path = self._node_repeat_path(node, context_path)
+        if override := self._lookup_repeat_override(repeat_path):
+            return override
+        return self.config.repeat_count
 
     def _append_ref(
         self,

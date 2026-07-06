@@ -37,6 +37,8 @@
             v-model:root-element="rootElement"
             v-model:mode="mode"
             v-model:repeat-count="repeatCount"
+            v-model:repeat-overrides="repeatOverrides"
+            :repeatable-paths="repeatablePaths"
             v-model:custom-paths="customPaths"
           />
 
@@ -158,6 +160,8 @@ const {
   rootElement,
   mode,
   repeatCount,
+  repeatOverrides,
+  repeatablePaths,
   customPaths,
   fillStrategy,
   isHybridStrategy,

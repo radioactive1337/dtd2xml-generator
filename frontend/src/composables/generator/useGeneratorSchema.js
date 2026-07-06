@@ -2,6 +2,7 @@ import { ref, watch } from 'vue'
 import { listElements, getElementTree } from '../../api/dtd'
 import { schemaFileName } from '../../utils/dtdSchema'
 import { collectDtdElementPaths } from '../../utils/mappingUtils'
+import { loadRepeatablePaths } from '../../utils/repeatablePaths'
 
 export function useGeneratorSchema() {
   const schemaId = ref('')
@@ -13,8 +14,22 @@ export function useGeneratorSchema() {
   const rootElement = ref('')
   const mode = ref('minimal')
   const repeatCount = ref(1)
+  const repeatOverrides = ref({})
+  const repeatablePaths = ref([])
   const customPaths = ref([])
   const dtdElementPaths = ref([])
+
+  async function refreshRepeatablePaths() {
+    if (!schemaId.value || !rootElement.value) {
+      repeatablePaths.value = []
+      return
+    }
+    try {
+      repeatablePaths.value = await loadRepeatablePaths(schemaId.value, rootElement.value)
+    } catch {
+      repeatablePaths.value = []
+    }
+  }
 
   async function refreshDtdElementPaths() {
     if (!schemaId.value || !rootElement.value) {
@@ -34,6 +49,8 @@ export function useGeneratorSchema() {
 
   watch([schemaId, rootElement], () => {
     refreshDtdElementPaths()
+    refreshRepeatablePaths()
+    repeatOverrides.value = {}
   })
 
   async function applyDtdUpload(result) {
@@ -72,6 +89,8 @@ export function useGeneratorSchema() {
     rootElement,
     mode,
     repeatCount,
+    repeatOverrides,
+    repeatablePaths,
     customPaths,
     dtdElementPaths,
     applyDtdUpload,

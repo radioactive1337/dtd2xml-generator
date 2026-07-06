@@ -9,6 +9,7 @@ export function useGeneratorActions({
   rootElement,
   mode,
   repeatCount,
+  repeatOverrides,
   customPaths,
   fillStrategy,
   llmAlias,
@@ -77,6 +78,7 @@ export function useGeneratorActions({
         root_element: rootElement.value,
         mode: mode.value,
         repeat_count: repeatCount.value,
+        repeat_overrides: repeatOverrides.value,
         custom_paths: mode.value === 'custom' ? customPaths.value : [],
       }
       const result = await generateXml(config)

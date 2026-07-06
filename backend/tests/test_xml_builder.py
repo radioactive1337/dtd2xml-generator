@@ -93,6 +93,25 @@ def test_custom_build(schema):
     assert len(header.findall("Meta")) >= 1
 
 
+def test_custom_build_repeat_overrides(schema):
+    config = BuildConfig(
+        root_element="PayDoc",
+        mode="maximal",
+        repeat_count=2,
+        repeat_overrides={"PayDoc.Body.Record": 4, "PayDoc.Header.Meta": 1},
+    )
+    result = build_xml(schema, config)
+    root = etree.fromstring(result.xml_text.encode("utf-8"))
+
+    header = root.find("Header")
+    assert header is not None
+    assert len(header.findall("Meta")) == 1
+
+    body = root.find("Body")
+    assert body is not None
+    assert len(body.findall("Record")) == 4
+
+
 def test_custom_build_repeat_count(schema):
     config = BuildConfig(
         root_element="PayDoc",

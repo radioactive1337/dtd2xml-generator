@@ -72,6 +72,7 @@ export function useGenerator() {
     rootElement: schema.rootElement,
     mode: schema.mode,
     repeatCount: schema.repeatCount,
+    repeatOverrides: schema.repeatOverrides,
     customPaths: schema.customPaths,
     fillStrategy,
     llmAlias: mapping.llmAlias,
