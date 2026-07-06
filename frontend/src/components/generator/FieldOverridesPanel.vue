@@ -1,5 +1,5 @@
 <template>
-  <details class="field-overrides" :open="hasOverrides">
+  <details class="field-overrides" :open="detailsOpen" @toggle="onToggle">
     <summary class="overrides-summary">
       <span>Фиксированные значения полей</span>
       <span v-if="hasOverrides" class="override-badge">
@@ -49,13 +49,13 @@
         <option v-for="p in pathOptions" :key="p" :value="p" />
       </datalist>
 
-      <button type="button" class="add-btn" @click="addRow">+ Добавить поле</button>
+      <button type="button" class="add-btn" @click.stop="addRow">+ Добавить поле</button>
     </div>
   </details>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { extractXmlElementPaths } from '../../utils/xmlPaths'
 import { formatCount } from '../../utils/ruPlural'
 import { datalistListFor, openDatalist, scheduleCloseDatalist } from '../../utils/datalistInput'
@@ -68,6 +68,7 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const rows = computed(() => props.modelValue || [])
+const expanded = ref(false)
 
 const pathOptions = computed(() => {
   const parsed = extractXmlElementPaths(props.xmlText, { skipFormat: true })
@@ -78,15 +79,21 @@ const filledCount = computed(
   () => rows.value.filter((r) => r.target_path?.trim() && r.xml_attr?.trim()).length,
 )
 const hasOverrides = computed(() => filledCount.value > 0)
+const detailsOpen = computed(() => expanded.value || rows.value.length > 0 || hasOverrides.value)
 const overrideBadge = computed(() =>
   formatCount(filledCount.value, 'поле', 'поля', 'полей'),
 )
+
+function onToggle(event) {
+  expanded.value = event.target.open
+}
 
 function emitRows(next) {
   emit('update:modelValue', next)
 }
 
 function addRow() {
+  expanded.value = true
   emitRows([
     ...rows.value,
     { target_path: '', xml_attr: '', value: '', target_element: '' },

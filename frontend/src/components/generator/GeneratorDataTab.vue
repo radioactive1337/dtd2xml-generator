@@ -187,7 +187,7 @@
       </div>
 
       <div class="mapping-add-row">
-        <button class="btn-add-mapping" @click="$emit('open-mapping-wizard')">+ Добавить маппинг</button>
+        <button type="button" class="btn-add-mapping" @click="$emit('open-mapping-wizard')">+ Добавить маппинг</button>
       </div>
     </div>
   </div>
