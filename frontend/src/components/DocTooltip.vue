@@ -10,24 +10,27 @@
     <slot />
     <Teleport to="body">
       <div
-        v-if="visible && text"
+        v-if="visible && plainText"
         ref="panelRef"
         class="doc-tooltip-panel"
         role="tooltip"
         :style="panelStyle"
       >
-        {{ text }}
+        {{ plainText }}
       </div>
     </Teleport>
   </span>
 </template>
 
 <script setup>
-import { ref, onBeforeUnmount } from 'vue'
+import { ref, onBeforeUnmount, computed } from 'vue'
+import { dtdDocPlainText } from '../utils/dtdDoc'
 
 const props = defineProps({
   text: { type: String, default: '' },
 })
+
+const plainText = computed(() => dtdDocPlainText(props.text))
 
 const anchorRef = ref(null)
 const panelRef = ref(null)
@@ -74,7 +77,7 @@ function updatePosition() {
 }
 
 function showPanel() {
-  if (!props.text?.trim()) return
+  if (!plainText.value?.trim()) return
   visible.value = true
   requestAnimationFrame(updatePosition)
 }

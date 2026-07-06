@@ -17,7 +17,11 @@
       @keydown="onKeydown"
     />
     <p v-if="error" class="picker-error">{{ error }}</p>
-    <p v-else-if="selectedDoc" class="picker-doc">{{ selectedDoc }}</p>
+    <DtdDocBlock
+      v-else-if="showSelectedDoc && selectedDoc"
+      :text="selectedDoc"
+      compact
+    />
     <Teleport to="body">
       <div
         v-if="isOpen"
@@ -39,7 +43,7 @@
             @mousedown.prevent="selectElement(el)"
           >
             <span class="picker-option-name">{{ el }}</span>
-            <span v-if="docFor(el)" class="picker-option-doc">{{ docFor(el) }}</span>
+            <span v-if="docPreview(el)" class="picker-option-doc">{{ docPreview(el) }}</span>
           </li>
         </ul>
         <p class="picker-counter">{{ displayed.matches.length }} из {{ displayed.total }}</p>
@@ -52,11 +56,14 @@
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { filterElements, resolveElementName } from '../utils/elementFilter'
+import { dtdDocPreview } from '../utils/dtdDoc'
+import DtdDocBlock from './DtdDocBlock.vue'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
   elements: { type: Array, default: () => [] },
   elementDocs: { type: Object, default: () => ({}) },
+  showSelectedDoc: { type: Boolean, default: true },
   placeholder: { type: String, default: '' },
   invalid: { type: Boolean, default: false },
   error: { type: String, default: '' },
@@ -81,6 +88,11 @@ const selectedDoc = computed(() => {
 
 function docFor(name) {
   return props.elementDocs[name] || ''
+}
+
+function docPreview(name) {
+  const doc = docFor(name)
+  return doc ? dtdDocPreview(doc) : ''
 }
 
 watch(
@@ -246,13 +258,6 @@ function onKeydown(event) {
   font-size: 11px;
   color: var(--danger);
   margin: 4px 0 0;
-}
-
-.picker-doc {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin: 4px 0 0;
-  line-height: 1.4;
 }
 
 .picker-dropdown {

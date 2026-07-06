@@ -27,10 +27,11 @@
             v-model="draft.target_element"
             :elements="elements"
             :element-docs="elementDocs"
+            :show-selected-doc="false"
             placeholder="Имя элемента (введите или выберите из списка)"
             @update:model-value="onTargetElementChange"
           />
-          <p v-if="targetElementDoc" class="wizard-doc">{{ targetElementDoc }}</p>
+          <DtdDocBlock v-if="targetElementDoc" :text="targetElementDoc" />
           <p class="wizard-hint">Выберите XML-элемент, атрибуты которого будут заполнены из SQL.</p>
         </div>
 
@@ -123,7 +124,7 @@
             <ul class="attr-docs-list">
               <li v-for="entry in targetAttributeDocEntries" :key="entry.name">
                 <code>{{ entry.name }}</code>
-                <span>{{ entry.doc }}</span>
+                <DtdDocBlock :text="entry.doc" compact />
               </li>
             </ul>
           </div>
@@ -139,12 +140,16 @@
                 v-model="field.xml_attr"
                 class="field-input"
                 :list="'wizard-attrs-list'"
-                :title="attributeDoc(field.xml_attr)"
+                :title="dtdDocPlainText(attributeDoc(field.xml_attr))"
                 placeholder="Атрибут XML"
               />
               <button class="btn-icon-remove" title="Удалить" @click="removeField(fi)">×</button>
             </div>
-            <p v-if="attributeDoc(field.xml_attr)" class="field-doc">{{ attributeDoc(field.xml_attr) }}</p>
+            <DtdDocBlock
+              v-if="attributeDoc(field.xml_attr)"
+              :text="attributeDoc(field.xml_attr)"
+              compact
+            />
           </div>
           <datalist id="wizard-attrs-list">
             <option v-for="attr in xmlAttrs" :key="attr" :value="attr" />
@@ -217,6 +222,8 @@ import {
   isOptionSelected,
 } from '../utils/datalistInput'
 import ElementPicker from './ElementPicker.vue'
+import DtdDocBlock from './DtdDocBlock.vue'
+import { dtdDocPlainText } from '../utils/dtdDoc'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -718,26 +725,10 @@ function finish() {
   gap: 6px;
 }
 
-.field-doc {
+.attr-docs-list code {
   font-size: 11px;
-  color: var(--text-muted);
-  line-height: 1.35;
-  margin: 0 0 4px;
-  padding-left: 2px;
+  margin-top: 2px;
 }
-
-.wizard-doc {
-  font-size: 12px;
-  color: var(--text);
-  margin: 0;
-  padding: 8px 10px;
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
-  border-left: 3px solid var(--accent);
-  border-radius: 0 var(--radius) var(--radius) 0;
-  line-height: 1.45;
-}
-
-.attr-docs-panel {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 8px 10px;
@@ -763,19 +754,12 @@ function finish() {
 }
 
 .attr-docs-list li {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr;
   gap: 8px;
   font-size: 11px;
   line-height: 1.35;
-}
-
-.attr-docs-list code {
-  flex-shrink: 0;
-  font-size: 11px;
-}
-
-.attr-docs-list span {
-  color: var(--text-muted);
+  align-items: start;
 }
 
 .field-input {
