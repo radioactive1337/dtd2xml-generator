@@ -136,3 +136,15 @@ def test_validate_user_xmlns_case(qualified_dtd_dir: Path):
 def test_dtd_local_name_helper():
     assert dtd_local_name("cs:add-object") == "add-object"
     assert dtd_local_name("PayDoc") == "PayDoc"
+
+
+def test_known_element_names_keep_qualified_names_only(qualified_dtd_dir: Path):
+    from app.api.routes.dtd import _known_element_names
+
+    parser = DTDParser(base_dir=qualified_dtd_dir)
+    module_schema = parser.parse_file(qualified_dtd_dir / "cs.dtd")
+
+    names = _known_element_names(module_schema)
+
+    assert "cs:add-object" in names
+    assert "add-object" not in names

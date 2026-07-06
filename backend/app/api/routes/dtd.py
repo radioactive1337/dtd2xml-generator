@@ -285,12 +285,7 @@ def _pick_primary_schema_id(schemas: list[SchemaResponse]) -> str:
 
 
 def _known_element_names(schema: DTDSchema) -> list[str]:
-    names: set[str] = set()
-    for name in schema.elements:
-        names.add(name)
-        if ":" in name:
-            names.add(name.split(":", 1)[1])
-    return sorted(names)
+    return sorted(schema.elements)
 
 
 def _schema_response(user: UserContext, schema_id: str) -> SchemaResponse:

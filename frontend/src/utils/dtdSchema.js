@@ -13,7 +13,6 @@ export function collectElementsFromSchemas(schemas) {
   for (const schema of schemas) {
     for (const name of schema.elements || []) {
       names.add(name)
-      names.add(dtdLocalName(name))
     }
   }
   return [...names].sort()
