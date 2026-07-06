@@ -6,7 +6,7 @@ import {
   createNodeIdFactory,
   injectXmlChildrenIntoAnyNode,
 } from './model'
-import { buildCheckedPathsFromElementPaths, resolveChoiceSelectionsFromXml } from './xmlSync'
+import { buildCheckedPathsFromElementPaths, refreshAnyContainersFromXml, resolveChoiceSelectionsFromXml } from './xmlSync'
 
 describe('resolveChoiceSelectionsFromXml with normalized paths', () => {
   it('picks the branch that matches indexed XML instance paths', () => {
@@ -153,5 +153,23 @@ describe('ANY content from pasted XML', () => {
     const block = container.children.find((n) => n.name === 'Block')
     expect(block?.hasChildren).toBe(true)
     expect(block?.children).toEqual([])
+  })
+
+  it('drops ANY children removed from XML on re-sync', () => {
+    const root = buildNodeFromModel({
+      name: 'Wrapper',
+      model: { kind: 'ANY' },
+      path: 'Wrapper',
+      depth: 0,
+      required: true,
+      ...modelOptions(),
+    })
+
+    const paths = ['Wrapper', 'Wrapper.Section', 'Wrapper.Note']
+    injectXmlChildrenIntoAnyNode(root, paths, modelOptions())
+    expect(root.children.map((n) => n.name)).toEqual(['Note', 'Section'])
+
+    refreshAnyContainersFromXml(root, ['Wrapper', 'Wrapper.Section'], modelOptions())
+    expect(root.children.map((n) => n.name)).toEqual(['Section'])
   })
 })

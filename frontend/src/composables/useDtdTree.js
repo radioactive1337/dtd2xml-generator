@@ -270,16 +270,18 @@ export function useDtdTree(props, emit) {
     }
   }
 
-  async function applyElementPathsToTree(elementPaths, seq = loadSeq) {
+  async function applyElementPathsToTree(elementPaths, seq = loadSeq, { quiet = false } = {}) {
     if (!treeRoot.value || !elementPaths?.length || isStale(seq)) return
 
     const syncPaths = normalizeElementPathsForTreeSync(elementPaths)
     const count = syncPaths.length
-    beginLoad(
-      count === 1
-        ? 'Синхронизация 1 структурного пути…'
-        : `Синхронизация ${count} структурных путей…`,
-    )
+    if (!quiet) {
+      beginLoad(
+        count === 1
+          ? 'Синхронизация 1 структурного пути…'
+          : `Синхронизация ${count} структурных путей…`,
+      )
+    }
     try {
       const getTree = (elementName) => getElementTree(props.schemaId, elementName)
       const nextChecked = await buildCheckedPathsFromElementPaths({
@@ -297,11 +299,11 @@ export function useDtdTree(props, emit) {
       refreshFlat()
       emitPaths()
     } finally {
-      endLoad(seq)
+      if (!quiet) endLoad(seq)
     }
   }
 
-  async function applyXmlElementPaths(elementPaths) {
+  async function applyXmlElementPaths(elementPaths, { quiet = false } = {}) {
     if (!props.schemaId || !elementPaths?.length) return
 
     const seq = loadSeq
@@ -316,7 +318,7 @@ export function useDtdTree(props, emit) {
     pendingXmlPaths.value = elementPaths
     if (!treeRoot.value) return
 
-    await applyElementPathsToTree(elementPaths, seq)
+    await applyElementPathsToTree(elementPaths, seq, { quiet })
     if (!isStale(seq)) pendingXmlPaths.value = null
   }
 

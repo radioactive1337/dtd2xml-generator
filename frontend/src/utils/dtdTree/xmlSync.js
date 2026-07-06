@@ -15,6 +15,16 @@ import {
   pruneOrphanPaths,
 } from './selection'
 
+/** Rebuild children for every ANY container from the current XML element paths. */
+export function refreshAnyContainersFromXml(treeRoot, elementPaths, modelOptions) {
+  if (!treeRoot) return
+  walkTree(treeRoot, (node) => {
+    if (node._isAnyContainer) {
+      injectXmlChildrenIntoAnyNode(node, elementPaths, modelOptions)
+    }
+  })
+}
+
 function matchedElPathsUnderAlternative(altNode, elPathSet) {
   const matched = new Set()
   walkTree(altNode, (n) => {
@@ -205,6 +215,8 @@ export async function buildCheckedPathsFromElementPaths({
   const elPathSet = new Set(syncPaths)
   const modelOptionsWithXml = { ...modelOptions, xmlElementPaths: syncPaths }
 
+  refreshAnyContainersFromXml(treeRoot, syncPaths, modelOptionsWithXml)
+
   let choiceSelections = resolveChoiceSelectionsFromXml(
     treeRoot,
     elPathSet,
@@ -221,6 +233,8 @@ export async function buildCheckedPathsFromElementPaths({
     choiceSelections,
   )
   if (isStale()) return null
+
+  refreshAnyContainersFromXml(treeRoot, syncPaths, modelOptionsWithXml)
 
   choiceSelections = resolveChoiceSelectionsFromXml(
     treeRoot,

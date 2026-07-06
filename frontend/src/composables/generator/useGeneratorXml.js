@@ -3,7 +3,14 @@ import {
   canonicalizeXmlElementName,
   canonicalizeXmlElementPaths,
   extractXmlElementPaths,
+  normalizeElementPathsForTreeSync,
 } from '../../utils/xmlPaths'
+
+const TREE_SYNC_DEBOUNCE_MS = 600
+
+function pathsSyncKey(paths) {
+  return [...paths].sort().join('\0')
+}
 
 export function useGeneratorXml({
   schemaId,
@@ -26,6 +33,8 @@ export function useGeneratorXml({
 
   let ignoreNextXmlWatch = false
   let skipModeSync = false
+  let treeSyncTimer = null
+  let lastSyncedPathsKey = ''
 
   const availableElementPaths = computed(() => {
     const text = (liveXmlText.value || xmlText.value || '').trim()
@@ -78,6 +87,41 @@ export function useGeneratorXml({
     liveXmlText.value = text || ''
     xmlText.value = text || ''
     xmlDirty.value = true
+    scheduleTreeSyncFromEditor()
+  }
+
+  function scheduleTreeSyncFromEditor() {
+    if (mode.value !== 'custom') return
+    if (treeSyncTimer) clearTimeout(treeSyncTimer)
+    treeSyncTimer = setTimeout(() => {
+      treeSyncTimer = null
+      void syncTreeFromEditorIfChanged()
+    }, TREE_SYNC_DEBOUNCE_MS)
+  }
+
+  async function syncTreeFromEditorIfChanged() {
+    if (mode.value !== 'custom' || generating.value || filling.value) return
+
+    const trimmed = getEditorXmlText()?.trim()
+    if (!trimmed) {
+      lastSyncedPathsKey = ''
+      return
+    }
+
+    try {
+      const parsed = extractXmlElementPaths(trimmed, { skipFormat: true })
+      if (!parsed?.elementPaths?.length) return
+
+      const canonicalElementPaths = canonicalizeXmlElementPaths(parsed.elementPaths, elements.value)
+      const syncPaths = normalizeElementPathsForTreeSync(canonicalElementPaths)
+      const key = pathsSyncKey(syncPaths)
+      if (key === lastSyncedPathsKey) return
+
+      await applyXmlPathsFromEditor(trimmed, { quiet: true })
+      lastSyncedPathsKey = key
+    } catch {
+      // Ignore malformed XML while the user is editing.
+    }
   }
 
   async function onXmlFileImported({ text }) {
@@ -98,10 +142,11 @@ export function useGeneratorXml({
     return structureTabRef.value?.dtdTreeRef
   }
 
-  async function applyXmlPathsFromEditor(text) {
+  async function applyXmlPathsFromEditor(text, { quiet = false } = {}) {
     const trimmed = text?.trim()
     if (!trimmed) {
       xmlSyncHint.value = ''
+      lastSyncedPathsKey = ''
       return
     }
 
@@ -112,6 +157,7 @@ export function useGeneratorXml({
       const { rootTag, elementPaths } = parsed
       const canonicalRootTag = canonicalizeXmlElementName(rootTag, elements.value)
       const canonicalElementPaths = canonicalizeXmlElementPaths(elementPaths, elements.value)
+      const syncPaths = normalizeElementPathsForTreeSync(canonicalElementPaths)
 
       if (!rootTag) {
         xmlSyncHint.value = 'В XML нет корневого элемента — выберите корень вручную'
@@ -129,7 +175,8 @@ export function useGeneratorXml({
         await nextTick()
       }
       const treeRef = await waitForDtdTreeRef()
-      await treeRef?.applyXmlElementPaths(canonicalElementPaths)
+      await treeRef?.applyXmlElementPaths(canonicalElementPaths, { quiet })
+      lastSyncedPathsKey = pathsSyncKey(syncPaths)
     } catch (e) {
       xmlSyncHint.value = e.message || 'Не удалось разобрать пути элементов в XML'
     }
@@ -192,10 +239,17 @@ export function useGeneratorXml({
 
   async function onEditorClear() {
     clearGenerationState()
+    lastSyncedPathsKey = ''
+    if (treeSyncTimer) {
+      clearTimeout(treeSyncTimer)
+      treeSyncTimer = null
+    }
     await setProgrammaticXml('', { dirty: false })
   }
 
-  function dispose() {}
+  function dispose() {
+    if (treeSyncTimer) clearTimeout(treeSyncTimer)
+  }
 
   return {
     xmlText,
