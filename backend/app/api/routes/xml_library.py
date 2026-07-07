@@ -19,6 +19,7 @@ from app.config import (
     reference_xml_root,
 )
 from app.services import reference_xml_service as ref_service
+from app.services.git_push_service import push_document
 from app.services.reference_xml_sync import load_sync_state, sync_reference_repository
 from app.services.xml_share_service import (
     ShareDocumentRequest,
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 class SharedStatusResponse(BaseModel):
     enabled: bool
     configured: bool = False
+    push_enabled: bool = False
     last_sync: str | None = None
     commit_sha: str | None = None
     categories_count: int = 0
@@ -45,6 +47,21 @@ class SyncResponse(BaseModel):
     commit_sha: str | None = None
     synced_at: str
     message: str
+
+
+class PushToGitRequest(BaseModel):
+    xml_text: str
+    filename: str
+    root_element: str
+    commit_message: str | None = None
+
+
+class PushToGitResponse(BaseModel):
+    status: str
+    commit_sha: str | None = None
+    path: str
+    message: str
+    overwritten: bool = False
 
 
 class CategoryResponse(BaseModel):
@@ -112,6 +129,13 @@ def _require_settings() -> ReferenceXmlSettings:
     return settings
 
 
+def _require_push_settings() -> ReferenceXmlSettings:
+    settings = _require_settings()
+    if not settings.push_enabled:
+        raise HTTPException(status_code=503, detail="Git push is not enabled")
+    return settings
+
+
 def _require_root() -> Path:
     root = reference_xml_root()
     if root is None or not root.is_dir():
@@ -143,6 +167,7 @@ async def shared_status(
     return SharedStatusResponse(
         enabled=True,
         configured=root is not None and root.is_dir(),
+        push_enabled=settings.push_enabled,
         last_sync=state.get("last_sync"),
         commit_sha=state.get("commit_sha"),
         categories_count=categories_count,
@@ -161,6 +186,33 @@ async def shared_sync(
         commit_sha=result.commit_sha,
         synced_at=result.synced_at,
         message=result.message,
+    )
+
+
+@router.post("/shared/push", response_model=PushToGitResponse)
+async def push_to_git(
+    body: PushToGitRequest,
+    user: UserContext = Depends(get_current_user),
+) -> PushToGitResponse:
+    settings = _require_push_settings()
+    author_name = f"{user.display_name} ({settings.push_author_name})"
+    result = await push_document(
+        settings,
+        root_element=body.root_element,
+        filename=body.filename,
+        xml_text=body.xml_text,
+        author_name=author_name,
+        author_email=settings.push_author_email,
+        commit_message=body.commit_message,
+    )
+    if result.status == "ok":
+        await sync_reference_repository(settings)
+    return PushToGitResponse(
+        status=result.status,
+        commit_sha=result.commit_sha,
+        path=result.path,
+        message=result.message,
+        overwritten=result.overwritten,
     )
 
 

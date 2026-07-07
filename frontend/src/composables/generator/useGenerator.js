@@ -87,6 +87,46 @@ export function useGenerator() {
     () => Boolean(xml.getEditorXmlText()?.trim() || xml.xmlText.value?.trim()),
   )
 
+  const gitPushEnabled = computed(() => Boolean(xmlLibrary.syncStatus.value?.push_enabled))
+
+  const gitPushMessage = ref('')
+  const gitPushError = ref('')
+
+  function resetGitPushFeedback() {
+    gitPushMessage.value = ''
+    gitPushError.value = ''
+  }
+
+  async function handleGitPush({ filename, commitMessage }) {
+    const xmlText = xml.getEditorXmlText() || xml.xmlText.value || ''
+    const rootElement = schema.rootElement.value
+    if (!rootElement) {
+      gitPushError.value = 'Выберите корневой элемент перед отправкой в Git'
+      return
+    }
+    resetGitPushFeedback()
+    try {
+      const result = await xmlLibrary.pushToGit({
+        rootElement,
+        filename,
+        xmlText,
+        commitMessage,
+      })
+      if (result?.status === 'ok') {
+        gitPushMessage.value = result.overwritten
+          ? `Файл обновлён: ${result.path}`
+          : `Файл добавлен: ${result.path}`
+        categoryDocuments.value = {}
+      } else if (result?.status === 'unchanged') {
+        gitPushMessage.value = result.message || 'Изменений нет'
+      }
+    } catch (err) {
+      gitPushError.value = translateApiError(
+        err?.response?.data?.detail || err?.message || String(err),
+      )
+    }
+  }
+
   async function handleLibraryExpandCategory(category) {
     loadingCategory.value = category
     try {
@@ -321,8 +361,14 @@ export function useGenerator() {
     syncStatus: xmlLibrary.syncStatus,
     librarySyncing: xmlLibrary.syncing,
     libraryLoading: xmlLibrary.loading,
+    gitPushSubmitting: xmlLibrary.gitPushing,
     libraryError: xmlLibrary.libraryError,
     canSaveLibraryDocument,
+    gitPushEnabled,
+    gitPushMessage,
+    gitPushError,
+    resetGitPushFeedback,
+    handleGitPush,
     categoryDocuments,
     loadingCategory,
     handleLibrarySync,

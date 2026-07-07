@@ -58,6 +58,10 @@ class ReferenceXmlSettings(BaseModel):
     branch: str = "main"
     subdir: str = "xml-library"
     cache_dir: str = "data/reference-xml"
+    push_enabled: bool = False
+    push_cache_dir: str = "data/reference-xml-push"
+    push_author_name: str = "XML Generator"
+    push_author_email: str = "xmlgenerator@noreply"
 
 
 def is_auth_disabled() -> bool:
@@ -395,6 +399,16 @@ def reference_xml_cache_dir() -> Path | None:
     if settings is None:
         return None
     cache = Path(settings.cache_dir)
+    if not cache.is_absolute():
+        cache = PROJECT_ROOT / cache
+    return cache
+
+
+def reference_xml_push_cache_dir() -> Path | None:
+    settings = get_reference_xml_settings()
+    if settings is None:
+        return None
+    cache = Path(settings.push_cache_dir)
     if not cache.is_absolute():
         cache = PROJECT_ROOT / cache
     return cache

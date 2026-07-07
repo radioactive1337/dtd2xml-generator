@@ -61,6 +61,11 @@ export async function deletePersonalDocument(name) {
   return data
 }
 
+export async function pushDocumentToGit(payload) {
+  const { data } = await client.post('/xml-library/shared/push', payload)
+  return data
+}
+
 export async function shareDocument(payload) {
   const { data } = await client.post('/xml-library/share', payload)
   return data
