@@ -55,7 +55,9 @@ export function isInActiveBranch(node, treeRoot, checkedPaths) {
 
 export function enforceChoiceExclusivity(treeRoot, checkedPaths) {
   if (!treeRoot) return
-  function walk(node) {
+  const stack = [treeRoot]
+  while (stack.length > 0) {
+    const node = stack.pop()
     if (node._isChoiceGroup) {
       const selected = (node.children || []).filter((c) =>
         isChoiceAlternativeSelected(node, c, checkedPaths),
@@ -64,15 +66,19 @@ export function enforceChoiceExclusivity(treeRoot, checkedPaths) {
         removePathAndDescendants(selected[i].path, checkedPaths, treeRoot)
       }
     }
-    for (const child of node.children || []) walk(child)
+    const children = node.children
+    if (children) {
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
+    }
   }
-  walk(treeRoot)
 }
 
 /** Drop checked paths that belong to non-selected CHOICE alternatives. */
 export function pruneInactiveChoiceBranches(treeRoot, checkedPaths) {
   if (!treeRoot) return
-  function walk(node) {
+  const stack = [treeRoot]
+  while (stack.length > 0) {
+    const node = stack.pop()
     if (node._isChoiceGroup) {
       for (const alt of node.children || []) {
         if (isChoiceAlternativeSelected(node, alt, checkedPaths)) continue
@@ -83,9 +89,11 @@ export function pruneInactiveChoiceBranches(treeRoot, checkedPaths) {
         }
       }
     }
-    for (const child of node.children || []) walk(child)
+    const children = node.children
+    if (children) {
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
+    }
   }
-  walk(treeRoot)
 }
 
 function hasCheckedDescendant(node, checkedPaths) {

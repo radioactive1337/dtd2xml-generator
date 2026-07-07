@@ -261,50 +261,77 @@ export function applyLoadedChildren(node, contentModel, options) {
   node._isChoiceGroup = model.kind === 'CHOICE'
 }
 
-export function findNodeByPath(path, node) {
-  if (!node) return null
-  if (node.path === path) return node
-  for (const child of node.children || []) {
-    const found = findNodeByPath(path, child)
-    if (found) return found
-  }
-  return null
-}
-
-export function findParentNode(path, node) {
-  if (!node) return null
-  for (const child of node.children || []) {
-    if (child.path === path) return node
-    const found = findParentNode(path, child)
-    if (found) return found
-  }
-  return null
-}
-
-export function flattenVisible(node) {
-  const result = []
-  if (!node) return result
-  function walk(n) {
-    result.push(n)
-    if (n.expanded) {
-      for (const child of n.children || []) walk(child)
+export function findNodeByPath(path, root) {
+  if (!root) return null
+  const stack = [root]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (node.path === path) return node
+    const children = node.children
+    if (children) {
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
     }
   }
-  walk(node)
+  return null
+}
+
+export function findParentNode(path, root) {
+  if (!root) return null
+  const stack = [root]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    const children = node.children
+    if (children) {
+      for (let i = children.length - 1; i >= 0; i--) {
+        const child = children[i]
+        if (child.path === path) return node
+        stack.push(child)
+      }
+    }
+  }
+  return null
+}
+
+export function flattenVisible(root) {
+  const result = []
+  if (!root) return result
+  const stack = [root]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    result.push(node)
+    if (node.expanded) {
+      const children = node.children
+      if (children) {
+        for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
+      }
+    }
+  }
   return result
 }
 
-export function walkTree(node, fn) {
-  if (!node) return
-  fn(node)
-  for (const child of node.children || []) walkTree(child, fn)
+export function walkTree(root, fn) {
+  if (!root) return
+  const stack = [root]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    fn(node)
+    const children = node.children
+    if (children) {
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
+    }
+  }
 }
 
 export function collectDescendantPaths(node) {
   const paths = []
-  for (const child of node.children || []) {
-    paths.push(child.path)
-    paths.push(...collectDescendantPaths(child))
+  const stack = [...(node.children || [])]
+  while (stack.length > 0) {
+    const current = stack.pop()
+    paths.push(current.path)
+    const children = current.children
+    if (children) {
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
+    }
   }
   return paths
 }
@@ -338,13 +365,19 @@ export function findChoiceAlternative(choiceGroup, node) {
   return null
 }
 
-export function findNodesForElementPath(elPath, node, results = []) {
-  if (!node) return results
-  if (!node.isGroupLabel && normalizeTreePath(node.path) === elPath) {
-    results.push(node)
-  }
-  for (const child of node.children || []) {
-    findNodesForElementPath(elPath, child, results)
+export function findNodesForElementPath(elPath, root) {
+  const results = []
+  if (!root) return results
+  const stack = [root]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (!node.isGroupLabel && normalizeTreePath(node.path) === elPath) {
+      results.push(node)
+    }
+    const children = node.children
+    if (children) {
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
+    }
   }
   return results
 }

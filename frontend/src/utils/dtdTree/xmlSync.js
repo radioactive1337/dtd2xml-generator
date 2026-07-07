@@ -64,37 +64,43 @@ function isAlternativePreferredByPaths(alt, preferPaths) {
 }
 
 export function resolveChoiceSelectionsFromXml(
-  node,
+  root,
   elPathSet,
   selections = new Map(),
   preferPaths = null,
 ) {
-  if (!node) return selections
-  if (node._isChoiceGroup) {
-    const alts = node.children || []
-    let bestAlt = null
-    let bestScore = 0
-    let bestPreferred = false
-    for (const alt of alts) {
-      const score = scoreAlternativeForXml(alt, alts, elPathSet)
-      const preferred = isAlternativePreferredByPaths(alt, preferPaths)
-      if (
-        score > bestScore
-        || (score === bestScore && score > 0 && preferred && !bestPreferred)
-      ) {
-        bestScore = score
-        bestAlt = alt
-        bestPreferred = preferred
+  if (!root) return selections
+  // Iterative DFS to avoid call-stack overflow on large loaded trees.
+  const stack = [root]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (node._isChoiceGroup) {
+      const alts = node.children || []
+      let bestAlt = null
+      let bestScore = 0
+      let bestPreferred = false
+      for (const alt of alts) {
+        const score = scoreAlternativeForXml(alt, alts, elPathSet)
+        const preferred = isAlternativePreferredByPaths(alt, preferPaths)
+        if (
+          score > bestScore
+          || (score === bestScore && score > 0 && preferred && !bestPreferred)
+        ) {
+          bestScore = score
+          bestAlt = alt
+          bestPreferred = preferred
+        }
+      }
+      if (bestAlt && bestScore > 0) {
+        selections.set(node.path, bestAlt.path)
+        stack.push(bestAlt)
+      }
+    } else {
+      const children = node.children
+      if (children) {
+        for (let i = children.length - 1; i >= 0; i--) stack.push(children[i])
       }
     }
-    if (bestAlt && bestScore > 0) {
-      selections.set(node.path, bestAlt.path)
-      resolveChoiceSelectionsFromXml(bestAlt, elPathSet, selections, preferPaths)
-    }
-    return selections
-  }
-  for (const child of node.children || []) {
-    resolveChoiceSelectionsFromXml(child, elPathSet, selections, preferPaths)
   }
   return selections
 }
@@ -216,10 +222,19 @@ export async function ensureTreeLoadedForElementPaths(
         const selectedAltPath = selections.get(node.path)
         if (selectedAltPath && child.path !== selectedAltPath) continue
       }
-      queue.push(child)
+      // Only explore branches that can lead to a needed path.
+      // This keeps queue size bounded by depth × needed-paths instead of full tree size.
+      if (neededPrefixes.has(normalizeTreePath(child.path))) {
+        queue.push(child)
+      }
     }
   }
 }
+
+// Structural paths beyond this cap are not synced to the DTD tree.
+// Paths are sorted shallowest-first by normalizeElementPathsForTreeSync so the
+// most important structure is always captured first.
+const MAX_SYNC_PATHS = 500
 
 export async function buildCheckedPathsFromElementPaths({
   elementPaths,
@@ -229,7 +244,10 @@ export async function buildCheckedPathsFromElementPaths({
   preferPaths,
   modelOptions,
 }) {
-  const syncPaths = normalizeElementPathsForTreeSync(elementPaths)
+  const allSyncPaths = normalizeElementPathsForTreeSync(elementPaths)
+  const syncPaths = allSyncPaths.length > MAX_SYNC_PATHS
+    ? allSyncPaths.slice(0, MAX_SYNC_PATHS)
+    : allSyncPaths
   const elPathSet = new Set(syncPaths)
   const modelOptionsWithXml = { ...modelOptions, xmlElementPaths: syncPaths }
 
