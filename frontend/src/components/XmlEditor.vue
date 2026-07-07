@@ -40,6 +40,17 @@
           </button>
         </div>
 
+        <div v-if="showCompareButton" class="action-group">
+          <button
+            class="btn-secondary btn-tint btn-tint-compare"
+            :disabled="!modelValue || comparing"
+            title="Сравнить структуру XML со всеми эталонами того же корневого элемента"
+            @click="$emit('run-compare')"
+          >
+            {{ comparing ? 'Проверяем…' : 'Проверить уникальность' }}
+          </button>
+        </div>
+
         <div class="action-group">
           <button
             class="btn-secondary btn-tint btn-tint-export"
@@ -169,6 +180,8 @@ const props = defineProps({
   gitPushSubmitting: { type: Boolean, default: false },
   gitPushMessage: { type: String, default: '' },
   gitPushError: { type: String, default: '' },
+  showCompareButton: { type: Boolean, default: false },
+  comparing: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -180,6 +193,7 @@ const emit = defineEmits([
   'push-to-git',
   'push-dialog-open',
   'push-dialog-close',
+  'run-compare',
 ])
 
 const { isDark } = useTheme()
@@ -591,6 +605,15 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
 .editor-actions .btn-tint-save:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 26%, var(--surface2));
   border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+}
+
+.editor-actions .btn-tint-compare {
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface2));
+  border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
+}
+.editor-actions .btn-tint-compare:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warning) 22%, var(--surface2));
+  border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
 }
 
 .format-icon {

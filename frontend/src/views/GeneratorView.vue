@@ -87,14 +87,12 @@
           <GeneratorCompareTab
             v-show="activeTab === 'compare'"
             :report="compareReport"
-            :comparing="comparing"
             :compare-error="compareError"
             :has-unique-paths="hasUniquePaths"
             :ai-available="llmAliases.length > 0"
             :ai-explanation="aiExplanation"
             :ai-loading="aiLoading"
             :ai-error="aiError"
-            @run-compare="runCompare"
             @run-explain="runExplain"
             @go-to-path="goToComparePath"
           />
@@ -174,6 +172,8 @@
         :git-push-submitting="gitPushSubmitting"
         :git-push-message="gitPushMessage"
         :git-push-error="gitPushError"
+        :show-compare-button="!!schemaId"
+        :comparing="comparing"
         @content-change="onEditorContentChange"
         @clear="onEditorClear"
         @import="onXmlFileImported"
@@ -182,6 +182,7 @@
         @push-to-git="handleGitPush"
         @push-dialog-open="resetGitPushFeedback"
         @push-dialog-close="resetGitPushFeedback"
+        @run-compare="runCompareAndFocusTab"
       />
     </div>
 
@@ -342,7 +343,13 @@ const {
   runCompare,
   runExplain,
   goToComparePath,
+  focusCompareTab,
 } = useGenerator()
+
+function runCompareAndFocusTab() {
+  focusCompareTab()
+  runCompare()
+}
 </script>
 
 <style scoped>

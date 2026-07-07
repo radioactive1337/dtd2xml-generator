@@ -116,6 +116,10 @@ export function useGeneratorTabs({
     activeTab.value = 'structure'
   }
 
+  function focusCompareTab() {
+    activeTab.value = 'compare'
+  }
+
   return {
     activeTab,
     autoValidateAfterFill,
@@ -126,5 +130,6 @@ export function useGeneratorTabs({
     resetHybridTabSwitch,
     focusResultsTab,
     focusStructureTab,
+    focusCompareTab,
   }
 }

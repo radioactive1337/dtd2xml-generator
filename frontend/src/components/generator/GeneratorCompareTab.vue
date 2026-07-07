@@ -1,19 +1,5 @@
 <template>
   <div class="tab-pane">
-    <div class="compare-toolbar">
-      <button
-        type="button"
-        class="btn-primary btn-sm"
-        :disabled="comparing"
-        @click="$emit('run-compare')"
-      >
-        {{ comparing ? 'Проверяем…' : 'Проверить уникальность' }}
-      </button>
-      <span class="compare-hint">
-        Сравнение структуры текущего XML со всеми эталонами того же корневого элемента.
-      </span>
-    </div>
-
     <p v-if="compareError" class="error-msg">{{ compareError }}</p>
 
     <template v-if="report">
@@ -108,7 +94,7 @@
     </template>
 
     <p v-else-if="!compareError" class="compare-placeholder">
-      Нажмите «Проверить уникальность», чтобы сравнить структуру XML с эталонами.
+      Нажмите «Проверить уникальность» на панели редактора, чтобы сравнить структуру XML с эталонами.
     </p>
   </div>
 </template>
@@ -118,7 +104,6 @@ import { computed, reactive, watch } from 'vue'
 
 const props = defineProps({
   report: { type: Object, default: null },
-  comparing: { type: Boolean, default: false },
   compareError: { type: String, default: '' },
   hasUniquePaths: { type: Boolean, default: false },
   aiAvailable: { type: Boolean, default: true },
@@ -127,7 +112,7 @@ const props = defineProps({
   aiError: { type: String, default: '' },
 })
 
-defineEmits(['run-compare', 'run-explain', 'go-to-path'])
+defineEmits(['run-explain', 'go-to-path'])
 
 const uniquePathsLabel = computed(() => {
   const count = props.report?.unique_paths?.length ?? 0
@@ -211,18 +196,6 @@ function plural(n, one, few, many) {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.compare-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.compare-hint {
-  font-size: 12px;
-  color: var(--text-muted);
 }
 
 .compare-placeholder {
