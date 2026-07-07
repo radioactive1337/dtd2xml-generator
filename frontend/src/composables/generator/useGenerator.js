@@ -87,7 +87,12 @@ export function useGenerator() {
     () => Boolean(xml.getEditorXmlText()?.trim() || xml.xmlText.value?.trim()),
   )
 
-  const gitPushEnabled = computed(() => Boolean(xmlLibrary.syncStatus.value?.push_enabled))
+  const gitPushEnabled = computed(() => {
+    const status = xmlLibrary.syncStatus.value
+    if (!status?.push_enabled) return false
+    if (status.git_auth_required && !status.git_configured) return false
+    return true
+  })
 
   const gitPushMessage = ref('')
   const gitPushError = ref('')

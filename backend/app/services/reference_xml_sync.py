@@ -20,6 +20,12 @@ SYNC_STATE_FILE = "sync_state.json"
 
 
 @dataclass(frozen=True)
+class GitAuth:
+    token: str | None = None
+    git_user: str = "oauth2"
+
+
+@dataclass(frozen=True)
 class SyncResult:
     status: str
     commit_sha: str | None
@@ -49,17 +55,45 @@ def _save_sync_state(cache_dir: Path, state: dict) -> None:
     )
 
 
-def _resolve_repo_url(settings: ReferenceXmlSettings) -> str:
+def _resolve_repo_url(
+    settings: ReferenceXmlSettings,
+    *,
+    git_auth: GitAuth | None = None,
+) -> str:
     url = settings.repo_url.strip()
     if not url:
         raise HTTPException(status_code=503, detail="Reference XML repo_url is not configured")
-    token = os.getenv("REFERENCE_XML_GIT_TOKEN", "").strip()
+
+    token = git_auth.token if git_auth else None
+    git_user = git_auth.git_user if git_auth else "oauth2"
+    if not token:
+        token = os.getenv("REFERENCE_XML_GIT_TOKEN", "").strip()
+        if token:
+            git_user = os.getenv("REFERENCE_XML_GIT_USER", "oauth2").strip() or "oauth2"
+
     if token and url.startswith("https://"):
         if "@" not in url.split("://", 1)[1]:
-            # GitLab and similar: https://oauth2:<token>@host/... (not https://<token>@...)
-            user = os.getenv("REFERENCE_XML_GIT_USER", "oauth2").strip() or "oauth2"
-            url = url.replace("https://", f"https://{user}:{token}@", 1)
+            url = url.replace("https://", f"https://{git_user}:{token}@", 1)
     return url
+
+
+def _ensure_remote_url(cache_dir: Path, repo_url: str) -> None:
+    if not (cache_dir / ".git").is_dir():
+        return
+    result = _run_git(["git", "-C", str(cache_dir), "remote", "set-url", "origin", repo_url])
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git remote set-url failed").strip()
+        raise HTTPException(status_code=502, detail=f"Git remote update failed: {detail}")
+
+
+def test_git_access(settings: ReferenceXmlSettings, git_auth: GitAuth) -> str:
+    repo_url = _resolve_repo_url(settings, git_auth=git_auth)
+    branch = settings.branch.strip() or "main"
+    result = _run_git(["git", "ls-remote", "--heads", repo_url, branch])
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git ls-remote failed").strip()
+        raise ValueError(detail)
+    return f"Git access OK (branch: {branch})"
 
 
 def _run_git(args: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -79,12 +113,16 @@ def _git_head_sha(cache_dir: Path) -> str | None:
     return result.stdout.strip() or None
 
 
-def _sync_repository_sync(settings: ReferenceXmlSettings) -> SyncResult:
+def _sync_repository_sync(
+    settings: ReferenceXmlSettings,
+    *,
+    git_auth: GitAuth,
+) -> SyncResult:
     cache_dir = reference_xml_cache_dir()
     if cache_dir is None:
         raise HTTPException(status_code=503, detail="Reference XML library is not configured")
 
-    repo_url = _resolve_repo_url(settings)
+    repo_url = _resolve_repo_url(settings, git_auth=git_auth)
     branch = settings.branch.strip() or "main"
     git_dir = cache_dir / ".git"
 
@@ -107,6 +145,7 @@ def _sync_repository_sync(settings: ReferenceXmlSettings) -> SyncResult:
             raise HTTPException(status_code=502, detail=f"Git clone failed: {detail}")
         action = "cloned"
     else:
+        _ensure_remote_url(cache_dir, repo_url)
         fetch = _run_git(["git", "-C", str(cache_dir), "fetch", "origin", branch])
         if fetch.returncode != 0:
             detail = (fetch.stderr or fetch.stdout or "git fetch failed").strip()
@@ -145,10 +184,18 @@ def _sync_repository_sync(settings: ReferenceXmlSettings) -> SyncResult:
     )
 
 
-async def sync_reference_repository(settings: ReferenceXmlSettings) -> SyncResult:
+async def sync_reference_repository(
+    settings: ReferenceXmlSettings,
+    *,
+    git_auth: GitAuth,
+) -> SyncResult:
     if not _sync_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="Sync already in progress")
     try:
-        return await asyncio.to_thread(_sync_repository_sync, settings)
+        return await asyncio.to_thread(
+            _sync_repository_sync,
+            settings,
+            git_auth=git_auth,
+        )
     finally:
         _sync_lock.release()

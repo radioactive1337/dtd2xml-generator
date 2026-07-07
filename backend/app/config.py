@@ -373,6 +373,69 @@ def save_user_connections_raw(user: "UserContext", raw: dict[str, Any]) -> None:
     _save_raw_user_connections(user, raw)
 
 
+def get_user_git_token(user: "UserContext") -> str:
+    raw = _load_raw_user_connections(user)
+    return str(raw.get("git", {}).get("token", "")).strip()
+
+
+def get_user_git_user(user: "UserContext") -> str:
+    raw = _load_raw_user_connections(user)
+    configured = str(raw.get("git", {}).get("user", "")).strip()
+    return configured or "oauth2"
+
+
+def user_git_configured(user: "UserContext") -> bool:
+    return bool(get_user_git_token(user))
+
+
+def resolve_git_auth(user: "UserContext") -> tuple[str | None, str]:
+    """Return (token, git_user). User token takes priority over env fallback."""
+    user_token = get_user_git_token(user)
+    if user_token:
+        return user_token, get_user_git_user(user)
+    env_token = os.getenv("REFERENCE_XML_GIT_TOKEN", "").strip()
+    if env_token:
+        env_user = os.getenv("REFERENCE_XML_GIT_USER", "oauth2").strip() or "oauth2"
+        return env_token, env_user
+    return None, "oauth2"
+
+
+def git_auth_configured(user: "UserContext") -> bool:
+    token, _ = resolve_git_auth(user)
+    return bool(token)
+
+
+def save_user_git_settings(
+    user: "UserContext",
+    *,
+    token: str | None = None,
+    git_user: str | None = None,
+) -> None:
+    raw = _load_raw_user_connections(user)
+    git = raw.setdefault("git", {})
+    if token is not None:
+        stripped = token.strip()
+        if stripped:
+            git["token"] = stripped
+        else:
+            git.pop("token", None)
+    if git_user is not None:
+        git["user"] = git_user.strip() or "oauth2"
+    if not git:
+        raw.pop("git", None)
+    _save_raw_user_connections(user, raw)
+
+
+def clear_user_git_settings(user: "UserContext") -> None:
+    raw = _load_raw_user_connections(user)
+    raw.pop("git", None)
+    _save_raw_user_connections(user, raw)
+
+
+def reference_xml_requires_https_token(settings: ReferenceXmlSettings) -> bool:
+    return settings.repo_url.strip().startswith("https://")
+
+
 def get_reference_xml_settings() -> ReferenceXmlSettings | None:
     raw = _load_raw_app_config()
     ref = raw.get("reference_xml")

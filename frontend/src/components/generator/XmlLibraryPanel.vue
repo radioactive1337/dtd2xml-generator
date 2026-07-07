@@ -32,7 +32,7 @@
         <button
           type="button"
           class="btn-secondary btn-sm"
-          :disabled="syncing"
+          :disabled="syncing || !canSyncFromGit"
           @click="onSync"
         >
           {{ syncing ? 'Обновление…' : 'Обновить из Git' }}
@@ -46,6 +46,14 @@
 
       <div v-if="syncStatus?.enabled && !syncStatus?.configured" class="library-hint">
         Каталог эталонов пуст. Нажмите «Обновить из Git» для первой загрузки.
+      </div>
+
+      <div
+        v-if="syncStatus?.enabled && syncStatus?.git_auth_required && !syncStatus?.git_configured"
+        class="library-hint"
+      >
+        Для доступа к приватному репозиторию укажите Git-токен в
+        <router-link to="/settings">Настройках</router-link>.
       </div>
 
       <div v-if="syncStatus?.enabled" class="field category-search-field">
@@ -173,6 +181,13 @@ const emit = defineEmits([
   'share-personal',
   'delete-personal',
 ])
+
+const canSyncFromGit = computed(() => {
+  const status = props.syncStatus
+  if (!status?.enabled) return false
+  if (status.git_auth_required && !status.git_configured) return false
+  return true
+})
 
 const expandedCategory = ref(null)
 const categoryRootFilter = ref('')

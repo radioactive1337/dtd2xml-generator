@@ -48,6 +48,14 @@ def reference_xml_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("app.api.routes.xml_library.get_reference_xml_settings", lambda: settings)
     monkeypatch.setattr("app.api.routes.xml_library.reference_xml_cache_dir", _cache_dir)
     monkeypatch.setattr("app.api.routes.xml_library.reference_xml_root", _root)
+    monkeypatch.setattr(
+        "app.api.routes.xml_library.resolve_git_auth",
+        lambda _user: ("test-token", "oauth2"),
+    )
+    monkeypatch.setattr(
+        "app.api.routes.xml_library.git_auth_configured",
+        lambda _user: True,
+    )
 
     return root
 

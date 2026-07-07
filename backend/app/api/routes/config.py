@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -12,14 +13,22 @@ from app.auth.sessions import get_current_user
 from app.config import (
     DatabaseConfig,
     LLMConfig,
+    clear_user_git_settings,
     get_connection_aliases,
+    get_reference_xml_settings,
+    get_user_git_user,
     load_connections,
+    reference_xml_requires_https_token,
+    resolve_git_auth,
     save_user_connections_raw,
+    save_user_git_settings,
     set_default_llm_alias,
+    user_git_configured,
     _load_raw_user_connections,
 )
 from app.services.db_service import DBService
 from app.services.llm_service import LLMService
+from app.services.reference_xml_sync import GitAuth, test_git_access
 from app.user_context import UserContext
 
 router = APIRouter(prefix="/config", tags=["config"])
@@ -103,6 +112,16 @@ class ConnectionsResponse(BaseModel):
     databases: list[DatabaseAliasResponse]
     llm: list[LlmAliasResponse]
     default_llm: str | None = None
+
+
+class GitSettingsResponse(BaseModel):
+    configured: bool
+    user: str = "oauth2"
+
+
+class GitSettingsUpdateRequest(BaseModel):
+    token: str | None = None
+    user: str | None = None
 
 
 def _validate_alias(alias: str) -> str:
@@ -354,3 +373,77 @@ async def set_default_llm(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return DefaultLlmResponse(default_llm=default_llm)
+
+
+@router.get("/git", response_model=GitSettingsResponse)
+async def get_git_settings(
+    user: UserContext = Depends(get_current_user),
+) -> GitSettingsResponse:
+    return GitSettingsResponse(
+        configured=user_git_configured(user),
+        user=get_user_git_user(user),
+    )
+
+
+@router.put("/git", response_model=GitSettingsResponse)
+async def update_git_settings(
+    body: GitSettingsUpdateRequest,
+    user: UserContext = Depends(get_current_user),
+) -> GitSettingsResponse:
+    if body.token is None and body.user is None:
+        raise HTTPException(status_code=400, detail="No Git settings to update")
+
+    kwargs: dict[str, str | None] = {}
+    if body.token is not None:
+        kwargs["token"] = body.token
+    if body.user is not None:
+        kwargs["git_user"] = body.user
+    save_user_git_settings(user, **kwargs)
+    return GitSettingsResponse(
+        configured=user_git_configured(user),
+        user=get_user_git_user(user),
+    )
+
+
+@router.delete("/git")
+async def delete_git_settings(
+    user: UserContext = Depends(get_current_user),
+) -> dict[str, str]:
+    clear_user_git_settings(user)
+    return {"status": "deleted"}
+
+
+@router.post("/test-git", response_model=ConnectionTestResponse)
+async def test_git_connection(
+    user: UserContext = Depends(get_current_user),
+) -> ConnectionTestResponse:
+    settings = get_reference_xml_settings()
+    if settings is None:
+        return ConnectionTestResponse(
+            alias="git",
+            ok=False,
+            message="Reference XML library is not configured",
+        )
+
+    token, git_user = resolve_git_auth(user)
+    if reference_xml_requires_https_token(settings) and not token:
+        return ConnectionTestResponse(
+            alias="git",
+            ok=False,
+            message="Укажите Git-токен в настройках",
+        )
+
+    try:
+        message = await asyncio.to_thread(
+            test_git_access,
+            settings,
+            GitAuth(token=token, git_user=git_user),
+        )
+    except ValueError as exc:
+        logger.warning("Git connection test failed: %s", exc)
+        return ConnectionTestResponse(alias="git", ok=False, message=str(exc))
+    except Exception as exc:
+        logger.error("Git connection test failed: %s", exc)
+        return ConnectionTestResponse(alias="git", ok=False, message=str(exc))
+
+    return ConnectionTestResponse(alias="git", ok=True, message=message)

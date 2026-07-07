@@ -11,7 +11,13 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from app.config import ReferenceXmlSettings, reference_xml_push_cache_dir
-from app.services.reference_xml_sync import _git_head_sha, _resolve_repo_url, _run_git
+from app.services.reference_xml_sync import (
+    GitAuth,
+    _ensure_remote_url,
+    _git_head_sha,
+    _resolve_repo_url,
+    _run_git,
+)
 
 _push_lock = threading.Lock()
 
@@ -69,12 +75,12 @@ def _resolve_target_file(
     return target, rel_path
 
 
-def _ensure_push_repo(settings: ReferenceXmlSettings) -> Path:
+def _ensure_push_repo(settings: ReferenceXmlSettings, *, git_auth: GitAuth) -> Path:
     cache_dir = reference_xml_push_cache_dir()
     if cache_dir is None:
         raise HTTPException(status_code=503, detail="Reference XML library is not configured")
 
-    repo_url = _resolve_repo_url(settings)
+    repo_url = _resolve_repo_url(settings, git_auth=git_auth)
     branch = settings.branch.strip() or "main"
     git_dir = cache_dir / ".git"
 
@@ -95,6 +101,7 @@ def _ensure_push_repo(settings: ReferenceXmlSettings) -> Path:
             raise HTTPException(status_code=502, detail=f"Git clone failed: {detail}")
         return cache_dir
 
+    _ensure_remote_url(cache_dir, repo_url)
     fetch = _run_git(["git", "-C", str(cache_dir), "fetch", "origin", branch])
     if fetch.returncode != 0:
         detail = (fetch.stderr or fetch.stdout or "git fetch failed").strip()
@@ -118,6 +125,7 @@ def _ensure_push_repo(settings: ReferenceXmlSettings) -> Path:
 def _push_document_sync(
     settings: ReferenceXmlSettings,
     *,
+    git_auth: GitAuth,
     root_element: str,
     filename: str,
     xml_text: str,
@@ -133,7 +141,7 @@ def _push_document_sync(
     if not xml_text.strip():
         raise HTTPException(status_code=400, detail="XML text is empty")
 
-    cache_dir = _ensure_push_repo(settings)
+    cache_dir = _ensure_push_repo(settings, git_auth=git_auth)
     target, rel_path = _resolve_target_file(cache_dir, settings, safe_root, safe_filename)
     overwritten = target.is_file()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -202,6 +210,7 @@ def _push_document_sync(
 async def push_document(
     settings: ReferenceXmlSettings,
     *,
+    git_auth: GitAuth,
     root_element: str,
     filename: str,
     xml_text: str,
@@ -215,6 +224,7 @@ async def push_document(
         return await asyncio.to_thread(
             _push_document_sync,
             settings,
+            git_auth=git_auth,
             root_element=root_element,
             filename=filename,
             xml_text=xml_text,

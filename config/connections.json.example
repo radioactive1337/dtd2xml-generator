@@ -3,5 +3,8 @@
     "default_llm_alias": null
   },
   "databases": {},
-  "llm": {}
+  "llm": {},
+  "git": {
+    "user": "oauth2"
+  }
 }

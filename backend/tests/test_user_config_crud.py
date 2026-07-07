@@ -70,3 +70,27 @@ def test_delete_database_alias(auth_client: TestClient):
     assert delete.status_code == 200
     aliases = auth_client.get("/api/config/aliases").json()["databases"]
     assert "TMP" not in aliases
+
+
+def test_git_settings_crud(auth_client: TestClient):
+    login_as(auth_client, "git_user", create=True)
+
+    initial = auth_client.get("/api/config/git")
+    assert initial.status_code == 200
+    assert initial.json()["configured"] is False
+
+    update = auth_client.put(
+        "/api/config/git",
+        json={"token": "user-git-token", "user": "oauth2"},
+    )
+    assert update.status_code == 200
+    assert update.json()["configured"] is True
+    assert update.json()["user"] == "oauth2"
+    assert "token" not in update.json()
+
+    configured = auth_client.get("/api/config/git")
+    assert configured.json()["configured"] is True
+
+    delete = auth_client.delete("/api/config/git")
+    assert delete.status_code == 200
+    assert auth_client.get("/api/config/git").json()["configured"] is False
