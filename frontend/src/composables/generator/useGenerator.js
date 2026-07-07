@@ -307,6 +307,11 @@ export function useGenerator() {
   })
 
   onMounted(async () => {
+    // Run config-aliases fetch concurrently with schema loading so that LLM/DB
+    // aliases are available as soon as possible (avoids a race where the user
+    // triggers compare before aliases are populated).
+    const aliasesPromise = getConfigAliases().catch(() => null)
+
     try {
       const schemas = await listSchemas()
       const primary = pickPrimarySchema(schemas)
@@ -315,17 +320,12 @@ export function useGenerator() {
       // No saved schemas or API unavailable.
     }
 
-    try {
-      const aliases = await getConfigAliases()
+    const aliases = await aliasesPromise
+    if (aliases) {
       mapping.dbAliases.value = aliases.databases || []
       mapping.llmAliases.value = aliases.llm || []
       mapping.defaultLlmAlias.value = aliases.default_llm || ''
       mapping.llmAlias.value = mapping.defaultLlmAlias.value || mapping.llmAliases.value[0] || ''
-    } catch {
-      mapping.dbAliases.value = []
-      mapping.llmAliases.value = []
-      mapping.defaultLlmAlias.value = ''
-      mapping.llmAlias.value = ''
     }
 
     await xmlLibrary.refreshSharedCategories()
