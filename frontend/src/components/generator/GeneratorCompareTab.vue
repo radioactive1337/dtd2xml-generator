@@ -49,26 +49,6 @@
           </template>
         </p>
 
-        <section v-if="report.unique_paths?.length" class="paths-section">
-          <h3 class="section-title">Уникальные пути</h3>
-          <ul class="paths-list">
-            <li v-for="range in rangesByPath" :key="range.key" class="path-item">
-              <button
-                type="button"
-                class="path-link"
-                :title="`Перейти к строке ${range.start_line}`"
-                @click="$emit('go-to-path', range)"
-              >
-                <span class="path-text">{{ range.path }}</span>
-                <span class="path-line">строка {{ range.start_line }}</span>
-              </button>
-            </li>
-            <li v-for="path in pathsWithoutRange" :key="path" class="path-item">
-              <span class="path-text path-text--plain">{{ path }}</span>
-            </li>
-          </ul>
-        </section>
-
         <section class="ai-section">
           <div class="ai-header">
             <button
@@ -84,6 +64,46 @@
           <p v-if="aiError" class="error-msg">{{ aiError }}</p>
           <div v-if="aiExplanation" class="ai-output">{{ aiExplanation }}</div>
         </section>
+
+        <section v-if="report.unique_paths?.length" class="paths-section">
+          <h3 class="section-title">Уникальные пути</h3>
+          <ul class="paths-list">
+            <li v-for="range in groupedPaths.ranges" :key="range.key" class="path-item">
+              <div class="path-row">
+                <button
+                  type="button"
+                  class="path-link"
+                  :title="`Перейти к строке ${range.start_line}`"
+                  @click="$emit('go-to-path', range)"
+                >
+                  <span class="path-text">{{ range.path }}</span>
+                  <span class="path-line">строка {{ range.start_line }}</span>
+                </button>
+                <button
+                  v-if="range.children.length"
+                  type="button"
+                  class="path-toggle"
+                  :aria-expanded="!!expanded[range.key]"
+                  :title="expanded[range.key] ? 'Свернуть вложенные' : 'Показать вложенные'"
+                  @click="toggle(range.key)"
+                >
+                  <span class="toggle-caret">{{ expanded[range.key] ? '▾' : '▸' }}</span>
+                  +{{ range.children.length }}
+                </button>
+              </div>
+              <ul v-if="range.children.length && expanded[range.key]" class="child-list">
+                <li v-for="child in range.children" :key="child" class="child-item">
+                  <span class="path-text path-text--plain" :title="child">
+                    …/{{ relativeChild(range.path, child) }}
+                  </span>
+                </li>
+              </ul>
+            </li>
+            <li v-for="path in groupedPaths.orphans" :key="path" class="path-item">
+              <span class="path-text path-text--plain">{{ path }}</span>
+            </li>
+          </ul>
+        </section>
       </template>
     </template>
 
@@ -94,7 +114,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, reactive, watch } from 'vue'
 
 const props = defineProps({
   report: { type: Object, default: null },
@@ -119,14 +139,52 @@ const referencesLabel = computed(() => {
   return `${count} ${plural(count, 'эталоном', 'эталонами', 'эталонами')}`
 })
 
-const rangesByPath = computed(() =>
-  (props.report?.highlight_ranges || []).map((r, i) => ({ ...r, key: `${r.path}-${i}` })),
+const expanded = reactive({})
+
+// Reset expand state whenever a fresh comparison arrives.
+watch(
+  () => props.report,
+  () => {
+    for (const key of Object.keys(expanded)) delete expanded[key]
+  },
 )
 
-const pathsWithoutRange = computed(() => {
-  const covered = new Set((props.report?.highlight_ranges || []).map((r) => r.path))
-  return (props.report?.unique_paths || []).filter((p) => !covered.has(p))
+function isChildOf(parentPath, path) {
+  return path.startsWith(`${parentPath}/`)
+}
+
+const groupedPaths = computed(() => {
+  const ranges = (props.report?.highlight_ranges || []).map((r, i) => ({
+    ...r,
+    key: `${r.path}-${i}`,
+    children: [],
+  }))
+  const groupPaths = new Set(ranges.map((r) => r.path))
+  const orphans = []
+
+  for (const path of props.report?.unique_paths || []) {
+    if (groupPaths.has(path)) continue // it's a top-most (clickable) path itself
+    // Attach to the most specific (longest) matching top-most ancestor.
+    let best = null
+    for (const range of ranges) {
+      if (isChildOf(range.path, path) && (!best || range.path.length > best.path.length)) {
+        best = range
+      }
+    }
+    if (best) best.children.push(path)
+    else orphans.push(path)
+  }
+
+  return { ranges, orphans }
 })
+
+function relativeChild(parentPath, childPath) {
+  return childPath.slice(parentPath.length + 1)
+}
+
+function toggle(key) {
+  expanded[key] = !expanded[key]
+}
 
 const aiButtonTitle = computed(() => {
   if (!props.aiAvailable) return 'LLM не настроен в подключениях'
@@ -248,6 +306,61 @@ function plural(n, one, few, many) {
 
 .path-item {
   min-width: 0;
+}
+
+.path-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.path-row .path-link {
+  flex: 1;
+  min-width: 0;
+}
+
+.path-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 50%, transparent);
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.path-toggle:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.toggle-caret {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.child-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0 0 0 14px;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.child-item {
+  min-width: 0;
+}
+
+.child-item .path-text--plain {
+  padding: 4px 8px;
+  font-size: 11px;
 }
 
 .path-link {
