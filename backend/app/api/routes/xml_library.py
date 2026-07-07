@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ from app.services.reference_xml_sync import load_sync_state, sync_reference_repo
 from app.user_context import UserContext
 
 router = APIRouter(prefix="/xml-library", tags=["xml-library"])
+logger = logging.getLogger(__name__)
 
 
 class SharedStatusResponse(BaseModel):
@@ -210,7 +212,11 @@ async def list_personal_documents(
     user.xml_documents_dir.mkdir(parents=True, exist_ok=True)
     summaries: list[PersonalDocumentSummary] = []
     for path in sorted(user.xml_documents_dir.glob("*.json")):
-        data = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Skipping unreadable personal document %s: %s", path.name, exc)
+            continue
         doc_schema = data.get("schema_id", "")
         if schema_id and doc_schema != schema_id:
             continue

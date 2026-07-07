@@ -91,11 +91,11 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
     }
   }
 
-  async function refreshPersonalDocuments(schemaId) {
+  async function refreshPersonalDocuments() {
     libraryError.value = ''
     loading.value = true
     try {
-      personalDocuments.value = await listPersonalDocuments(schemaId || undefined)
+      personalDocuments.value = await listPersonalDocuments()
     } catch (err) {
       libraryError.value = translateApiError(err?.response?.data?.detail || err?.message || String(err))
       personalDocuments.value = []
@@ -125,13 +125,13 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
       xml_text: xmlText,
     }
     const saved = await savePersonalDocument(payload)
-    await refreshPersonalDocuments(schemaId)
+    await refreshPersonalDocuments()
     return saved
   }
 
-  async function removePersonalDocument(name, schemaId) {
+  async function removePersonalDocument(name) {
     await deletePersonalDocument(name)
-    await refreshPersonalDocuments(schemaId)
+    await refreshPersonalDocuments()
   }
 
   async function loadIntoEditor(xmlText) {

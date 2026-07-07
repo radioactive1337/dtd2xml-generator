@@ -123,22 +123,16 @@ export function useGenerator() {
 
   async function handleLibraryDeletePersonal(name) {
     try {
-      await xmlLibrary.removePersonalDocument(name, schema.schemaId.value)
+      await xmlLibrary.removePersonalDocument(name)
     } catch (err) {
       xmlLibrary.libraryError.value = err?.response?.data?.detail || err?.message || String(err)
     }
   }
 
-  watch(schema.schemaId, (id) => {
-    if (id) xmlLibrary.refreshPersonalDocuments(id)
-  })
-
   watch(tabs.activeTab, (tab) => {
     if (tab === 'library') {
       xmlLibrary.refreshSharedCategories()
-      if (schema.schemaId.value) {
-        xmlLibrary.refreshPersonalDocuments(schema.schemaId.value)
-      }
+      xmlLibrary.refreshPersonalDocuments()
     }
   })
 
@@ -222,9 +216,7 @@ export function useGenerator() {
     }
 
     await xmlLibrary.refreshSharedCategories()
-    if (schema.schemaId.value) {
-      await xmlLibrary.refreshPersonalDocuments(schema.schemaId.value)
-    }
+    await xmlLibrary.refreshPersonalDocuments()
   })
 
   onBeforeUnmount(() => {

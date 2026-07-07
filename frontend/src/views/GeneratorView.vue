@@ -99,6 +99,7 @@
             :elements="elements"
             :element-docs="elementDocs"
             :root-element="rootElement"
+            :schema-id="schemaId"
             @library-sync="handleLibrarySync"
             @library-expand-category="handleLibraryExpandCategory"
             @library-open-shared="handleLibraryOpenShared"

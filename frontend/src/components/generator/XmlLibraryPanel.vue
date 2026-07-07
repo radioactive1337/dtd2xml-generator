@@ -107,6 +107,12 @@
         <li v-for="doc in personalDocuments" :key="doc.name" class="doc-item">
           <div class="doc-info">
             <span class="doc-title">{{ doc.name }}</span>
+            <span
+              v-if="currentSchemaId && doc.schema_id && doc.schema_id !== currentSchemaId"
+              class="doc-schema-hint"
+            >
+              другая схема DTD
+            </span>
             <span v-if="doc.description" class="doc-desc">{{ doc.description }}</span>
           </div>
           <div class="doc-actions">
@@ -174,6 +180,7 @@ const props = defineProps({
   elements: { type: Array, default: () => [] },
   elementDocs: { type: Object, default: () => ({}) },
   rootElement: { type: String, default: '' },
+  currentSchemaId: { type: String, default: '' },
 })
 
 const emit = defineEmits([
@@ -450,6 +457,11 @@ function submitSave() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.doc-schema-hint {
+  font-size: 10px;
+  color: var(--warning, #b8860b);
 }
 
 .doc-actions {

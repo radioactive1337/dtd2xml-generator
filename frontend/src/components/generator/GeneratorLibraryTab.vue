@@ -14,6 +14,7 @@
       :elements="elements"
       :element-docs="elementDocs"
       :root-element="rootElement"
+      :current-schema-id="schemaId"
       @update:active-scope="$emit('update:library-active-scope', $event)"
       @sync="$emit('library-sync')"
       @expand-category="(cat) => $emit('library-expand-category', cat)"
@@ -42,6 +43,7 @@ defineProps({
   elements: { type: Array, default: () => [] },
   elementDocs: { type: Object, default: () => ({}) },
   rootElement: { type: String, default: '' },
+  schemaId: { type: String, default: '' },
 })
 
 defineEmits([

@@ -1,9 +1,0 @@
-{
-  "name": "Other",
-  "schema_id": "schema-2",
-  "category": "free-document",
-  "description": "test doc",
-  "created_at": "2026-07-06T13:57:53.828859Z",
-  "updated_at": "2026-07-06T13:57:53.828859Z",
-  "xml_text": "<root>personal</root>"
-}

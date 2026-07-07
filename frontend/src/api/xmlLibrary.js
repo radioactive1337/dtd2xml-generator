@@ -29,9 +29,8 @@ export async function loadSharedDocument(category, docId) {
   return data
 }
 
-export async function listPersonalDocuments(schemaId) {
-  const params = schemaId ? { schema_id: schemaId } : undefined
-  const { data } = await client.get('/xml-library/personal', { params })
+export async function listPersonalDocuments() {
+  const { data } = await client.get('/xml-library/personal')
   return data
 }
 
