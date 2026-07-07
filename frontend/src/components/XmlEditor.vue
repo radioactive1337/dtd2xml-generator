@@ -13,7 +13,7 @@
 
         <div class="action-group">
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-tint btn-tint-import"
             title="Загрузить XML из файла"
             @click="triggerImport"
           >
@@ -23,7 +23,7 @@
 
         <div class="action-group">
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-tint btn-tint-format"
             :disabled="!modelValue"
             title="Форматировать документ (Alt+Shift+F)"
             @click="formatDocument"
@@ -31,7 +31,7 @@
             <span class="format-icon" aria-hidden="true">{ }</span>Форматировать
           </button>
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-tint btn-tint-danger"
             :disabled="!modelValue"
             title="Очистить содержимое редактора"
             @click="clearEditor"
@@ -41,12 +41,16 @@
         </div>
 
         <div class="action-group">
-          <button class="btn-secondary" :disabled="!modelValue" @click="downloadXml">
+          <button
+            class="btn-secondary btn-tint btn-tint-export"
+            :disabled="!modelValue"
+            @click="downloadXml"
+          >
             Экспорт .xml
           </button>
           <button
             v-if="gitPushEnabled"
-            class="btn-secondary"
+            class="btn-secondary btn-tint btn-tint-git"
             :disabled="!modelValue"
             title="Отправить в Git-репозиторий эталонной библиотеки"
             @click="onGitPushClick"
@@ -54,7 +58,7 @@
             Отправить в Git
           </button>
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-tint btn-tint-share"
             :disabled="!modelValue"
             title="Поделиться с другим пользователем"
             @click="onShareClick"
@@ -62,7 +66,7 @@
             Поделиться
           </button>
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-tint btn-tint-save"
             :disabled="!canSave"
             title="Сохранить в «Мои документы»"
             @click="onSaveClick"
@@ -520,6 +524,73 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   margin-left: 8px;
   padding-left: 8px;
   border-left: 1px solid var(--border);
+}
+
+.editor-actions .btn-tint {
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.editor-actions .btn-tint-import {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface2));
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+.editor-actions .btn-tint-import:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface2));
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+}
+
+.editor-actions .btn-tint-format {
+  background: color-mix(in srgb, var(--llm-accent) 14%, var(--surface2));
+  border-color: color-mix(in srgb, var(--llm-accent) 36%, var(--border));
+}
+.editor-actions .btn-tint-format:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--llm-accent) 22%, var(--surface2));
+  border-color: color-mix(in srgb, var(--llm-accent) 46%, var(--border));
+}
+
+.editor-actions .btn-tint-danger {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface2));
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
+}
+.editor-actions .btn-tint-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 20%, var(--surface2));
+  border-color: color-mix(in srgb, var(--danger) 44%, var(--border));
+}
+
+.editor-actions .btn-tint-export {
+  background: color-mix(in srgb, var(--success) 13%, var(--surface2));
+  border-color: color-mix(in srgb, var(--success) 36%, var(--border));
+}
+.editor-actions .btn-tint-export:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--success) 21%, var(--surface2));
+  border-color: color-mix(in srgb, var(--success) 46%, var(--border));
+}
+
+.editor-actions .btn-tint-git {
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface2));
+  border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
+}
+.editor-actions .btn-tint-git:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warning) 22%, var(--surface2));
+  border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
+}
+
+.editor-actions .btn-tint-share {
+  background: color-mix(in srgb, #06b6d4 13%, var(--surface2));
+  border-color: color-mix(in srgb, #06b6d4 35%, var(--border));
+}
+.editor-actions .btn-tint-share:hover:not(:disabled) {
+  background: color-mix(in srgb, #06b6d4 21%, var(--surface2));
+  border-color: color-mix(in srgb, #06b6d4 45%, var(--border));
+}
+
+.editor-actions .btn-tint-save {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface2));
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+}
+.editor-actions .btn-tint-save:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 26%, var(--surface2));
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
 }
 
 .format-icon {
