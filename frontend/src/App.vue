@@ -31,7 +31,11 @@
     </header>
     <main class="app-main">
       <div class="route-wrapper">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <keep-alive include="GeneratorView">
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </div>
     </main>
   </div>

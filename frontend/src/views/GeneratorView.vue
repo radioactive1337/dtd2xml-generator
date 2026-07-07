@@ -175,6 +175,8 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'GeneratorView' })
+
 import XmlEditor from '../components/XmlEditor.vue'
 import MappingWizard from '../components/MappingWizard.vue'
 import GeneratorDtdSection from '../components/generator/GeneratorDtdSection.vue'
