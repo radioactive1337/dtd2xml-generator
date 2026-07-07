@@ -19,50 +19,62 @@ function parseXmlDocument(xmlText) {
   return doc
 }
 
+// Stop processing after this many elements so a huge XML cannot OOM the browser.
+// Tree-sync only needs structural coverage; 10 000 nodes is more than enough.
+const MAX_WALK_NODES = 10_000
+
 function collectElementPaths(doc) {
   const root = doc.documentElement
   if (!root) return { rootTag: '', elementPaths: [] }
 
   const rootTag = localTagName(root)
-  const elementPaths = []
 
-  function childSegment(tag, index, totalWithTag) {
-    if (totalWithTag > 1) return `${tag}[${index}]`
-    return tag
-  }
+  // Use an explicit stack so we never blow the JS call stack on deeply nested XML.
+  // Deduplicate into a Set during collection to keep peak memory minimal.
+  const seen = new Set()
+  const stack = [[root, rootTag]]
 
-  function walk(el, currentPath) {
-    const tag = localTagName(el)
-    if (!tag) return
-    const pathToEl = currentPath || tag
-    elementPaths.push(pathToEl)
+  while (stack.length > 0) {
+    if (seen.size >= MAX_WALK_NODES) break
 
-    const children = [...el.children]
+    const [el, pathToEl] = stack.pop()
+    seen.add(pathToEl)
+
+    const children = el.children
     const tagCounts = {}
-    for (const child of children) {
-      const childTag = localTagName(child)
-      if (!childTag) continue
-      tagCounts[childTag] = (tagCounts[childTag] || 0) + 1
+    for (let i = 0; i < children.length; i++) {
+      const childTag = localTagName(children[i])
+      if (childTag) tagCounts[childTag] = (tagCounts[childTag] || 0) + 1
     }
 
+    // Push children in reverse order so the stack processes them left-to-right.
     const tagIndices = {}
-    for (const child of children) {
+    const toQueue = []
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i]
       const childTag = localTagName(child)
       if (!childTag) continue
       const idx = tagIndices[childTag] || 0
       tagIndices[childTag] = idx + 1
-      const segment = childSegment(childTag, idx, tagCounts[childTag])
-      walk(child, `${pathToEl}.${segment}`)
+      const segment = tagCounts[childTag] > 1 ? `${childTag}[${idx}]` : childTag
+      toQueue.push([child, `${pathToEl}.${segment}`])
+    }
+    for (let i = toQueue.length - 1; i >= 0; i--) {
+      stack.push(toQueue[i])
     }
   }
 
-  walk(root, '')
-  return { rootTag, elementPaths: [...new Set(elementPaths)] }
+  return { rootTag, elementPaths: [...seen] }
 }
+
+// XML larger than this is not walked for tree-sync — DOMParser alone would
+// materialise the full tree in memory and risk an OOM on large documents.
+const MAX_PARSE_BYTES = 4 * 1024 * 1024 // 4 MB
 
 /**
  * Parse XML text and return the document root tag plus dot-separated element paths.
- * Returns null when the text is empty or not well-formed XML.
+ * Returns null when the text is empty, not well-formed XML, or exceeds the size
+ * threshold (tree-sync is skipped for very large documents).
  *
  * @param {string} xmlText
  * @param {{ skipFormat?: boolean }} [options]
@@ -72,6 +84,9 @@ function collectElementPaths(doc) {
 export function extractXmlElementPaths(xmlText, { skipFormat = false } = {}) {
   const trimmed = normalizeXmlInput(xmlText)
   if (!trimmed) return null
+
+  // Bail out early to avoid OOM on very large files.
+  if (trimmed.length > MAX_PARSE_BYTES) return null
 
   let doc = parseXmlDocument(trimmed)
   if (!doc && !skipFormat) {
