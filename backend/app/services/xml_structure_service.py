@@ -167,12 +167,14 @@ def compare_structure(
 
     union_paths: set[str] = set()
     similarities: list[dict] = []
+    ref_paths_by_doc: dict[str, set[str]] = {}
     for ref in references:
         try:
             ref_paths = extract_paths(ref.xml_text)
         except XmlParseError:
             continue  # skip unparseable references
         union_paths |= ref_paths
+        ref_paths_by_doc[ref.doc_id] = ref_paths
         similarities.append(
             {
                 "category": ref.category,
@@ -188,6 +190,7 @@ def compare_structure(
     highlight_targets = compute_highlight_targets(xml_text, unique_paths)
     snippets = extract_snippets(xml_text, unique_paths)
     closest = similarities[0] if similarities else None
+    closest_paths = sorted(ref_paths_by_doc.get(closest["doc_id"], set())) if closest else []
 
     return {
         "root_element": root_element,
@@ -200,6 +203,7 @@ def compare_structure(
         "snippets": snippets,
         "similarities": similarities,
         "closest": closest,
+        "closest_paths": closest_paths,
     }
 
 

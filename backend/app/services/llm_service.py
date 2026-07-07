@@ -52,14 +52,20 @@ _FIELD_MAPPING_SYSTEM_PROMPT = (
 )
 
 _STRUCTURE_DIFF_SYSTEM_PROMPT = (
-    "Ты — QA-ревьюер XML-документов. На вход тебе дают уже посчитанный "
-    "алгоритмом список уникальных структурных путей элементов, которых нет ни в "
-    "одном эталонном документе того же типа, ближайший эталон и фрагменты этих "
-    "уникальных элементов. Ты НЕ ищешь различия сам — они уже найдены. "
-    "Кратко и по-деловому объясни на русском языке, что означают эти расхождения, "
-    "и для каждого оцени значимость одной из пометок: «критично», «косметика» или "
-    "«вероятная опечатка в имени тега». Отвечай обычным текстом или списком, без "
-    "markdown-разметки и без блоков кода."
+    "Ты — QA-аналитик XML-документов с продуктовым мышлением. "
+    "На вход тебе дают уже найденные алгоритмом уникальные структурные пути — "
+    "элементы, которых нет ни в одном эталонном документе. "
+    "Ты НЕ ищешь различия сам — они уже найдены. Твоя задача: для каждого "
+    "уникального элемента дать короткое продуктовое объяснение из трёх частей:\n"
+    "1. Что это за элемент — что он задаёт или передаёт (суди по имени, пути, значению в фрагменте и DTD-описанию, если есть).\n"
+    "2. Почему его нет в эталонах — возможные причины: новая функциональность, "
+    "опечатка в имени тега, лишнее поле, расширение схемы и т.п. "
+    "Если в эталоне есть похожий путь — укажи его явно.\n"
+    "3. Рекомендация — одно из: «Добавить в эталоны» (если элемент выглядит намеренным и корректным), "
+    "«Переименовать» (если похоже на опечатку — укажи на что), "
+    "«Удалить» (если элемент явно лишний), "
+    "«Уточнить у разработчика» (если непонятно).\n"
+    "Пиши кратко, по-деловому, на русском. Без markdown-разметки, без блоков кода."
 )
 
 _http_client: httpx.AsyncClient | None = None
@@ -493,7 +499,9 @@ class LLMService:
         root_element: str,
         unique_paths: list[str],
         closest: dict | None,
+        closest_paths: list[str],
         snippets: list[dict],
+        dtd_docs: dict[str, str],
     ) -> str:
         lines = [f"Корневой элемент: {root_element or '(неизвестен)'}"]
         if closest:
@@ -506,22 +514,32 @@ class LLMService:
         else:
             lines.append("Эталоны того же типа не найдены.")
 
+        if closest_paths:
+            lines.append("")
+            lines.append("Пути элементов в ближайшем эталоне (для сравнения):")
+            for path in closest_paths:
+                lines.append(f"  {path}")
+
         lines.append("")
-        lines.append("Уникальные структурные пути (нет ни в одном эталоне):")
+        lines.append("Уникальные пути в текущем документе (нет ни в одном эталоне):")
         for path in unique_paths:
-            lines.append(f"- {path}")
+            dtd_note = dtd_docs.get(path, "")
+            if dtd_note:
+                lines.append(f"- {path}  [DTD: {dtd_note}]")
+            else:
+                lines.append(f"- {path}")
 
         if snippets:
             lines.append("")
-            lines.append("Фрагменты уникальных элементов:")
+            lines.append("Фрагменты уникальных элементов (значения из документа):")
             for snippet in snippets:
                 lines.append(f"# {snippet.get('path', '')}")
                 lines.append(snippet.get("xml", ""))
 
         lines.append("")
         lines.append(
-            "Объясни расхождения и пометь значимость каждого "
-            "(критично / косметика / вероятная опечатка в имени тега)."
+            "Для каждого уникального пути дай продуктовое объяснение по трём пунктам: "
+            "что это, почему нет в эталоне (сравни с путями эталона если похоже), рекомендация."
         )
         return "\n".join(lines)
 
@@ -531,9 +549,11 @@ class LLMService:
         root_element: str,
         unique_paths: list[str],
         closest: dict | None = None,
+        closest_paths: list[str] | None = None,
         snippets: list[dict] | None = None,
+        dtd_docs: dict[str, str] | None = None,
     ) -> str:
-        """Return a human-readable explanation of pre-computed structural diffs."""
+        """Return a human-readable product-context explanation of pre-computed structural diffs."""
         if not unique_paths:
             raise ValueError("No unique paths to explain")
         if not self.base_url:
@@ -544,7 +564,9 @@ class LLMService:
             root_element=root_element,
             unique_paths=unique_paths,
             closest=closest,
+            closest_paths=closest_paths or [],
             snippets=snippets or [],
+            dtd_docs=dtd_docs or {},
         )
         content = await self._chat_completion(
             system_prompt=_STRUCTURE_DIFF_SYSTEM_PROMPT,

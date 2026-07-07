@@ -11,14 +11,18 @@ export async function explainStructure({
   rootElement,
   uniquePaths,
   closest,
+  closestPaths,
   snippets,
+  dtdDocs,
   llmAlias,
 }) {
   const payload = {
     root_element: rootElement || '',
     unique_paths: uniquePaths || [],
     closest: closest || null,
+    closest_paths: closestPaths || [],
     snippets: snippets || [],
+    dtd_docs: dtdDocs || {},
   }
   if (llmAlias) {
     payload.llm_alias = llmAlias

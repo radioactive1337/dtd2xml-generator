@@ -2,7 +2,19 @@ import { ref, computed } from 'vue'
 import { analyzeStructure, explainStructure } from '../../api/xmlCompare'
 import { translateApiError } from '../../utils/apiErrors'
 
-export function useGeneratorCompare({ getEditorXmlText, xmlEditorRef, llmAlias }) {
+function buildDtdDocs(uniquePaths, elementDocs) {
+  const docs = {}
+  const docsMap = elementDocs?.value ?? elementDocs ?? {}
+  for (const path of uniquePaths) {
+    const name = path.split('/').pop()
+    if (docsMap[name]) {
+      docs[path] = docsMap[name]
+    }
+  }
+  return docs
+}
+
+export function useGeneratorCompare({ getEditorXmlText, xmlEditorRef, llmAlias, elementDocs }) {
   const report = ref(null)
   const comparing = ref(false)
   const compareError = ref('')
@@ -59,7 +71,9 @@ export function useGeneratorCompare({ getEditorXmlText, xmlEditorRef, llmAlias }
         rootElement: report.value.root_element,
         uniquePaths: report.value.unique_paths,
         closest: report.value.closest || null,
+        closestPaths: report.value.closest_paths || [],
         snippets: report.value.snippets || [],
+        dtdDocs: buildDtdDocs(report.value.unique_paths, elementDocs),
         llmAlias: llmAlias?.value || '',
       })
       aiExplanation.value = result.explanation || ''

@@ -59,6 +59,7 @@ class StructureCompareResponse(BaseModel):
     snippets: list[StructureSnippet]
     similarities: list[SimilarityEntry]
     closest: SimilarityEntry | None = None
+    closest_paths: list[str] = Field(default_factory=list)
 
 
 class ClosestReference(BaseModel):
@@ -77,7 +78,9 @@ class StructureExplainRequest(BaseModel):
     root_element: str = ""
     unique_paths: list[str] = Field(default_factory=list)
     closest: ClosestReference | None = None
+    closest_paths: list[str] = Field(default_factory=list)
     snippets: list[ExplainSnippet] = Field(default_factory=list)
+    dtd_docs: dict[str, str] = Field(default_factory=dict)
     llm_alias: str | None = None
 
 
@@ -152,7 +155,9 @@ async def explain_structure(
             root_element=request.root_element,
             unique_paths=request.unique_paths,
             closest=closest,
+            closest_paths=request.closest_paths,
             snippets=snippets,
+            dtd_docs=request.dtd_docs,
         )
     except ValueError as exc:
         message = str(exc)

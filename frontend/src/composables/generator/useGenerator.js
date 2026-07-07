@@ -229,6 +229,7 @@ export function useGenerator() {
     getEditorXmlText: xml.getEditorXmlText,
     xmlEditorRef: xml.xmlEditorRef,
     llmAlias: mapping.llmAlias,
+    elementDocs: schema.elementDocs,
   })
 
   const elementCountLabel = computed(() => formatElements(schema.dtdMeta.value.elementCount))
