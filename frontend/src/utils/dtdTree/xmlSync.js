@@ -138,25 +138,29 @@ export async function ensureElementPathLoaded(
   selections,
   modelOptions,
 ) {
-  async function walk(node) {
-    if (isStale() || !node) return null
+  // Iterative DFS — avoids unbounded async call-stack frames that caused OOM.
+  const stack = [treeRoot]
+  while (stack.length > 0) {
+    if (isStale()) return null
+    const node = stack.pop()
+    if (!node) continue
+
     if (!node.isGroupLabel && normalizeTreePath(node.path) === elPath) return node
 
     await loadNodeIfNeeded(node, getElementTree, isStale, modelOptions)
+    if (isStale()) return null
 
-    for (const child of node.children || []) {
+    const children = node.children || []
+    // Push in reverse order so left-to-right DFS order is preserved.
+    for (let i = children.length - 1; i >= 0; i--) {
+      const child = children[i]
       if (node._isChoiceGroup) {
         const selectedAltPath = selections.get(node.path)
         if (selectedAltPath && child.path !== selectedAltPath) continue
       }
-      const found = await walk(child)
-      if (found) return found
+      stack.push(child)
     }
-    return null
   }
-
-  const found = await walk(treeRoot)
-  if (found) return found
 
   const candidates = findNodesForElementPath(elPath, treeRoot)
   return pickNodeForElementPath(candidates, selections, treeRoot)
@@ -173,13 +177,28 @@ export async function ensureTreeLoadedForElementPaths(
   if (!treeRoot || isStale()) return
   const pathSet = new Set(elementPaths)
 
-  function subtreeNeeded(node) {
-    const elPath = normalizeTreePath(node.path)
-    return [...pathSet].some((p) => p === elPath || p.startsWith(`${elPath}.`))
+  // Pre-build a set of all path prefixes that are needed so subtreeNeeded()
+  // is O(depth) instead of O(pathSet.size) per node.
+  const neededPrefixes = new Set()
+  for (const p of pathSet) {
+    const parts = p.split('.')
+    let prefix = ''
+    for (const part of parts) {
+      prefix = prefix ? `${prefix}.${part}` : part
+      neededPrefixes.add(prefix)
+    }
   }
 
-  async function walkLoad(node) {
+  function subtreeNeeded(node) {
+    return neededPrefixes.has(normalizeTreePath(node.path))
+  }
+
+  // Iterative BFS — avoids unbounded async call-stack frames that caused OOM.
+  const queue = [treeRoot]
+  while (queue.length > 0) {
     if (isStale()) return
+    const node = queue.shift()
+
     if (subtreeNeeded(node)) {
       if (node._refName && !node._loaded) {
         const data = await getElementTree(node._refName)
@@ -191,16 +210,15 @@ export async function ensureTreeLoadedForElementPaths(
         node.expanded = true
       }
     }
+
     for (const child of node.children || []) {
       if (node._isChoiceGroup) {
         const selectedAltPath = selections.get(node.path)
         if (selectedAltPath && child.path !== selectedAltPath) continue
       }
-      await walkLoad(child)
+      queue.push(child)
     }
   }
-
-  await walkLoad(treeRoot)
 }
 
 export async function buildCheckedPathsFromElementPaths({
