@@ -13,6 +13,10 @@
     "repo_url": "git@github.com:org/xml-library.git",
     "branch": "main",
     "subdir": "xml-library",
-    "cache_dir": "data/reference-xml"
+    "cache_dir": "data/reference-xml",
+    "push_enabled": false,
+    "push_cache_dir": "data/reference-xml-push",
+    "push_author_name": "XML Generator",
+    "push_author_email": "xmlgenerator@noreply"
   }
 }

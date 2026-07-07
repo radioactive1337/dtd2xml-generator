@@ -15,11 +15,16 @@ from app.auth.sessions import get_current_user
 from app.config import (
     ReferenceXmlSettings,
     get_reference_xml_settings,
+    git_auth_configured,
     reference_xml_cache_dir,
+    reference_xml_requires_https_token,
     reference_xml_root,
+    resolve_git_auth,
 )
 from app.services import reference_xml_service as ref_service
-from app.services.reference_xml_sync import load_sync_state, sync_reference_repository
+from app.services.git_identity_service import ensure_git_commit_author
+from app.services.git_push_service import push_document
+from app.services.reference_xml_sync import GitAuth, load_sync_state, sync_reference_repository
 from app.services.xml_share_service import (
     ShareDocumentRequest,
     ShareDocumentResponse,
@@ -34,6 +39,9 @@ logger = logging.getLogger(__name__)
 class SharedStatusResponse(BaseModel):
     enabled: bool
     configured: bool = False
+    push_enabled: bool = False
+    git_configured: bool = False
+    git_auth_required: bool = False
     last_sync: str | None = None
     commit_sha: str | None = None
     categories_count: int = 0
@@ -45,6 +53,21 @@ class SyncResponse(BaseModel):
     commit_sha: str | None = None
     synced_at: str
     message: str
+
+
+class PushToGitRequest(BaseModel):
+    xml_text: str
+    filename: str
+    root_element: str
+    commit_message: str | None = None
+
+
+class PushToGitResponse(BaseModel):
+    status: str
+    commit_sha: str | None = None
+    path: str
+    message: str
+    overwritten: bool = False
 
 
 class CategoryResponse(BaseModel):
@@ -112,6 +135,23 @@ def _require_settings() -> ReferenceXmlSettings:
     return settings
 
 
+def _require_push_settings() -> ReferenceXmlSettings:
+    settings = _require_settings()
+    if not settings.push_enabled:
+        raise HTTPException(status_code=503, detail="Git push is not enabled")
+    return settings
+
+
+def _git_auth_for_user(user: UserContext, settings: ReferenceXmlSettings) -> GitAuth:
+    token, git_user = resolve_git_auth(user)
+    if reference_xml_requires_https_token(settings) and not token:
+        raise HTTPException(
+            status_code=400,
+            detail="Git token is not configured. Add it in Settings.",
+        )
+    return GitAuth(token=token, git_user=git_user)
+
+
 def _require_root() -> Path:
     root = reference_xml_root()
     if root is None or not root.is_dir():
@@ -129,7 +169,7 @@ def _personal_path(user: UserContext, name: str) -> Path:
 
 @router.get("/shared/status", response_model=SharedStatusResponse)
 async def shared_status(
-    _user: UserContext = Depends(get_current_user),
+    user: UserContext = Depends(get_current_user),
 ) -> SharedStatusResponse:
     settings = get_reference_xml_settings()
     if settings is None:
@@ -139,10 +179,14 @@ async def shared_status(
     cache_dir = reference_xml_cache_dir()
     state = load_sync_state(cache_dir) if cache_dir else {}
     categories_count = len(ref_service.list_categories(root)) if root and root.is_dir() else 0
+    auth_required = reference_xml_requires_https_token(settings)
 
     return SharedStatusResponse(
         enabled=True,
         configured=root is not None and root.is_dir(),
+        push_enabled=settings.push_enabled,
+        git_configured=git_auth_configured(user),
+        git_auth_required=auth_required,
         last_sync=state.get("last_sync"),
         commit_sha=state.get("commit_sha"),
         categories_count=categories_count,
@@ -152,15 +196,45 @@ async def shared_status(
 
 @router.post("/shared/sync", response_model=SyncResponse)
 async def shared_sync(
-    _user: UserContext = Depends(get_current_user),
+    user: UserContext = Depends(get_current_user),
 ) -> SyncResponse:
     settings = _require_settings()
-    result = await sync_reference_repository(settings)
+    git_auth = _git_auth_for_user(user, settings)
+    result = await sync_reference_repository(settings, git_auth=git_auth)
     return SyncResponse(
         status=result.status,
         commit_sha=result.commit_sha,
         synced_at=result.synced_at,
         message=result.message,
+    )
+
+
+@router.post("/shared/push", response_model=PushToGitResponse)
+async def push_to_git(
+    body: PushToGitRequest,
+    user: UserContext = Depends(get_current_user),
+) -> PushToGitResponse:
+    settings = _require_push_settings()
+    git_auth = _git_auth_for_user(user, settings)
+    author_name, author_email = ensure_git_commit_author(user, settings)
+    result = await push_document(
+        settings,
+        git_auth=git_auth,
+        root_element=body.root_element,
+        filename=body.filename,
+        xml_text=body.xml_text,
+        author_name=author_name,
+        author_email=author_email,
+        commit_message=body.commit_message,
+    )
+    if result.status == "ok":
+        await sync_reference_repository(settings, git_auth=git_auth)
+    return PushToGitResponse(
+        status=result.status,
+        commit_sha=result.commit_sha,
+        path=result.path,
+        message=result.message,
+        overwritten=result.overwritten,
     )
 
 

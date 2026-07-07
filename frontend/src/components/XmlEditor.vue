@@ -13,7 +13,7 @@
 
         <div class="action-group">
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-tint btn-tint-import"
             title="Загрузить XML из файла"
             @click="triggerImport"
           >
@@ -23,7 +23,7 @@
 
         <div class="action-group">
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-tint btn-tint-format"
             :disabled="!modelValue"
             title="Форматировать документ (Alt+Shift+F)"
             @click="formatDocument"
@@ -31,7 +31,7 @@
             <span class="format-icon" aria-hidden="true">{ }</span>Форматировать
           </button>
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-tint btn-tint-danger"
             :disabled="!modelValue"
             title="Очистить содержимое редактора"
             @click="clearEditor"
@@ -41,11 +41,24 @@
         </div>
 
         <div class="action-group">
-          <button class="btn-secondary" :disabled="!modelValue" @click="downloadXml">
+          <button
+            class="btn-secondary btn-tint btn-tint-export"
+            :disabled="!modelValue"
+            @click="downloadXml"
+          >
             Экспорт .xml
           </button>
           <button
-            class="btn-secondary"
+            v-if="gitPushEnabled"
+            class="btn-secondary btn-tint btn-tint-git"
+            :disabled="!modelValue"
+            title="Отправить в Git-репозиторий эталонной библиотеки"
+            @click="onGitPushClick"
+          >
+            Отправить в Git
+          </button>
+          <button
+            class="btn-secondary btn-tint btn-tint-share"
             :disabled="!modelValue"
             title="Поделиться с другим пользователем"
             @click="onShareClick"
@@ -53,7 +66,7 @@
             Поделиться
           </button>
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-tint btn-tint-save"
             :disabled="!canSave"
             title="Сохранить в «Мои документы»"
             @click="onSaveClick"
@@ -65,6 +78,58 @@
     </div>
     <p v-if="importError" class="import-error">{{ importError }}</p>
     <div ref="editorContainer" class="editor-container" />
+
+    <div v-if="showPushDialog" class="save-dialog-backdrop" @click.self="closePushDialog">
+      <form class="save-dialog" @submit.prevent="submitPush">
+        <h4 class="save-dialog-title">Отправить в Git</h4>
+        <p v-if="rootElement" class="push-path-hint">
+          Путь: <code>{{ pushTargetPath }}</code>
+        </p>
+        <p class="push-overwrite-hint">
+          Если файл уже есть в репозитории, он будет перезаписан.
+        </p>
+        <label class="save-label">
+          Имя файла
+          <input
+            v-model="pushFilename"
+            type="text"
+            class="save-input"
+            required
+            :disabled="gitPushSubmitting"
+            autofocus
+          />
+        </label>
+        <label class="save-label">
+          Сообщение коммита (необязательно)
+          <input
+            v-model="pushCommitMessage"
+            type="text"
+            class="save-input"
+            :disabled="gitPushSubmitting"
+          />
+        </label>
+        <p v-if="gitPushError" class="push-feedback push-feedback-error">{{ gitPushError }}</p>
+        <p v-else-if="gitPushMessage" class="push-feedback push-feedback-success">{{ gitPushMessage }}</p>
+        <div class="save-dialog-actions">
+          <button
+            type="button"
+            class="btn-secondary btn-sm"
+            :disabled="gitPushSubmitting"
+            @click="closePushDialog"
+          >
+            {{ gitPushMessage ? 'Закрыть' : 'Отмена' }}
+          </button>
+          <button
+            v-if="!gitPushMessage"
+            type="submit"
+            class="btn-primary btn-sm"
+            :disabled="!pushFilename.trim() || gitPushSubmitting"
+          >
+            {{ gitPushSubmitting ? 'Отправка…' : 'Отправить' }}
+          </button>
+        </div>
+      </form>
+    </div>
 
     <div v-if="showSaveDialog" class="save-dialog-backdrop" @click.self="closeSaveDialog">
       <form class="save-dialog" @submit.prevent="submitSave">
@@ -87,7 +152,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import loader from '@monaco-editor/loader'
 import { registerXmlFormatter } from '../utils/formatXml'
 import { readXmlFileAsText } from '../utils/readXmlFile'
@@ -99,9 +164,23 @@ const props = defineProps({
   validationErrors: { type: Array, default: () => [] },
   canSave: { type: Boolean, default: false },
   uniqueRanges: { type: Array, default: () => [] },
+  gitPushEnabled: { type: Boolean, default: false },
+  rootElement: { type: String, default: '' },
+  gitPushSubmitting: { type: Boolean, default: false },
+  gitPushMessage: { type: String, default: '' },
+  gitPushError: { type: String, default: '' },
 })
 
-const emit = defineEmits(['content-change', 'import', 'clear', 'save', 'share'])
+const emit = defineEmits([
+  'content-change',
+  'import',
+  'clear',
+  'save',
+  'share',
+  'push-to-git',
+  'push-dialog-open',
+  'push-dialog-close',
+])
 
 const { isDark } = useTheme()
 
@@ -109,8 +188,22 @@ const editorContainer = ref(null)
 const fileInput = ref(null)
 const importError = ref('')
 const showSaveDialog = ref(false)
+const showPushDialog = ref(false)
 const saveName = ref('')
 const saveDescription = ref('')
+const pushFilename = ref('')
+const pushCommitMessage = ref('')
+
+const pushTargetPath = computed(() => {
+  const folder = props.rootElement || 'root'
+  const file = pushFilename.value.trim() || 'document.xml'
+  return `${folder}/${file}`
+})
+
+function defaultPushFilename() {
+  const base = (props.filename || 'generated.xml').replace(/\.xml$/i, '')
+  return `${base || 'document'}.xml`
+}
 let editor = null
 let monaco = null
 let suppressEditorEvent = false
@@ -333,6 +426,35 @@ function clearEditor() {
   emit('clear')
 }
 
+function onGitPushClick() {
+  pushFilename.value = defaultPushFilename()
+  pushCommitMessage.value = ''
+  showPushDialog.value = true
+  emit('push-dialog-open')
+}
+
+function closePushDialog() {
+  if (props.gitPushSubmitting) return
+  showPushDialog.value = false
+  emit('push-dialog-close')
+}
+
+function submitPush() {
+  const filename = pushFilename.value.trim()
+  if (!filename || props.gitPushSubmitting) return
+  emit('push-to-git', {
+    filename,
+    commitMessage: pushCommitMessage.value.trim(),
+  })
+}
+
+watch(
+  () => props.gitPushMessage,
+  (message) => {
+    if (message) showPushDialog.value = true
+  },
+)
+
 function onSaveClick() {
   saveName.value = ''
   saveDescription.value = ''
@@ -402,6 +524,73 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   margin-left: 8px;
   padding-left: 8px;
   border-left: 1px solid var(--border);
+}
+
+.editor-actions .btn-tint {
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.editor-actions .btn-tint-import {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface2));
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+.editor-actions .btn-tint-import:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface2));
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+}
+
+.editor-actions .btn-tint-format {
+  background: color-mix(in srgb, var(--llm-accent) 14%, var(--surface2));
+  border-color: color-mix(in srgb, var(--llm-accent) 36%, var(--border));
+}
+.editor-actions .btn-tint-format:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--llm-accent) 22%, var(--surface2));
+  border-color: color-mix(in srgb, var(--llm-accent) 46%, var(--border));
+}
+
+.editor-actions .btn-tint-danger {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface2));
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
+}
+.editor-actions .btn-tint-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 20%, var(--surface2));
+  border-color: color-mix(in srgb, var(--danger) 44%, var(--border));
+}
+
+.editor-actions .btn-tint-export {
+  background: color-mix(in srgb, var(--success) 13%, var(--surface2));
+  border-color: color-mix(in srgb, var(--success) 36%, var(--border));
+}
+.editor-actions .btn-tint-export:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--success) 21%, var(--surface2));
+  border-color: color-mix(in srgb, var(--success) 46%, var(--border));
+}
+
+.editor-actions .btn-tint-git {
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface2));
+  border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
+}
+.editor-actions .btn-tint-git:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warning) 22%, var(--surface2));
+  border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
+}
+
+.editor-actions .btn-tint-share {
+  background: color-mix(in srgb, #06b6d4 13%, var(--surface2));
+  border-color: color-mix(in srgb, #06b6d4 35%, var(--border));
+}
+.editor-actions .btn-tint-share:hover:not(:disabled) {
+  background: color-mix(in srgb, #06b6d4 21%, var(--surface2));
+  border-color: color-mix(in srgb, #06b6d4 45%, var(--border));
+}
+
+.editor-actions .btn-tint-save {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface2));
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+}
+.editor-actions .btn-tint-save:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 26%, var(--surface2));
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
 }
 
 .format-icon {
@@ -477,6 +666,36 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+
+.push-path-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.push-path-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
+.push-overwrite-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.push-feedback {
+  margin: 0;
+  font-size: 12px;
+}
+
+.push-feedback-error {
+  color: var(--danger, #ef4444);
+}
+
+.push-feedback-success {
+  color: var(--success, #22c55e);
 }
 </style>
 

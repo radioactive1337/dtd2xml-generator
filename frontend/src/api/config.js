@@ -54,3 +54,23 @@ export async function deleteLlmAlias(alias) {
   const { data } = await client.delete(`/config/llm/${encodeURIComponent(alias)}`)
   return data
 }
+
+export async function getGitSettings() {
+  const { data } = await client.get('/config/git')
+  return data
+}
+
+export async function updateGitSettings(payload) {
+  const { data } = await client.put('/config/git', payload)
+  return data
+}
+
+export async function deleteGitSettings() {
+  const { data } = await client.delete('/config/git')
+  return data
+}
+
+export async function testGitConnection() {
+  const { data } = await client.post('/config/test-git')
+  return data
+}

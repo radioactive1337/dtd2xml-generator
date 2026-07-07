@@ -7,6 +7,7 @@ import {
   listSharedDocuments,
   loadPersonalDocument,
   loadSharedDocument,
+  pushDocumentToGit,
   savePersonalDocument,
   shareDocument,
   syncSharedLibrary,
@@ -20,6 +21,7 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
   const personalDocuments = ref([])
   const selectedCategory = ref(null)
   const syncing = ref(false)
+  const gitPushing = ref(false)
   const syncStatus = ref(null)
   const libraryError = ref('')
   const loading = ref(false)
@@ -89,6 +91,37 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
       throw err
     } finally {
       syncing.value = false
+    }
+  }
+
+  async function pushToGit({
+    rootElement,
+    filename,
+    xmlText,
+    commitMessage = '',
+  }) {
+    if (gitPushing.value) return
+    libraryError.value = ''
+    gitPushing.value = true
+    try {
+      const result = await pushDocumentToGit({
+        root_element: rootElement,
+        filename,
+        xml_text: xmlText,
+        commit_message: commitMessage.trim() || null,
+      })
+      if (result.status === 'ok') {
+        await refreshSharedCategories()
+        if (selectedCategory.value) {
+          await loadCategoryDocuments(selectedCategory.value)
+        }
+      }
+      return result
+    } catch (err) {
+      libraryError.value = translateApiError(err?.response?.data?.detail || err?.message || String(err))
+      throw err
+    } finally {
+      gitPushing.value = false
     }
   }
 
@@ -179,6 +212,7 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
     personalDocuments,
     selectedCategory,
     syncing,
+    gitPushing,
     syncStatus,
     libraryError,
     loading,
@@ -186,6 +220,7 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
     refreshSharedCategories,
     loadCategoryDocuments,
     syncFromGit,
+    pushToGit,
     refreshPersonalDocuments,
     openSharedDocument,
     openPersonalDocument,

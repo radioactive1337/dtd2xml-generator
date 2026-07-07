@@ -71,6 +71,57 @@
           <p v-else class="empty">Алиасы LLM не настроены.</p>
         </section>
 
+        <section class="alias-section">
+          <div class="section-header">
+            <h3>Git (эталонная библиотека)</h3>
+          </div>
+          <p class="hint section-hint">
+            Персональный токен для pull и push в репозиторий эталонов. Для привязки коммитов к вашему
+            аккаунту GitLab укажите email, совпадающий с профилем (или он подтянется автоматически при сохранении токена).
+          </p>
+          <div class="git-settings-card">
+            <div class="git-settings-row">
+              <span class="alias-icon git">GIT</span>
+              <div class="alias-info">
+                <span class="alias-name">Доступ к репозиторию</span>
+                <span class="alias-meta">
+                  {{ gitSettings.configured ? 'Токен сохранён' : 'Токен не задан' }}
+                  · пользователь: {{ gitSettings.user || 'oauth2' }}
+                </span>
+                <span v-if="gitSettings.author_configured" class="alias-meta">
+                  Автор коммитов: {{ gitSettings.author_name }} &lt;{{ gitSettings.author_email }}&gt;
+                </span>
+                <span v-else-if="gitSettings.configured" class="alias-meta">
+                  Автор коммитов не задан — будет подтянут из GitLab при первом push
+                </span>
+              </div>
+              <button class="btn-secondary btn-test" :disabled="gitTesting" @click="testGit">
+                {{ gitTesting ? 'Проверка…' : 'Проверить' }}
+              </button>
+              <button class="btn-secondary btn-test" @click="openGitForm">
+                {{ gitSettings.configured ? 'Изменить' : 'Добавить токен' }}
+              </button>
+              <button
+                v-if="gitSettings.configured"
+                class="btn-secondary btn-test danger"
+                @click="removeGitSettings"
+              >
+                Удалить
+              </button>
+              <span v-if="gitTestStatus" class="status-badge" :class="gitTestStatus.ok ? 'ok' : 'error'">
+                {{ gitTestStatus.ok ? 'OK' : 'Ошибка' }}
+              </span>
+              <p
+                v-if="gitTestStatus?.message"
+                class="status-detail"
+                :class="gitTestStatus.ok ? 'ok-msg' : 'error-msg'"
+              >
+                {{ gitTestStatus.message }}
+              </p>
+            </div>
+          </div>
+        </section>
+
         <section class="setup-hint card inner">
           <div class="panel-title">Серверные настройки</div>
           <p class="hint inner-hint">
@@ -124,6 +175,36 @@
       </div>
     </div>
 
+    <div v-if="gitFormOpen" class="modal-overlay" @click.self="closeGitForm">
+      <div class="card modal">
+        <div class="panel-title">{{ gitSettings.configured ? 'Изменить Git-токен' : 'Git-токен' }}</div>
+        <form @submit.prevent="saveGitForm">
+          <label>Git user (для HTTPS)</label>
+          <input v-model="gitForm.user" placeholder="oauth2" />
+          <label>
+            Token{{ gitSettings.configured ? ' (оставьте пустым, чтобы не менять)' : '' }}
+          </label>
+          <input v-model="gitForm.token" type="password" autocomplete="off" />
+          <label>Имя в коммитах</label>
+          <input v-model="gitForm.author_name" placeholder="Как в GitLab" />
+          <label>Email в коммитах</label>
+          <input
+            v-model="gitForm.author_email"
+            type="email"
+            placeholder="Должен совпадать с email в GitLab"
+          />
+          <p class="hint inner-hint">
+            GitLab привязывает коммит к аккаунту по email автора, а не по токену push.
+          </p>
+          <p v-if="gitFormError" class="error-msg">{{ gitFormError }}</p>
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" @click="closeGitForm">Отмена</button>
+            <button type="submit" class="btn-primary" :disabled="savingGitForm">Сохранить</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div v-if="llmFormOpen" class="modal-overlay" @click.self="closeLlmForm">
       <div class="card modal">
         <div class="panel-title">{{ llmForm.alias && llmFormEditing ? 'Изменить LLM' : 'Новый алиас LLM' }}</div>
@@ -161,6 +242,10 @@ import {
   createLlmAlias,
   updateLlmAlias,
   deleteLlmAlias,
+  getGitSettings,
+  updateGitSettings,
+  deleteGitSettings,
+  testGitConnection,
 } from '../api/config'
 
 const connections = ref({ databases: [], llm: [], default_llm: null })
@@ -170,6 +255,13 @@ const loading = ref(true)
 const error = ref('')
 const dbTests = ref({})
 const llmTests = ref({})
+const gitSettings = ref({ configured: false, user: 'oauth2' })
+const gitTestStatus = ref(null)
+const gitTesting = ref(false)
+const gitFormOpen = ref(false)
+const savingGitForm = ref(false)
+const gitFormError = ref('')
+const gitForm = ref({ token: '', user: 'oauth2', author_name: '', author_email: '' })
 
 const dbFormOpen = ref(false)
 const llmFormOpen = ref(false)
@@ -224,6 +316,80 @@ function isLlmTesting(alias) {
 async function loadConnections() {
   connections.value = await getConnections()
   defaultLlmAlias.value = connections.value.default_llm || connections.value.llm?.[0]?.alias || ''
+  gitSettings.value = await getGitSettings()
+}
+
+function openGitForm() {
+  gitFormError.value = ''
+  gitForm.value = {
+    token: '',
+    user: gitSettings.value.user || 'oauth2',
+    author_name: gitSettings.value.author_name || '',
+    author_email: gitSettings.value.author_email || '',
+  }
+  gitFormOpen.value = true
+}
+
+function closeGitForm() {
+  gitFormOpen.value = false
+  gitFormError.value = ''
+}
+
+async function saveGitForm() {
+  gitFormError.value = ''
+  if (!gitSettings.value.configured && !gitForm.value.token.trim()) {
+    gitFormError.value = 'Укажите токен'
+    return
+  }
+  savingGitForm.value = true
+  error.value = ''
+  try {
+    const payload = { user: gitForm.value.user.trim() || 'oauth2' }
+    if (gitForm.value.token.trim()) {
+      payload.token = gitForm.value.token.trim()
+    } else if (!gitSettings.value.configured) {
+      gitFormError.value = 'Укажите токен'
+      return
+    }
+    if (gitForm.value.author_name.trim()) {
+      payload.author_name = gitForm.value.author_name.trim()
+    }
+    if (gitForm.value.author_email.trim()) {
+      payload.author_email = gitForm.value.author_email.trim()
+    }
+    gitSettings.value = await updateGitSettings(payload)
+    gitTestStatus.value = null
+    closeGitForm()
+  } catch (e) {
+    gitFormError.value = e.message
+  } finally {
+    savingGitForm.value = false
+  }
+}
+
+async function removeGitSettings() {
+  if (!confirm('Удалить сохранённый Git-токен?')) return
+  error.value = ''
+  try {
+    await deleteGitSettings()
+    gitSettings.value = { configured: false, user: 'oauth2' }
+    gitTestStatus.value = null
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function testGit() {
+  gitTesting.value = true
+  gitTestStatus.value = null
+  try {
+    const result = await testGitConnection()
+    gitTestStatus.value = { ok: result.ok, message: result.message }
+  } catch (e) {
+    gitTestStatus.value = { ok: false, message: e.message }
+  } finally {
+    gitTesting.value = false
+  }
 }
 
 async function testDb(alias) {
@@ -526,6 +692,28 @@ code {
 
 .alias-icon.llm {
   background: var(--llm-accent);
+}
+
+.alias-icon.git {
+  background: #6b7280;
+}
+
+.section-hint {
+  margin-top: 0;
+  margin-bottom: 12px;
+}
+
+.git-settings-card {
+  background: var(--surface2);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.git-settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .empty {

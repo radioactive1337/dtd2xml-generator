@@ -169,11 +169,19 @@
         :validation-errors="validationResult?.valid === false ? validationResult.errors : []"
         :can-save="canSaveLibraryDocument"
         :unique-ranges="uniqueRanges"
+        :git-push-enabled="gitPushEnabled"
+        :root-element="rootElement"
+        :git-push-submitting="gitPushSubmitting"
+        :git-push-message="gitPushMessage"
+        :git-push-error="gitPushError"
         @content-change="onEditorContentChange"
         @clear="onEditorClear"
         @import="onXmlFileImported"
         @save="handleLibrarySave"
         @share="openShareInlineDialog"
+        @push-to-git="handleGitPush"
+        @push-dialog-open="resetGitPushFeedback"
+        @push-dialog-close="resetGitPushFeedback"
       />
     </div>
 
@@ -296,6 +304,12 @@ const {
   libraryLoading,
   libraryError,
   canSaveLibraryDocument,
+  gitPushEnabled,
+  gitPushSubmitting,
+  gitPushMessage,
+  gitPushError,
+  resetGitPushFeedback,
+  handleGitPush,
   categoryDocuments,
   loadingCategory,
   handleLibrarySync,
