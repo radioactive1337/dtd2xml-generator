@@ -309,6 +309,23 @@ export function flattenVisible(root) {
   return result
 }
 
+/** Build path→node and path→parent maps in a single O(N) tree pass. */
+export function buildNodeAndParentMaps(root) {
+  const nodeMap = new Map()
+  const parentMap = new Map()
+  if (!root) return { nodeMap, parentMap }
+  const stack = [root]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    nodeMap.set(node.path, node)
+    for (const child of node.children || []) {
+      parentMap.set(child.path, node)
+      stack.push(child)
+    }
+  }
+  return { nodeMap, parentMap }
+}
+
 export function walkTree(root, fn) {
   if (!root) return
   const stack = [root]

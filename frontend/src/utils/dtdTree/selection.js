@@ -1,4 +1,5 @@
 import {
+  buildNodeAndParentMaps,
   collectDescendantPaths,
   findChoiceAlternative,
   findChoiceGroupAncestor,
@@ -103,11 +104,31 @@ function hasCheckedDescendant(node, checkedPaths) {
   return false
 }
 
-function addImpliedAncestorPaths(treeRoot, checkedPaths) {
-  walkTree(treeRoot, (n) => {
-    if (n.isGroupLabel || n.required || !isInActiveBranch(n, treeRoot, checkedPaths)) return
-    if (hasCheckedDescendant(n, checkedPaths)) checkedPaths.add(n.path)
-  })
+// O(1)-per-step variants of skipGroupLabelParent / isInActiveBranch used by
+// syncCheckedFromPaths where a precomputed parentMap is available.
+function skipGroupLabelParentFast(node, parentMap) {
+  let parent = parentMap.get(node.path)
+  while (parent?.isGroupLabel && !parent._isChoiceGroup) {
+    parent = parentMap.get(parent.path)
+  }
+  return parent
+}
+
+function isInActiveBranchFast(node, checkedPaths, parentMap) {
+  if (!node) return false
+  let current = node
+  while (true) {
+    const parent = skipGroupLabelParentFast(current, parentMap)
+    if (!parent) return true
+    if (parent._isChoiceGroup) {
+      const alt = findChoiceAlternative(parent, current)
+      if (!alt || !isChoiceAlternativeSelected(parent, alt, checkedPaths)) return false
+    }
+    if (!parent.required && !checkedPaths.has(parent.path)) {
+      if (!hasCheckedDescendant(parent, checkedPaths)) return false
+    }
+    current = parent
+  }
 }
 
 export function pruneOrphanPaths(treeRoot, checkedPaths) {
@@ -122,22 +143,41 @@ export function pruneOrphanPaths(treeRoot, checkedPaths) {
 
 export function syncCheckedFromPaths(treeRoot, checkedPaths) {
   if (!treeRoot) return
-  pruneOrphanPaths(treeRoot, checkedPaths)
+  // Build lookup maps once so every isInActiveBranch call inside the three
+  // walkTree passes below is O(depth) instead of O(depth × N).
+  const { nodeMap, parentMap } = buildNodeAndParentMaps(treeRoot)
+
+  // pruneOrphanPaths — fast lookup via nodeMap
+  for (const path of [...checkedPaths]) {
+    const node = nodeMap.get(path)
+    if (!node || !isInActiveBranchFast(node, checkedPaths, parentMap)) {
+      checkedPaths.delete(path)
+    }
+  }
+
   enforceChoiceExclusivity(treeRoot, checkedPaths)
   pruneInactiveChoiceBranches(treeRoot, checkedPaths)
+
   walkTree(treeRoot, (n) => {
-    const active = isInActiveBranch(n, treeRoot, checkedPaths)
+    const active = isInActiveBranchFast(n, checkedPaths, parentMap)
     if (active && n.required) {
       checkedPaths.add(n.path)
     } else if (!active) {
       checkedPaths.delete(n.path)
     }
   })
-  addImpliedAncestorPaths(treeRoot, checkedPaths)
+
+  // addImpliedAncestorPaths — fast
+  walkTree(treeRoot, (n) => {
+    if (n.isGroupLabel || n.required || !isInActiveBranchFast(n, checkedPaths, parentMap)) return
+    if (hasCheckedDescendant(n, checkedPaths)) checkedPaths.add(n.path)
+  })
+
   enforceChoiceExclusivity(treeRoot, checkedPaths)
   pruneInactiveChoiceBranches(treeRoot, checkedPaths)
+
   walkTree(treeRoot, (n) => {
-    const active = isInActiveBranch(n, treeRoot, checkedPaths)
+    const active = isInActiveBranchFast(n, checkedPaths, parentMap)
     n.locked = active && n.required
     n.checked = active && (n.required || checkedPaths.has(n.path))
   })
@@ -167,19 +207,8 @@ export function addCheckedAncestors(targetSet, node, treeRoot) {
 
 export function expandAncestorsOfChecked(checkedPaths, treeRoot) {
   if (!treeRoot || !checkedPaths.size) return
-  // Build nodeMap and parentMap in a single O(N) pass so ancestor traversal
-  // is O(1) per step instead of O(N) findParentNode on every step.
-  const nodeMap = new Map()
-  const parentMap = new Map()
-  const stack = [treeRoot]
-  while (stack.length > 0) {
-    const node = stack.pop()
-    nodeMap.set(node.path, node)
-    for (const child of node.children || []) {
-      parentMap.set(child.path, node)
-      stack.push(child)
-    }
-  }
+  // Single O(N) pass builds both maps; ancestor traversal is then O(1) per step.
+  const { nodeMap, parentMap } = buildNodeAndParentMaps(treeRoot)
   for (const path of checkedPaths) {
     let node = nodeMap.get(path)
     while (node) {
