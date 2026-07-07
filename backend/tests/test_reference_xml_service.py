@@ -41,6 +41,30 @@ def test_parse_entry_without_prefix():
     assert title == "add-card"
 
 
+def test_parse_entry_xml_extension():
+    doc_id, title = svc.parse_entry("add-card", "add-card.xml")
+    assert doc_id == "add-card"
+    assert title == "add-card"
+
+
+def test_list_and_load_xml_documents(tmp_path: Path):
+    root = tmp_path / "xml-library"
+    pay_doc = root / "PayDoc"
+    pay_doc.mkdir(parents=True)
+    (pay_doc / "example.xml").write_text("<PayDoc>xml</PayDoc>", encoding="utf-8")
+
+    categories = svc.list_categories(root)
+    assert [c.name for c in categories] == ["PayDoc"]
+    assert categories[0].document_count == 1
+    assert categories[0].root_element == "PayDoc"
+
+    docs = svc.list_documents(root, "PayDoc")
+    assert docs[0].filename == "example.xml"
+
+    entry = svc.load_document(root, "PayDoc", "example")
+    assert entry.xml_text == "<PayDoc>xml</PayDoc>"
+
+
 def test_list_categories(reference_tree: Path):
     categories = svc.list_categories(reference_tree)
     names = {c.name for c in categories}

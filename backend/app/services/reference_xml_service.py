@@ -10,6 +10,26 @@ from xml.etree import ElementTree as ET
 from fastapi import HTTPException
 
 _CATEGORY_RE = re.compile(r"^[\w\-.]+$")
+_REFERENCE_EXTENSIONS = (".txt", ".xml")
+
+
+def _strip_reference_extension(filename: str) -> str:
+    lower = filename.lower()
+    for ext in _REFERENCE_EXTENSIONS:
+        if lower.endswith(ext):
+            return filename[: -len(ext)]
+    return filename
+
+
+def _iter_reference_files(category_dir: Path):
+    for ext in _REFERENCE_EXTENSIONS:
+        for path in sorted(category_dir.glob(f"*{ext}")):
+            if path.is_file():
+                yield path
+
+
+def _category_has_reference_files(category_dir: Path) -> bool:
+    return any(True for _ in _iter_reference_files(category_dir))
 
 
 @dataclass(frozen=True)
@@ -37,7 +57,7 @@ class ReferenceEntry:
 
 def parse_entry(category: str, filename: str) -> tuple[str, str]:
     """Return (doc_id, title) for a reference XML filename."""
-    stem = filename.removesuffix(".txt")
+    stem = _strip_reference_extension(filename)
     prefix = f"{category}_"
     title = stem[len(prefix) :] if stem.startswith(prefix) else stem
     title = title.replace("_", " ").strip(" _") or stem
@@ -62,10 +82,23 @@ def _resolve_document_path(root: Path, category: str, doc_id: str) -> Path:
     _validate_category(category)
     _validate_doc_id(doc_id)
     root_resolved = root.resolve()
-    path = (root / category / f"{doc_id}.txt").resolve()
-    if not path.is_relative_to(root_resolved):
+    cat_dir = (root / category).resolve()
+    if not cat_dir.is_relative_to(root_resolved):
+        raise HTTPException(status_code=400, detail="Invalid category path")
+
+    candidates = [cat_dir / f"{doc_id}{ext}" for ext in _REFERENCE_EXTENSIONS]
+    if any(doc_id.lower().endswith(ext) for ext in _REFERENCE_EXTENSIONS):
+        candidates.insert(0, cat_dir / doc_id)
+
+    for path in candidates:
+        resolved = path.resolve()
+        if resolved.is_relative_to(root_resolved) and resolved.is_file():
+            return resolved
+
+    fallback = (cat_dir / f"{doc_id}.xml").resolve()
+    if not fallback.is_relative_to(root_resolved):
         raise HTTPException(status_code=400, detail="Invalid document path")
-    return path
+    return fallback
 
 
 def _normalize_element_key(text: str) -> str:
@@ -73,9 +106,7 @@ def _normalize_element_key(text: str) -> str:
 
 
 def _peek_root_element(category_dir: Path) -> str | None:
-    for path in sorted(category_dir.glob("*.txt")):
-        if not path.is_file():
-            continue
+    for path in _iter_reference_files(category_dir):
         try:
             root = ET.fromstring(path.read_text(encoding="utf-8"))
         except ET.ParseError:
@@ -92,7 +123,7 @@ def _is_reference_category_dir(entry: Path) -> bool:
         return False
     if entry.name.startswith("."):
         return False
-    return any(path.is_file() for path in entry.glob("*.txt"))
+    return any(path.is_file() for path in _iter_reference_files(entry))
 
 
 def list_categories(
@@ -107,7 +138,7 @@ def list_categories(
     for entry in sorted(root.iterdir()):
         if not _is_reference_category_dir(entry):
             continue
-        count = sum(1 for f in entry.glob("*.txt") if f.is_file())
+        count = sum(1 for _ in _iter_reference_files(entry))
         peeked = _peek_root_element(entry)
         if filter_key:
             candidate_keys = {
@@ -137,9 +168,7 @@ def list_documents(root: Path, category: str) -> list[DocumentSummary]:
     if not cat_dir.resolve().is_relative_to(root_resolved):
         raise HTTPException(status_code=400, detail="Invalid category path")
     documents: list[DocumentSummary] = []
-    for path in sorted(cat_dir.glob("*.txt")):
-        if not path.is_file():
-            continue
+    for path in _iter_reference_files(cat_dir):
         doc_id, title = parse_entry(category, path.name)
         documents.append(
             DocumentSummary(doc_id=doc_id, title=title, filename=path.name)
