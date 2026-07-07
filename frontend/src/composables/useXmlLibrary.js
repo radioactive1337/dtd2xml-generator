@@ -8,6 +8,7 @@ import {
   loadPersonalDocument,
   loadSharedDocument,
   savePersonalDocument,
+  shareDocument,
   syncSharedLibrary,
 } from '../api/xmlLibrary'
 import { translateApiError } from '../utils/apiErrors'
@@ -134,6 +135,37 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
     await refreshPersonalDocuments()
   }
 
+  async function sharePersonalDocument(name, recipientUsername, message = '') {
+    const result = await shareDocument({
+      recipient_username: recipientUsername.trim(),
+      source_document_name: name,
+      message: message.trim(),
+    })
+    return result
+  }
+
+  async function shareCurrentDocument({
+    name,
+    schemaId,
+    xmlText,
+    description = '',
+    recipientUsername,
+    message = '',
+  }) {
+    const result = await shareDocument({
+      recipient_username: recipientUsername.trim(),
+      message: message.trim(),
+      document: {
+        name: name.trim(),
+        schema_id: schemaId || '',
+        category: 'free-document',
+        description: description.trim(),
+        xml_text: xmlText,
+      },
+    })
+    return result
+  }
+
   async function loadIntoEditor(xmlText) {
     if (onLoadDocument) {
       await onLoadDocument(xmlText)
@@ -159,6 +191,8 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
     openPersonalDocument,
     saveCurrentDocument,
     removePersonalDocument,
+    sharePersonalDocument,
+    shareCurrentDocument,
     loadIntoEditor,
   }
 }

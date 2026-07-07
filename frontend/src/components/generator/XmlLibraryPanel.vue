@@ -104,9 +104,18 @@
             >
               другая схема DTD
             </span>
+            <span v-if="doc.shared_by_name" class="doc-shared-badge">от {{ doc.shared_by_name }}</span>
             <span v-if="doc.description" class="doc-desc">{{ doc.description }}</span>
           </div>
           <div class="doc-actions">
+            <button
+              type="button"
+              class="btn-secondary btn-sm"
+              title="Поделиться"
+              @click="$emit('share-personal', doc.name)"
+            >
+              Поделиться
+            </button>
             <button
               type="button"
               class="btn-secondary btn-sm"
@@ -161,6 +170,7 @@ const emit = defineEmits([
   'expand-category',
   'open-shared',
   'open-personal',
+  'share-personal',
   'delete-personal',
 ])
 
@@ -399,6 +409,11 @@ function onSync() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.doc-shared-badge {
+  font-size: 10px;
+  color: var(--accent);
 }
 
 .doc-desc {

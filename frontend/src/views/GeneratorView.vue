@@ -103,6 +103,7 @@
             @library-expand-category="handleLibraryExpandCategory"
             @library-open-shared="handleLibraryOpenShared"
             @library-open-personal="handleLibraryOpenPersonal"
+            @library-share-personal="openSharePersonalDialog"
             @library-delete-personal="handleLibraryDeletePersonal"
           />
         </div>
@@ -156,8 +157,20 @@
         @clear="onEditorClear"
         @import="onXmlFileImported"
         @save="handleLibrarySave"
+        @share="openShareInlineDialog"
       />
     </div>
+
+    <ShareDocumentDialog
+      :open="shareDialogOpen"
+      :document-label="shareDialogMode === 'personal' ? shareDialogDocumentName : ''"
+      :require-document-name="shareDialogMode === 'inline'"
+      :default-document-name="rootElement || 'document'"
+      :submitting="shareDialogSubmitting"
+      :error-message="shareDialogError"
+      @close="closeShareDialog"
+      @submit="handleShareSubmit"
+    />
   </div>
 </template>
 
@@ -171,6 +184,7 @@ import GeneratorDataTab from '../components/generator/GeneratorDataTab.vue'
 import GeneratorResultsTab from '../components/generator/GeneratorResultsTab.vue'
 import GeneratorLibraryTab from '../components/generator/GeneratorLibraryTab.vue'
 import GeneratorActionFooter from '../components/generator/GeneratorActionFooter.vue'
+import ShareDocumentDialog from '../components/generator/ShareDocumentDialog.vue'
 import { useGenerator } from '../composables/generator/useGenerator'
 
 const {
@@ -271,6 +285,15 @@ const {
   handleLibraryOpenPersonal,
   handleLibrarySave,
   handleLibraryDeletePersonal,
+  shareDialogOpen,
+  shareDialogMode,
+  shareDialogDocumentName,
+  shareDialogSubmitting,
+  shareDialogError,
+  openSharePersonalDialog,
+  openShareInlineDialog,
+  closeShareDialog,
+  handleShareSubmit,
   generate,
   fill,
   cancelFill,
