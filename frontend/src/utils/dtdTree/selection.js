@@ -24,9 +24,11 @@ export function removePathAndDescendants(path, checkedPaths, treeRoot) {
 }
 
 export function isChoiceAlternativeSelected(choiceGroup, alt, checkedPaths) {
-  return [...checkedPaths].some(
-    (p) => p === alt.path || p.startsWith(`${alt.path}.`),
-  )
+  const prefix = `${alt.path}.`
+  for (const p of checkedPaths) {
+    if (p === alt.path || p.startsWith(prefix)) return true
+  }
+  return false
 }
 
 /** Required nodes apply only when every ancestor branch is selected (incl. CHOICE alt). */
@@ -43,10 +45,7 @@ export function isInActiveBranch(node, treeRoot, checkedPaths) {
     }
 
     if (!parent.required && !checkedPaths.has(parent.path)) {
-      const hasCheckedDescendant = [...checkedPaths].some(
-        (p) => p !== parent.path && p.startsWith(`${parent.path}.`),
-      )
-      if (!hasCheckedDescendant) return false
+      if (!hasCheckedDescendant(parent, checkedPaths)) return false
     }
 
     current = parent
@@ -98,7 +97,10 @@ export function pruneInactiveChoiceBranches(treeRoot, checkedPaths) {
 
 function hasCheckedDescendant(node, checkedPaths) {
   const prefix = `${node.path}.`
-  return [...checkedPaths].some((p) => p.startsWith(prefix))
+  for (const p of checkedPaths) {
+    if (p.startsWith(prefix)) return true
+  }
+  return false
 }
 
 function addImpliedAncestorPaths(treeRoot, checkedPaths) {
@@ -164,11 +166,25 @@ export function addCheckedAncestors(targetSet, node, treeRoot) {
 }
 
 export function expandAncestorsOfChecked(checkedPaths, treeRoot) {
+  if (!treeRoot || !checkedPaths.size) return
+  // Build nodeMap and parentMap in a single O(N) pass so ancestor traversal
+  // is O(1) per step instead of O(N) findParentNode on every step.
+  const nodeMap = new Map()
+  const parentMap = new Map()
+  const stack = [treeRoot]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    nodeMap.set(node.path, node)
+    for (const child of node.children || []) {
+      parentMap.set(child.path, node)
+      stack.push(child)
+    }
+  }
   for (const path of checkedPaths) {
-    let node = findNodeByPath(path, treeRoot)
+    let node = nodeMap.get(path)
     while (node) {
       node.expanded = true
-      node = findParentNode(node.path, treeRoot)
+      node = parentMap.get(node.path)
     }
   }
 }

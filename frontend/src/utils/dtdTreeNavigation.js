@@ -63,6 +63,10 @@ export function expandModelBranches(model, treePath, elementPath) {
   return branches
 }
 
+// Stop BFS after this many expansions so recursive DTD schemas (A → B → A → …)
+// cannot produce an infinite queue.
+const MAX_SEARCH_NODES = 2000
+
 /**
  * BFS from rootElement through content models to find a tree path for targetName.
  * @param {string} rootElement
@@ -86,10 +90,14 @@ export async function findPathsToElement(rootElement, targetName, getElementTree
     return cache.get(elementName)
   }
 
-  const queue = [{ refToLoad: root, treePath: root, elementPath: root }]
+  // Each queue entry carries an `ancestry` Set of element names already on the
+  // current path so we can detect and break cycles in recursive DTD schemas.
+  const queue = [{ refToLoad: root, treePath: root, elementPath: root, ancestry: new Set([root]) }]
   const expandedPaths = new Set()
+  let nodeCount = 0
 
   while (queue.length > 0) {
+    if (nodeCount++ >= MAX_SEARCH_NODES) break
     const state = queue.shift()
     if (expandedPaths.has(state.treePath)) continue
     expandedPaths.add(state.treePath)
@@ -102,7 +110,10 @@ export async function findPathsToElement(rootElement, targetName, getElementTree
       if (pathTailName(branch.treePath) === target) {
         return branch.treePath
       }
-      queue.push(branch)
+      // Skip branches that would re-enter an element already on this ancestry path.
+      if (!expandedPaths.has(branch.treePath) && !state.ancestry.has(branch.refToLoad)) {
+        queue.push({ ...branch, ancestry: new Set([...state.ancestry, branch.refToLoad]) })
+      }
     }
   }
 
