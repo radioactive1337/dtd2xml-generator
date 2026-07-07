@@ -8,6 +8,7 @@ the element structure matters.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from lxml import etree
@@ -55,6 +56,14 @@ def _element_path(element: etree._Element) -> str:
     return "/".join(parts)
 
 
+def _extract_paths_from_root(root: etree._Element) -> set[str]:
+    paths: set[str] = set()
+    for element in root.iter():
+        if isinstance(element.tag, str):
+            paths.add(_element_path(element))
+    return paths
+
+
 def peek_root_element(xml_text: str) -> str:
     """Return the local name of the root element (namespace stripped)."""
     root = _parse(xml_text)
@@ -65,30 +74,14 @@ def peek_root_element(xml_text: str) -> str:
 
 def extract_paths(xml_text: str) -> set[str]:
     """Return the set of structural element paths of the document."""
-    root = _parse(xml_text)
-    paths: set[str] = set()
-    for element in root.iter():
-        if not isinstance(element.tag, str):
-            continue  # skip comments / processing instructions
-        paths.add(_element_path(element))
-    return paths
+    return _extract_paths_from_root(_parse(xml_text))
 
 
-def compute_highlight_ranges(
-    xml_text: str, unique_paths: set[str] | list[str]
+def _compute_highlight_ranges_from_root(
+    root: etree._Element, unique: set[str]
 ) -> list[dict]:
-    """Return line ranges of the top-most unique subtrees for highlighting.
-
-    An element is a "top-most divergence point" when its path is unique but its
-    parent path is not. For each such element we return the line range of its
-    whole subtree ``[sourceline .. max descendant sourceline]`` so the entire new
-    block gets highlighted.
-    """
-    unique = set(unique_paths)
     if not unique:
         return []
-
-    root = _parse(xml_text)
     ranges: list[dict] = []
     for element in root.iter():
         if not isinstance(element.tag, str):
@@ -99,7 +92,7 @@ def compute_highlight_ranges(
         parent = element.getparent()
         parent_path = _element_path(parent) if parent is not None else ""
         if parent_path in unique:
-            continue  # not a top-most divergence point
+            continue
 
         start = element.sourceline
         if not start:
@@ -115,21 +108,11 @@ def compute_highlight_ranges(
     return ranges
 
 
-def compute_highlight_targets(
-    xml_text: str, unique_paths: set[str] | list[str]
+def _compute_highlight_targets_from_root(
+    root: etree._Element, unique: set[str]
 ) -> list[dict]:
-    """Return per-element highlight targets for every unique element.
-
-    Unlike :func:`compute_highlight_ranges` (which returns line ranges of the
-    top-most divergence subtrees), this returns one entry per unique element
-    occurrence — its ``line`` (``sourceline``) and ``tag`` — so the editor can
-    highlight only the element's tag instead of whole lines.
-    """
-    unique = set(unique_paths)
     if not unique:
         return []
-
-    root = _parse(xml_text)
     targets: list[dict] = []
     for element in root.iter():
         if not isinstance(element.tag, str):
@@ -140,10 +123,34 @@ def compute_highlight_targets(
         line = element.sourceline
         if not line:
             continue
-        targets.append(
-            {"line": line, "path": path, "tag": _local_name(element.tag)}
-        )
+        targets.append({"line": line, "path": path, "tag": _local_name(element.tag)})
     return targets
+
+
+def compute_highlight_ranges(
+    xml_text: str, unique_paths: set[str] | list[str]
+) -> list[dict]:
+    """Return line ranges of the top-most unique subtrees for highlighting.
+
+    An element is a "top-most divergence point" when its path is unique but its
+    parent path is not. For each such element we return the line range of its
+    whole subtree ``[sourceline .. max descendant sourceline]`` so the entire new
+    block gets highlighted.
+    """
+    return _compute_highlight_ranges_from_root(_parse(xml_text), set(unique_paths))
+
+
+def compute_highlight_targets(
+    xml_text: str, unique_paths: set[str] | list[str]
+) -> list[dict]:
+    """Return per-element highlight targets for every unique element.
+
+    Unlike :func:`compute_highlight_ranges` (which returns line ranges of the
+    top-most divergence subtrees), this returns one entry per unique element
+    occurrence — its ``line`` (``sourceline``) and ``tag`` — so the editor can
+    highlight only the element's tag instead of whole lines.
+    """
+    return _compute_highlight_targets_from_root(_parse(xml_text), set(unique_paths))
 
 
 def _jaccard(a: set[str], b: set[str]) -> float:
@@ -154,43 +161,62 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 
 
 def compare_structure(
-    xml_text: str, references: list[ReferenceDoc]
+    xml_text: str, references: Iterable[ReferenceDoc]
 ) -> dict:
     """Compare the current XML structure against every reference document.
 
     Returns a report with the unique paths (present in the current document but
     in none of the references), highlight line ranges, per-reference similarity
     scores and the closest reference.
+
+    ``references`` may be a generator — each document is processed and released
+    immediately, so the full reference corpus never lives in memory at once.
+    Only the closest reference's path set is retained.
     """
-    current_paths = extract_paths(xml_text)
-    root_element = peek_root_element(xml_text)
+    # Parse the current document exactly once and reuse the tree for all
+    # subsequent operations (highlight ranges, targets, snippets).
+    current_root = _parse(xml_text)
+    if not isinstance(current_root.tag, str):
+        raise XmlParseError("XML has no element root")
+    root_element = _local_name(current_root.tag)
+    current_paths = _extract_paths_from_root(current_root)
 
     union_paths: set[str] = set()
     similarities: list[dict] = []
-    ref_paths_by_doc: dict[str, set[str]] = {}
+
+    # Track only the best reference's paths to avoid keeping all path sets
+    # in memory simultaneously.
+    best_score = -1.0
+    closest_ref_paths: set[str] = set()
+
     for ref in references:
         try:
-            ref_paths = extract_paths(ref.xml_text)
+            ref_paths = _extract_paths_from_root(_parse(ref.xml_text))
         except XmlParseError:
             continue  # skip unparseable references
         union_paths |= ref_paths
-        ref_paths_by_doc[ref.doc_id] = ref_paths
+        score = _jaccard(current_paths, ref_paths)
         similarities.append(
             {
                 "category": ref.category,
                 "doc_id": ref.doc_id,
                 "title": ref.title,
-                "score": _jaccard(current_paths, ref_paths),
+                "score": score,
             }
         )
+        if score > best_score:
+            best_score = score
+            closest_ref_paths = ref_paths
 
     similarities.sort(key=lambda s: s["score"], reverse=True)
     unique_paths = sorted(current_paths - union_paths)
-    highlight_ranges = compute_highlight_ranges(xml_text, unique_paths)
-    highlight_targets = compute_highlight_targets(xml_text, unique_paths)
-    snippets = extract_snippets(xml_text, unique_paths)
+    unique_set = set(unique_paths)
+
+    highlight_ranges = _compute_highlight_ranges_from_root(current_root, unique_set)
+    highlight_targets = _compute_highlight_targets_from_root(current_root, unique_set)
+    snippets = _extract_snippets_from_root(current_root, unique_set)
     closest = similarities[0] if similarities else None
-    closest_paths = sorted(ref_paths_by_doc.get(closest["doc_id"], set())) if closest else []
+    closest_paths = sorted(closest_ref_paths) if closest else []
 
     return {
         "root_element": root_element,
@@ -207,19 +233,11 @@ def compare_structure(
     }
 
 
-def extract_snippets(
-    xml_text: str, unique_paths: set[str] | list[str], *, max_length: int = 600
+def _extract_snippets_from_root(
+    root: etree._Element, unique: set[str], *, max_length: int = 600
 ) -> list[dict]:
-    """Return short serialized XML fragments of top-most unique elements.
-
-    Used to give the LLM concrete context. Each snippet is truncated to
-    ``max_length`` characters.
-    """
-    unique = set(unique_paths)
     if not unique:
         return []
-
-    root = _parse(xml_text)
     snippets: list[dict] = []
     for element in root.iter():
         if not isinstance(element.tag, str):
@@ -238,3 +256,14 @@ def extract_snippets(
         snippets.append({"path": path, "xml": raw})
 
     return snippets
+
+
+def extract_snippets(
+    xml_text: str, unique_paths: set[str] | list[str], *, max_length: int = 600
+) -> list[dict]:
+    """Return short serialized XML fragments of top-most unique elements.
+
+    Used to give the LLM concrete context. Each snippet is truncated to
+    ``max_length`` characters.
+    """
+    return _extract_snippets_from_root(_parse(xml_text), set(unique_paths), max_length=max_length)

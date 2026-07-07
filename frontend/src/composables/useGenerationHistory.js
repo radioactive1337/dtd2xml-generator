@@ -2,6 +2,9 @@ import { ref } from 'vue'
 
 const HISTORY_KEY = 'xml-gen-history'
 const MAX_ENTRIES = 20
+// XML larger than this is not persisted to localStorage; the entry is still
+// shown in the current session but the xml_text field is omitted on save.
+const MAX_XML_PERSIST_BYTES = 256 * 1024 // 256 KB
 
 const history = ref(loadHistory())
 
@@ -16,14 +19,24 @@ function loadHistory() {
   }
 }
 
+function prepareForStorage(entry) {
+  const xmlBytes = entry.xml_text ? new TextEncoder().encode(entry.xml_text).length : 0
+  if (xmlBytes > MAX_XML_PERSIST_BYTES) {
+    const { xml_text: _dropped, ...rest } = entry
+    return rest
+  }
+  return entry
+}
+
 function persistHistory(entries) {
-  const list = [...entries]
+  const list = entries.map(prepareForStorage)
   while (list.length > 0) {
     try {
       localStorage.setItem(HISTORY_KEY, JSON.stringify(list))
-      return list
+      return entries
     } catch {
       list.pop()
+      entries = entries.slice(0, list.length)
     }
   }
   try {

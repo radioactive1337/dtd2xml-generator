@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -98,20 +99,17 @@ def _require_root() -> Path:
     return root
 
 
-def _collect_references(root: Path, root_element: str) -> list[ReferenceDoc]:
-    references: list[ReferenceDoc] = []
+def _iter_references(root: Path, root_element: str) -> Generator[ReferenceDoc, None, None]:
+    """Yield reference documents one at a time so their XML is freed after each use."""
     for category in ref_service.list_categories(root, root_element=root_element):
         for doc in ref_service.list_documents(root, category.name):
             entry = ref_service.load_document(root, category.name, doc.doc_id)
-            references.append(
-                ReferenceDoc(
-                    category=entry.category,
-                    doc_id=entry.doc_id,
-                    title=entry.title,
-                    xml_text=entry.xml_text,
-                )
+            yield ReferenceDoc(
+                category=entry.category,
+                doc_id=entry.doc_id,
+                title=entry.title,
+                xml_text=entry.xml_text,
             )
-    return references
 
 
 @router.post("/structure", response_model=StructureCompareResponse)
@@ -126,8 +124,9 @@ async def compare_structure(
     except XmlParseError as exc:
         raise HTTPException(status_code=400, detail=f"Не удалось разобрать XML: {exc}") from exc
 
-    references = _collect_references(root, root_element)
-    report = structure_service.compare_structure(request.xml_text, references)
+    report = structure_service.compare_structure(
+        request.xml_text, _iter_references(root, root_element)
+    )
     return StructureCompareResponse(**report)
 
 
