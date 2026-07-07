@@ -23,7 +23,7 @@
 
         <div class="action-group">
           <button
-            class="btn-secondary btn-format"
+            class="btn-secondary"
             :disabled="!modelValue"
             title="Форматировать документ (Alt+Shift+F)"
             @click="formatDocument"
@@ -295,11 +295,6 @@ defineExpose({ goToPosition, getValue, setValue })
   margin-left: 8px;
   padding-left: 8px;
   border-left: 1px solid var(--border);
-}
-
-.btn-format {
-  font-size: 12px;
-  padding: 4px 10px;
 }
 
 .format-icon {
