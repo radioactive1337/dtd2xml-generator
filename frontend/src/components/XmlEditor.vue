@@ -192,13 +192,13 @@ const pushCommitMessage = ref('')
 
 const pushTargetPath = computed(() => {
   const folder = props.rootElement || 'root'
-  const file = pushFilename.value.trim() || 'document.txt'
+  const file = pushFilename.value.trim() || 'document.xml'
   return `${folder}/${file}`
 })
 
 function defaultPushFilename() {
   const base = (props.filename || 'generated.xml').replace(/\.xml$/i, '')
-  return `${base || 'document'}.txt`
+  return `${base || 'document'}.xml`
 }
 let editor = null
 let monaco = null

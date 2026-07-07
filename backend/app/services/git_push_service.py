@@ -22,7 +22,7 @@ from app.services.reference_xml_sync import (
 _push_lock = threading.Lock()
 
 _SEGMENT_RE = re.compile(r"^[\w\-.]+$")
-_FILENAME_RE = re.compile(r"^[\w\-. ()]+\.txt$")
+_FILENAME_RE = re.compile(r"^[\w\-. ()]+\.(?:txt|xml)$")
 
 
 @dataclass(frozen=True)
@@ -45,8 +45,9 @@ def _validate_segment(name: str, *, label: str) -> str:
 
 def _validate_filename(filename: str) -> str:
     value = filename.strip()
-    if not value.lower().endswith(".txt"):
-        value = f"{value}.txt"
+    lower = value.lower()
+    if not lower.endswith(".txt") and not lower.endswith(".xml"):
+        value = f"{value}.xml"
     if not _FILENAME_RE.match(value):
         raise HTTPException(status_code=400, detail="Invalid filename")
     return value
