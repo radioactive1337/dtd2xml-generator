@@ -144,6 +144,17 @@ export async function ensureElementPathLoaded(
   selections,
   modelOptions,
 ) {
+  // Pre-build the set of path prefixes that can lead to elPath so that
+  // recursive DTD schemas (A contains B contains A …) cannot produce an
+  // unbounded tree — only the branch toward elPath is ever expanded.
+  const neededPrefixes = new Set()
+  const parts = elPath.split('.')
+  let prefix = ''
+  for (const part of parts) {
+    prefix = prefix ? `${prefix}.${part}` : part
+    neededPrefixes.add(prefix)
+  }
+
   // Iterative DFS — avoids unbounded async call-stack frames that caused OOM.
   const stack = [treeRoot]
   while (stack.length > 0) {
@@ -164,6 +175,9 @@ export async function ensureElementPathLoaded(
         const selectedAltPath = selections.get(node.path)
         if (selectedAltPath && child.path !== selectedAltPath) continue
       }
+      // Only explore branches that can lead to elPath — prevents unbounded
+      // expansion in recursive schemas (e.g. A → B → A → …).
+      if (!neededPrefixes.has(normalizeTreePath(child.path))) continue
       stack.push(child)
     }
   }
