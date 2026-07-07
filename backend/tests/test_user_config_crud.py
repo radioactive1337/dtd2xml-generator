@@ -88,6 +88,15 @@ def test_git_settings_crud(auth_client: TestClient):
     assert update.json()["user"] == "oauth2"
     assert "token" not in update.json()
 
+    author_update = auth_client.put(
+        "/api/config/git",
+        json={"author_name": "Test User", "author_email": "test@example.com"},
+    )
+    assert author_update.status_code == 200
+    assert author_update.json()["author_configured"] is True
+    assert author_update.json()["author_name"] == "Test User"
+    assert author_update.json()["author_email"] == "test@example.com"
+
     configured = auth_client.get("/api/config/git")
     assert configured.json()["configured"] is True
 

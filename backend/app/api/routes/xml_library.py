@@ -22,6 +22,7 @@ from app.config import (
     resolve_git_auth,
 )
 from app.services import reference_xml_service as ref_service
+from app.services.git_identity_service import ensure_git_commit_author
 from app.services.git_push_service import push_document
 from app.services.reference_xml_sync import GitAuth, load_sync_state, sync_reference_repository
 from app.services.xml_share_service import (
@@ -215,7 +216,7 @@ async def push_to_git(
 ) -> PushToGitResponse:
     settings = _require_push_settings()
     git_auth = _git_auth_for_user(user, settings)
-    author_name = f"{user.display_name} ({settings.push_author_name})"
+    author_name, author_email = ensure_git_commit_author(user, settings)
     result = await push_document(
         settings,
         git_auth=git_auth,
@@ -223,7 +224,7 @@ async def push_to_git(
         filename=body.filename,
         xml_text=body.xml_text,
         author_name=author_name,
-        author_email=settings.push_author_email,
+        author_email=author_email,
         commit_message=body.commit_message,
     )
     if result.status == "ok":

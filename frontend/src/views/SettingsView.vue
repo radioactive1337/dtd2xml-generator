@@ -76,8 +76,8 @@
             <h3>Git (эталонная библиотека)</h3>
           </div>
           <p class="hint section-hint">
-            Персональный токен для pull и push в репозиторий эталонов. Токен хранится только на сервере
-            и не отображается в интерфейсе.
+            Персональный токен для pull и push в репозиторий эталонов. Для привязки коммитов к вашему
+            аккаунту GitLab укажите email, совпадающий с профилем (или он подтянется автоматически при сохранении токена).
           </p>
           <div class="git-settings-card">
             <div class="git-settings-row">
@@ -87,6 +87,12 @@
                 <span class="alias-meta">
                   {{ gitSettings.configured ? 'Токен сохранён' : 'Токен не задан' }}
                   · пользователь: {{ gitSettings.user || 'oauth2' }}
+                </span>
+                <span v-if="gitSettings.author_configured" class="alias-meta">
+                  Автор коммитов: {{ gitSettings.author_name }} &lt;{{ gitSettings.author_email }}&gt;
+                </span>
+                <span v-else-if="gitSettings.configured" class="alias-meta">
+                  Автор коммитов не задан — будет подтянут из GitLab при первом push
                 </span>
               </div>
               <button class="btn-secondary btn-test" :disabled="gitTesting" @click="testGit">
@@ -179,6 +185,17 @@
             Token{{ gitSettings.configured ? ' (оставьте пустым, чтобы не менять)' : '' }}
           </label>
           <input v-model="gitForm.token" type="password" autocomplete="off" />
+          <label>Имя в коммитах</label>
+          <input v-model="gitForm.author_name" placeholder="Как в GitLab" />
+          <label>Email в коммитах</label>
+          <input
+            v-model="gitForm.author_email"
+            type="email"
+            placeholder="Должен совпадать с email в GitLab"
+          />
+          <p class="hint inner-hint">
+            GitLab привязывает коммит к аккаунту по email автора, а не по токену push.
+          </p>
           <p v-if="gitFormError" class="error-msg">{{ gitFormError }}</p>
           <div class="modal-actions">
             <button type="button" class="btn-secondary" @click="closeGitForm">Отмена</button>
@@ -244,7 +261,7 @@ const gitTesting = ref(false)
 const gitFormOpen = ref(false)
 const savingGitForm = ref(false)
 const gitFormError = ref('')
-const gitForm = ref({ token: '', user: 'oauth2' })
+const gitForm = ref({ token: '', user: 'oauth2', author_name: '', author_email: '' })
 
 const dbFormOpen = ref(false)
 const llmFormOpen = ref(false)
@@ -307,6 +324,8 @@ function openGitForm() {
   gitForm.value = {
     token: '',
     user: gitSettings.value.user || 'oauth2',
+    author_name: gitSettings.value.author_name || '',
+    author_email: gitSettings.value.author_email || '',
   }
   gitFormOpen.value = true
 }
@@ -331,6 +350,12 @@ async function saveGitForm() {
     } else if (!gitSettings.value.configured) {
       gitFormError.value = 'Укажите токен'
       return
+    }
+    if (gitForm.value.author_name.trim()) {
+      payload.author_name = gitForm.value.author_name.trim()
+    }
+    if (gitForm.value.author_email.trim()) {
+      payload.author_email = gitForm.value.author_email.trim()
     }
     gitSettings.value = await updateGitSettings(payload)
     gitTestStatus.value = null

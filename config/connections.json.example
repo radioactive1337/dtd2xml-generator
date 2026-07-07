@@ -5,6 +5,8 @@
   "databases": {},
   "llm": {},
   "git": {
-    "user": "oauth2"
+    "user": "oauth2",
+    "author_name": "",
+    "author_email": ""
   }
 }
