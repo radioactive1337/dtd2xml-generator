@@ -146,8 +146,7 @@ function tagRangeOnLine(model, line, tag) {
   const match = new RegExp(`<${escapeRegExp(tag)}(?=[\\s/>])`).exec(text)
   if (!match) return null
   const startColumn = match.index + 1
-  const gt = text.indexOf('>', match.index)
-  const endColumn = gt >= 0 ? gt + 2 : text.length + 1
+  const endColumn = startColumn + 1 + tag.length
   return { startColumn, endColumn }
 }
 
