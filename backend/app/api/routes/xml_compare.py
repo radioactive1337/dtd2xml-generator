@@ -30,6 +30,12 @@ class HighlightRange(BaseModel):
     path: str
 
 
+class HighlightTarget(BaseModel):
+    line: int
+    path: str
+    tag: str
+
+
 class SimilarityEntry(BaseModel):
     category: str
     doc_id: str
@@ -49,6 +55,7 @@ class StructureCompareResponse(BaseModel):
     is_unique: bool
     unique_paths: list[str]
     highlight_ranges: list[HighlightRange]
+    highlight_targets: list[HighlightTarget]
     snippets: list[StructureSnippet]
     similarities: list[SimilarityEntry]
     closest: SimilarityEntry | None = None

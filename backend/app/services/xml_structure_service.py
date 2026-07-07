@@ -115,6 +115,37 @@ def compute_highlight_ranges(
     return ranges
 
 
+def compute_highlight_targets(
+    xml_text: str, unique_paths: set[str] | list[str]
+) -> list[dict]:
+    """Return per-element highlight targets for every unique element.
+
+    Unlike :func:`compute_highlight_ranges` (which returns line ranges of the
+    top-most divergence subtrees), this returns one entry per unique element
+    occurrence — its ``line`` (``sourceline``) and ``tag`` — so the editor can
+    highlight only the element's tag instead of whole lines.
+    """
+    unique = set(unique_paths)
+    if not unique:
+        return []
+
+    root = _parse(xml_text)
+    targets: list[dict] = []
+    for element in root.iter():
+        if not isinstance(element.tag, str):
+            continue
+        path = _element_path(element)
+        if path not in unique:
+            continue
+        line = element.sourceline
+        if not line:
+            continue
+        targets.append(
+            {"line": line, "path": path, "tag": _local_name(element.tag)}
+        )
+    return targets
+
+
 def _jaccard(a: set[str], b: set[str]) -> float:
     union = a | b
     if not union:
@@ -154,6 +185,7 @@ def compare_structure(
     similarities.sort(key=lambda s: s["score"], reverse=True)
     unique_paths = sorted(current_paths - union_paths)
     highlight_ranges = compute_highlight_ranges(xml_text, unique_paths)
+    highlight_targets = compute_highlight_targets(xml_text, unique_paths)
     snippets = extract_snippets(xml_text, unique_paths)
     closest = similarities[0] if similarities else None
 
@@ -164,6 +196,7 @@ def compare_structure(
         "is_unique": bool(unique_paths),
         "unique_paths": unique_paths,
         "highlight_ranges": highlight_ranges,
+        "highlight_targets": highlight_targets,
         "snippets": snippets,
         "similarities": similarities,
         "closest": closest,

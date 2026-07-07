@@ -11,7 +11,7 @@ export function useGeneratorCompare({ getEditorXmlText, xmlEditorRef, llmAlias }
   const aiLoading = ref(false)
   const aiError = ref('')
 
-  const uniqueRanges = computed(() => report.value?.highlight_ranges || [])
+  const uniqueRanges = computed(() => report.value?.highlight_targets || [])
   const hasUniquePaths = computed(() => (report.value?.unique_paths?.length || 0) > 0)
 
   function resetAiState() {

@@ -137,32 +137,72 @@ function notifyContentChange() {
   emit('content-change', editor.getValue())
 }
 
-function applyUniqueDecorations(ranges) {
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function tagRangeOnLine(model, line, tag) {
+  const text = model.getLineContent(line)
+  const match = new RegExp(`<${escapeRegExp(tag)}(?=[\\s/>])`).exec(text)
+  if (!match) return null
+  const startColumn = match.index + 1
+  const gt = text.indexOf('>', match.index)
+  const endColumn = gt >= 0 ? gt + 2 : text.length + 1
+  return { startColumn, endColumn }
+}
+
+function applyUniqueDecorations(targets) {
   if (!editor || !monaco) return
   const model = editor.getModel()
   if (!model) return
   const lineCount = model.getLineCount()
-  const list = (ranges || [])
-    .filter((r) => r && r.start_line > 0)
-    .map((r) => {
-      const start = Math.min(r.start_line, lineCount)
-      const end = Math.min(r.end_line || r.start_line, lineCount)
-      return {
-        range: new monaco.Range(start, 1, Math.max(end, start), 1),
+  const list = []
+
+  for (const t of targets || []) {
+    // Support both the element-target shape ({ line, tag }) and legacy line ranges.
+    const line = t?.line ?? t?.start_line
+    if (!line || line < 1 || line > lineCount) continue
+    const hover = {
+      value: `Уникальный элемент: ${t.path || t.tag || ''} (нет ни в одном эталоне)`,
+    }
+
+    let range = null
+    if (t.tag) {
+      const cols = tagRangeOnLine(model, line, t.tag)
+      if (cols) range = new monaco.Range(line, cols.startColumn, line, cols.endColumn)
+    }
+
+    if (range) {
+      list.push({
+        range,
         options: {
-          isWholeLine: true,
-          className: 'xml-unique-line',
+          className: 'xml-unique-token',
           glyphMarginClassName: 'xml-unique-glyph',
-          glyphMarginHoverMessage: {
-            value: `Уникальный путь: ${r.path} (нет ни в одном эталоне)`,
-          },
+          glyphMarginHoverMessage: hover,
+          hoverMessage: hover,
           overviewRuler: {
             color: '#f59e0b',
             position: monaco.editor.OverviewRulerLane.Right,
           },
         },
-      }
-    })
+      })
+    } else {
+      // Fallback: no tag found on the line — mark the whole line.
+      list.push({
+        range: new monaco.Range(line, 1, line, 1),
+        options: {
+          isWholeLine: true,
+          className: 'xml-unique-line',
+          glyphMarginClassName: 'xml-unique-glyph',
+          glyphMarginHoverMessage: hover,
+          overviewRuler: {
+            color: '#f59e0b',
+            position: monaco.editor.OverviewRulerLane.Right,
+          },
+        },
+      })
+    }
+  }
 
   if (uniqueDecorations) {
     uniqueDecorations.set(list)
@@ -443,6 +483,12 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
 
 <style>
 /* Not scoped: Monaco renders decoration nodes outside the component scope. */
+.xml-unique-token {
+  background: rgba(245, 158, 11, 0.28);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.55);
+}
+
 .xml-unique-line {
   background: rgba(245, 158, 11, 0.16);
 }

@@ -123,6 +123,27 @@ def test_highlight_ranges_cover_topmost_unique_subtree():
     assert ranges[0]["end_line"] == 4
 
 
+def test_highlight_targets_cover_every_unique_element():
+    current = (
+        "<PayDoc>\n"
+        "  <client/>\n"
+        "  <newBlock>\n"
+        "    <inner/>\n"
+        "  </newBlock>\n"
+        "</PayDoc>\n"
+    )
+    refs = [ReferenceDoc("c", "r", "R", "<PayDoc><client/></PayDoc>")]
+    report = svc.compare_structure(current, refs)
+    targets = report["highlight_targets"]
+    # Both the top-most unique element and its unique child are targeted.
+    by_path = {t["path"]: t for t in targets}
+    assert set(by_path) == {"PayDoc/newBlock", "PayDoc/newBlock/inner"}
+    assert by_path["PayDoc/newBlock"]["line"] == 3
+    assert by_path["PayDoc/newBlock"]["tag"] == "newBlock"
+    assert by_path["PayDoc/newBlock/inner"]["line"] == 4
+    assert by_path["PayDoc/newBlock/inner"]["tag"] == "inner"
+
+
 def test_extract_snippets_truncates_and_targets_topmost():
     current = "<PayDoc><client/><newBlock><inner/></newBlock></PayDoc>"
     snippets = svc.extract_snippets(current, ["PayDoc/newBlock", "PayDoc/newBlock/inner"])
