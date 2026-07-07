@@ -94,15 +94,6 @@
     </div>
 
     <div v-else class="library-pane">
-      <button
-        type="button"
-        class="btn-secondary btn-sm save-btn"
-        :disabled="!canSave"
-        @click="onSaveClick"
-      >
-        Сохранить текущий XML
-      </button>
-
       <ul v-if="personalDocuments.length" class="doc-list doc-list--flat">
         <li v-for="doc in personalDocuments" :key="doc.name" class="doc-item">
           <div class="doc-info">
@@ -137,24 +128,6 @@
       </ul>
       <p v-else-if="!loading" class="library-hint">Нет сохранённых документов.</p>
     </div>
-
-    <div v-if="showSaveDialog" class="save-dialog-backdrop" @click.self="closeSaveDialog">
-      <form class="save-dialog" @submit.prevent="submitSave">
-        <h4 class="save-dialog-title">Сохранить XML</h4>
-        <label class="save-label">
-          Имя
-          <input v-model="saveName" type="text" class="save-input" required autofocus />
-        </label>
-        <label class="save-label">
-          Описание (необязательно)
-          <input v-model="saveDescription" type="text" class="save-input" />
-        </label>
-        <div class="save-dialog-actions">
-          <button type="button" class="btn-secondary btn-sm" @click="closeSaveDialog">Отмена</button>
-          <button type="submit" class="btn-primary btn-sm" :disabled="!saveName.trim()">Сохранить</button>
-        </div>
-      </form>
-    </div>
   </section>
 </template>
 
@@ -174,7 +147,6 @@ const props = defineProps({
   syncing: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
   libraryError: { type: String, default: '' },
-  canSave: { type: Boolean, default: false },
   categoryDocuments: { type: Object, default: () => ({}) },
   loadingCategory: { type: String, default: null },
   elements: { type: Array, default: () => [] },
@@ -190,15 +162,10 @@ const emit = defineEmits([
   'open-shared',
   'open-personal',
   'delete-personal',
-  'save',
 ])
 
 const expandedCategory = ref(null)
 const categoryRootFilter = ref('')
-
-const showSaveDialog = ref(false)
-const saveName = ref('')
-const saveDescription = ref('')
 
 const pickerElements = computed(() => {
   const fromSchema = props.elements || []
@@ -272,23 +239,6 @@ async function toggleCategory(name) {
 
 function onSync() {
   emit('sync')
-}
-
-function onSaveClick() {
-  saveName.value = ''
-  saveDescription.value = ''
-  showSaveDialog.value = true
-}
-
-function closeSaveDialog() {
-  showSaveDialog.value = false
-}
-
-function submitSave() {
-  const name = saveName.value.trim()
-  if (!name) return
-  emit('save', { name, description: saveDescription.value.trim() })
-  closeSaveDialog()
 }
 </script>
 
@@ -476,10 +426,6 @@ function submitSave() {
   padding: 4px 8px;
 }
 
-.save-btn {
-  align-self: flex-start;
-}
-
 .btn-sm {
   padding: 4px 8px;
   font-size: 11px;
@@ -489,56 +435,6 @@ function submitSave() {
   min-width: 24px;
   padding: 4px 6px;
   line-height: 1;
-}
-
-.save-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  background: color-mix(in srgb, var(--bg, #000) 40%, transparent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-
-.save-dialog {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
-  width: min(360px, 90vw);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.save-dialog-title {
-  margin: 0;
-  font-size: 14px;
-}
-
-.save-label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.save-input {
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 13px;
-  background: var(--bg);
-  color: var(--text);
-}
-
-.save-dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
 }
 
 .category-search-field label {

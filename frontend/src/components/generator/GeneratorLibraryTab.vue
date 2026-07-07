@@ -8,7 +8,6 @@
       :syncing="librarySyncing"
       :loading="libraryLoading"
       :library-error="libraryError"
-      :can-save="canSaveLibraryDocument"
       :category-documents="categoryDocuments"
       :loading-category="loadingCategory"
       :elements="elements"
@@ -21,7 +20,6 @@
       @open-shared="(cat, id) => $emit('library-open-shared', cat, id)"
       @open-personal="(name) => $emit('library-open-personal', name)"
       @delete-personal="(name) => $emit('library-delete-personal', name)"
-      @save="(payload) => $emit('library-save', payload)"
     />
   </div>
 </template>
@@ -37,7 +35,6 @@ defineProps({
   librarySyncing: { type: Boolean, default: false },
   libraryLoading: { type: Boolean, default: false },
   libraryError: { type: String, default: '' },
-  canSaveLibraryDocument: { type: Boolean, default: false },
   categoryDocuments: { type: Object, default: () => ({}) },
   loadingCategory: { type: String, default: null },
   elements: { type: Array, default: () => [] },
@@ -53,7 +50,6 @@ defineEmits([
   'library-open-shared',
   'library-open-personal',
   'library-delete-personal',
-  'library-save',
 ])
 </script>
 

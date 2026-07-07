@@ -93,7 +93,6 @@
             :library-syncing="librarySyncing"
             :library-loading="libraryLoading"
             :library-error="libraryError"
-            :can-save-library-document="canSaveLibraryDocument"
             :category-documents="categoryDocuments"
             :loading-category="loadingCategory"
             :elements="elements"
@@ -104,7 +103,6 @@
             @library-expand-category="handleLibraryExpandCategory"
             @library-open-shared="handleLibraryOpenShared"
             @library-open-personal="handleLibraryOpenPersonal"
-            @library-save="handleLibrarySave"
             @library-delete-personal="handleLibraryDeletePersonal"
           />
         </div>
@@ -153,9 +151,11 @@
         :model-value="xmlText"
         :filename="`${rootElement || 'generated'}.xml`"
         :validation-errors="validationResult?.valid === false ? validationResult.errors : []"
+        :can-save="canSaveLibraryDocument"
         @content-change="onEditorContentChange"
         @clear="onEditorClear"
         @import="onXmlFileImported"
+        @save="handleLibrarySave"
       />
     </div>
   </div>

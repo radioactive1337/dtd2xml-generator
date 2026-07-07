@@ -10,39 +10,71 @@
           style="display: none"
           @change="onFileSelect"
         />
-        <button
-          class="btn-secondary"
-          title="Загрузить XML из файла"
-          @click="triggerImport"
-        >
-          Импорт .xml
-        </button>
-        <button
-          class="btn-secondary btn-format"
-          :disabled="!modelValue"
-          title="Форматировать документ (Alt+Shift+F)"
-          @click="formatDocument"
-        >
-          <span class="format-icon" aria-hidden="true">{ }</span>Форматировать
-        </button>
-        <button class="btn-secondary" :disabled="!modelValue" @click="copyToClipboard">
-          {{ copied ? 'Скопировано!' : 'Копировать' }}
-        </button>
-        <button class="btn-secondary" :disabled="!modelValue" @click="downloadXml">
-          Скачать .xml
-        </button>
-        <button
-          class="btn-secondary"
-          :disabled="!modelValue"
-          title="Очистить содержимое редактора"
-          @click="clearEditor"
-        >
-          Очистить
-        </button>
+
+        <div class="action-group">
+          <button
+            class="btn-secondary"
+            title="Загрузить XML из файла"
+            @click="triggerImport"
+          >
+            Импорт .xml
+          </button>
+        </div>
+
+        <div class="action-group">
+          <button
+            class="btn-secondary btn-format"
+            :disabled="!modelValue"
+            title="Форматировать документ (Alt+Shift+F)"
+            @click="formatDocument"
+          >
+            <span class="format-icon" aria-hidden="true">{ }</span>Форматировать
+          </button>
+          <button
+            class="btn-secondary"
+            :disabled="!modelValue"
+            title="Очистить содержимое редактора"
+            @click="clearEditor"
+          >
+            Очистить
+          </button>
+        </div>
+
+        <div class="action-group">
+          <button class="btn-secondary" :disabled="!modelValue" @click="downloadXml">
+            Экспорт .xml
+          </button>
+          <button
+            class="btn-secondary"
+            :disabled="!canSave"
+            title="Сохранить в «Мои документы»"
+            @click="onSaveClick"
+          >
+            Сохранить в документы
+          </button>
+        </div>
       </div>
     </div>
     <p v-if="importError" class="import-error">{{ importError }}</p>
     <div ref="editorContainer" class="editor-container" />
+
+    <div v-if="showSaveDialog" class="save-dialog-backdrop" @click.self="closeSaveDialog">
+      <form class="save-dialog" @submit.prevent="submitSave">
+        <h4 class="save-dialog-title">Сохранить XML</h4>
+        <label class="save-label">
+          Имя
+          <input v-model="saveName" type="text" class="save-input" required autofocus />
+        </label>
+        <label class="save-label">
+          Описание (необязательно)
+          <input v-model="saveDescription" type="text" class="save-input" />
+        </label>
+        <div class="save-dialog-actions">
+          <button type="button" class="btn-secondary btn-sm" @click="closeSaveDialog">Отмена</button>
+          <button type="submit" class="btn-primary btn-sm" :disabled="!saveName.trim()">Сохранить</button>
+        </div>
+      </form>
+    </div>
   </div>
 </template>
 
@@ -57,16 +89,19 @@ const props = defineProps({
   modelValue: { type: String, default: '' },
   filename: { type: String, default: 'generated.xml' },
   validationErrors: { type: Array, default: () => [] },
+  canSave: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['content-change', 'import', 'clear'])
+const emit = defineEmits(['content-change', 'import', 'clear', 'save'])
 
 const { isDark } = useTheme()
 
 const editorContainer = ref(null)
 const fileInput = ref(null)
-const copied = ref(false)
 const importError = ref('')
+const showSaveDialog = ref(false)
+const saveName = ref('')
+const saveDescription = ref('')
 let editor = null
 let monaco = null
 let suppressEditorEvent = false
@@ -151,13 +186,6 @@ onBeforeUnmount(() => {
   editor?.dispose()
 })
 
-async function copyToClipboard() {
-  if (!props.modelValue) return
-  await navigator.clipboard.writeText(props.modelValue)
-  copied.value = true
-  setTimeout(() => { copied.value = false }, 2000)
-}
-
 function downloadXml() {
   if (!props.modelValue) return
   const blob = new Blob([props.modelValue], { type: 'application/xml' })
@@ -202,6 +230,23 @@ function clearEditor() {
   emit('clear')
 }
 
+function onSaveClick() {
+  saveName.value = ''
+  saveDescription.value = ''
+  showSaveDialog.value = true
+}
+
+function closeSaveDialog() {
+  showSaveDialog.value = false
+}
+
+function submitSave() {
+  const name = saveName.value.trim()
+  if (!name) return
+  emit('save', { name, description: saveDescription.value.trim() })
+  closeSaveDialog()
+}
+
 function goToPosition(line, column) {
   if (!editor || !line || line < 1) return
   const position = { lineNumber: line, column: column > 0 ? column : 1 }
@@ -235,7 +280,21 @@ defineExpose({ goToPosition, getValue, setValue })
 
 .editor-actions {
   display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: wrap;
+}
+
+.action-group {
+  display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.action-group + .action-group {
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
 }
 
 .btn-format {
@@ -261,5 +320,60 @@ defineExpose({ goToPosition, getValue, setValue })
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+}
+
+.btn-sm {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.save-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg, #000) 40%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.save-dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  width: min(360px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.save-dialog-title {
+  margin: 0;
+  font-size: 14px;
+}
+
+.save-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.save-input {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.save-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
 }
 </style>
