@@ -5,6 +5,7 @@ import { stageFillXml } from '../../api/fill'
 import { pickPrimarySchema, normalizeDtdUploadResult } from '../../utils/dtdSchema'
 import { clearAllDatalistState } from '../../utils/datalistInput'
 import { formatElements } from '../../utils/ruPlural'
+import { translateApiError } from '../../utils/apiErrors'
 import { useGenerationHistory } from '../useGenerationHistory'
 import { useXmlLibrary } from '../useXmlLibrary'
 import { useGeneratorLayout } from './useGeneratorLayout'
@@ -126,6 +127,65 @@ export function useGenerator() {
       await xmlLibrary.removePersonalDocument(name)
     } catch (err) {
       xmlLibrary.libraryError.value = err?.response?.data?.detail || err?.message || String(err)
+    }
+  }
+
+  const shareDialogOpen = ref(false)
+  const shareDialogMode = ref('personal')
+  const shareDialogDocumentName = ref('')
+  const shareDialogSubmitting = ref(false)
+  const shareDialogError = ref('')
+
+  function openSharePersonalDialog(name) {
+    shareDialogMode.value = 'personal'
+    shareDialogDocumentName.value = name
+    shareDialogError.value = ''
+    shareDialogOpen.value = true
+  }
+
+  function openShareInlineDialog() {
+    shareDialogMode.value = 'inline'
+    shareDialogDocumentName.value = ''
+    shareDialogError.value = ''
+    shareDialogOpen.value = true
+  }
+
+  function closeShareDialog() {
+    if (shareDialogSubmitting.value) return
+    shareDialogOpen.value = false
+    shareDialogError.value = ''
+  }
+
+  async function handleShareSubmit({ recipientUsername, message, name }) {
+    shareDialogSubmitting.value = true
+    shareDialogError.value = ''
+    try {
+      if (shareDialogMode.value === 'personal') {
+        await xmlLibrary.sharePersonalDocument(
+          shareDialogDocumentName.value,
+          recipientUsername,
+          message,
+        )
+      } else {
+        const xmlText = xml.getEditorXmlText() || xml.xmlText.value || ''
+        await xmlLibrary.shareCurrentDocument({
+          name: name || shareDialogDocumentName.value,
+          schemaId: schema.schemaId.value,
+          xmlText,
+          recipientUsername,
+          message,
+        })
+      }
+      shareDialogOpen.value = false
+    } catch (err) {
+      const detail = err?.response?.data?.detail
+      if (detail && typeof detail === 'object') {
+        shareDialogError.value = translateApiError(detail.message || 'Пользователь не найден')
+      } else {
+        shareDialogError.value = translateApiError(detail || err?.message || String(err))
+      }
+    } finally {
+      shareDialogSubmitting.value = false
     }
   }
 
@@ -263,6 +323,15 @@ export function useGenerator() {
     handleLibraryOpenPersonal: xmlLibrary.openPersonalDocument,
     handleLibrarySave,
     handleLibraryDeletePersonal,
+    shareDialogOpen,
+    shareDialogMode,
+    shareDialogDocumentName,
+    shareDialogSubmitting,
+    shareDialogError,
+    openSharePersonalDialog,
+    openShareInlineDialog,
+    closeShareDialog,
+    handleShareSubmit,
     ...schema,
     ...mapping,
     ...xml,

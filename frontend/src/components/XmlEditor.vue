@@ -46,6 +46,14 @@
           </button>
           <button
             class="btn-secondary"
+            :disabled="!modelValue"
+            title="Поделиться с другим пользователем"
+            @click="onShareClick"
+          >
+            Поделиться
+          </button>
+          <button
+            class="btn-secondary"
             :disabled="!canSave"
             title="Сохранить в «Мои документы»"
             @click="onSaveClick"
@@ -92,7 +100,7 @@ const props = defineProps({
   canSave: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['content-change', 'import', 'clear', 'save'])
+const emit = defineEmits(['content-change', 'import', 'clear', 'save', 'share'])
 
 const { isDark } = useTheme()
 
@@ -234,6 +242,10 @@ function onSaveClick() {
   saveName.value = ''
   saveDescription.value = ''
   showSaveDialog.value = true
+}
+
+function onShareClick() {
+  emit('share')
 }
 
 function closeSaveDialog() {

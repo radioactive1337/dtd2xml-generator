@@ -20,6 +20,11 @@ from app.config import (
 )
 from app.services import reference_xml_service as ref_service
 from app.services.reference_xml_sync import load_sync_state, sync_reference_repository
+from app.services.xml_share_service import (
+    ShareDocumentRequest,
+    ShareDocumentResponse,
+    share_document,
+)
 from app.user_context import UserContext
 
 router = APIRouter(prefix="/xml-library", tags=["xml-library"])
@@ -69,6 +74,9 @@ class PersonalDocumentSummary(BaseModel):
     description: str = ""
     created_at: str = ""
     updated_at: str = ""
+    shared_by_id: str | None = None
+    shared_by_name: str | None = None
+    shared_at: str | None = None
 
 
 class PersonalDocumentData(BaseModel):
@@ -79,6 +87,9 @@ class PersonalDocumentData(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     xml_text: str = ""
+    shared_by_id: str | None = None
+    shared_by_name: str | None = None
+    shared_at: str | None = None
 
 
 def _utc_now() -> str:
@@ -86,7 +97,7 @@ def _utc_now() -> str:
 
 
 def _safe_name(name: str) -> str:
-    if not re.match(r"^[\w\-. ]+$", name):
+    if not re.match(r"^[\w\-. ()]+$", name):
         raise HTTPException(status_code=400, detail="Invalid document name")
     return name
 
@@ -228,9 +239,20 @@ async def list_personal_documents(
                 description=data.get("description", ""),
                 created_at=data.get("created_at", ""),
                 updated_at=data.get("updated_at", ""),
+                shared_by_id=data.get("shared_by_id"),
+                shared_by_name=data.get("shared_by_name"),
+                shared_at=data.get("shared_at"),
             )
         )
     return summaries
+
+
+@router.post("/share", response_model=ShareDocumentResponse)
+async def share_personal_document(
+    body: ShareDocumentRequest,
+    user: UserContext = Depends(get_current_user),
+) -> ShareDocumentResponse:
+    return share_document(user, body)
 
 
 @router.post("/personal", response_model=PersonalDocumentData)

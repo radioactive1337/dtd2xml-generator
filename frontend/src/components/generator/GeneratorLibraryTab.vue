@@ -19,6 +19,7 @@
       @expand-category="(cat) => $emit('library-expand-category', cat)"
       @open-shared="(cat, id) => $emit('library-open-shared', cat, id)"
       @open-personal="(name) => $emit('library-open-personal', name)"
+      @share-personal="(name) => $emit('library-share-personal', name)"
       @delete-personal="(name) => $emit('library-delete-personal', name)"
     />
   </div>
@@ -49,6 +50,7 @@ defineEmits([
   'library-expand-category',
   'library-open-shared',
   'library-open-personal',
+  'library-share-personal',
   'library-delete-personal',
 ])
 </script>
