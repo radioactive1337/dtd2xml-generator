@@ -98,6 +98,7 @@ const props = defineProps({
   filename: { type: String, default: 'generated.xml' },
   validationErrors: { type: Array, default: () => [] },
   canSave: { type: Boolean, default: false },
+  uniqueRanges: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['content-change', 'import', 'clear', 'save', 'share'])
@@ -114,6 +115,7 @@ let editor = null
 let monaco = null
 let suppressEditorEvent = false
 let pasteFlushTimer = null
+let uniqueDecorations = null
 
 function applyModelValue(val) {
   if (!editor) return
@@ -125,9 +127,94 @@ function applyModelValue(val) {
   editor.layout()
 }
 
+function onModelContentChanged() {
+  clearUniqueDecorations()
+  notifyContentChange()
+}
+
 function notifyContentChange() {
   if (suppressEditorEvent || !editor) return
   emit('content-change', editor.getValue())
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function tagRangeOnLine(model, line, tag) {
+  const text = model.getLineContent(line)
+  const match = new RegExp(`<${escapeRegExp(tag)}(?=[\\s/>])`).exec(text)
+  if (!match) return null
+  const startColumn = match.index + 1
+  const endColumn = startColumn + 1 + tag.length
+  return { startColumn, endColumn }
+}
+
+function applyUniqueDecorations(targets) {
+  if (!editor || !monaco) return
+  const model = editor.getModel()
+  if (!model) return
+  const lineCount = model.getLineCount()
+  const list = []
+
+  for (const t of targets || []) {
+    // Support both the element-target shape ({ line, tag }) and legacy line ranges.
+    const line = t?.line ?? t?.start_line
+    if (!line || line < 1 || line > lineCount) continue
+    const hover = {
+      value: `Уникальный элемент: ${t.path || t.tag || ''} (нет ни в одном эталоне)`,
+    }
+
+    let range = null
+    if (t.tag) {
+      const cols = tagRangeOnLine(model, line, t.tag)
+      if (cols) range = new monaco.Range(line, cols.startColumn, line, cols.endColumn)
+    }
+
+    if (range) {
+      list.push({
+        range,
+        options: {
+          className: 'xml-unique-token',
+          glyphMarginClassName: 'xml-unique-glyph',
+          glyphMarginHoverMessage: hover,
+          hoverMessage: hover,
+          overviewRuler: {
+            color: '#f59e0b',
+            position: monaco.editor.OverviewRulerLane.Right,
+          },
+        },
+      })
+    } else {
+      // Fallback: no tag found on the line — mark the whole line.
+      list.push({
+        range: new monaco.Range(line, 1, line, 1),
+        options: {
+          isWholeLine: true,
+          className: 'xml-unique-line',
+          glyphMarginClassName: 'xml-unique-glyph',
+          glyphMarginHoverMessage: hover,
+          overviewRuler: {
+            color: '#f59e0b',
+            position: monaco.editor.OverviewRulerLane.Right,
+          },
+        },
+      })
+    }
+  }
+
+  if (uniqueDecorations) {
+    uniqueDecorations.set(list)
+  } else {
+    uniqueDecorations = editor.createDecorationsCollection(list)
+  }
+}
+
+function clearUniqueDecorations() {
+  if (uniqueDecorations) {
+    uniqueDecorations.clear()
+    uniqueDecorations = null
+  }
 }
 
 function setValue(val) {
@@ -151,16 +238,24 @@ onMounted(async () => {
     wordWrap: 'on',
     fontSize: 13,
     tabSize: 2,
+    glyphMargin: true,
     scrollBeyondLastLine: false,
     automaticLayout: true,
   })
 
-  editor.onDidChangeModelContent(notifyContentChange)
+  editor.onDidChangeModelContent(onModelContentChanged)
   editor.onDidPaste(schedulePasteFlush)
   applyModelValue(props.modelValue)
+  if (props.uniqueRanges?.length) applyUniqueDecorations(props.uniqueRanges)
 })
 
 watch(() => props.modelValue, applyModelValue)
+
+watch(
+  () => props.uniqueRanges,
+  (ranges) => applyUniqueDecorations(ranges),
+  { deep: true },
+)
 
 watch(isDark, (dark) => {
   if (monaco) monaco.editor.setTheme(dark ? 'vs-dark' : 'vs')
@@ -271,7 +366,7 @@ function getValue() {
   return editor?.getValue() ?? props.modelValue ?? ''
 }
 
-defineExpose({ goToPosition, getValue, setValue })
+defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
 </script>
 
 <style scoped>
@@ -382,5 +477,25 @@ defineExpose({ goToPosition, getValue, setValue })
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+</style>
+
+<style>
+/* Not scoped: Monaco renders decoration nodes outside the component scope. */
+.xml-unique-token {
+  background: rgba(245, 158, 11, 0.28);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.55);
+}
+
+.xml-unique-line {
+  background: rgba(245, 158, 11, 0.16);
+}
+
+.xml-unique-glyph {
+  background: #f59e0b;
+  width: 4px !important;
+  margin-left: 3px;
+  border-radius: 2px;
 }
 </style>

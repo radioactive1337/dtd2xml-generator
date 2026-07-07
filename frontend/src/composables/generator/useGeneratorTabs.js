@@ -2,12 +2,13 @@ import { ref, computed, watch } from 'vue'
 
 const ACTIVE_TAB_KEY = 'xml-gen-left-tab'
 const AUTO_VALIDATE_KEY = 'xml-gen-auto-validate'
-export const TAB_ORDER = ['structure', 'data', 'results', 'library']
+export const TAB_ORDER = ['structure', 'data', 'results', 'compare', 'library']
 
 export const leftTabs = [
   { id: 'structure', label: 'Структура' },
   { id: 'data', label: 'Данные' },
   { id: 'results', label: 'Результат' },
+  { id: 'compare', label: 'Сравнение' },
   { id: 'library', label: 'Библиотека' },
 ]
 
