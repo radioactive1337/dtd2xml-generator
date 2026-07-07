@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app.auth.sessions import clear_session, set_session_user
+from app.auth.sessions import clear_session, get_current_user, set_session_user
 from app.auth.users import (
     create_user,
     get_user_by_norm,
     normalize_username,
+    search_usernames,
     suggest_similar_usernames,
     validate_username,
 )
 from app.config import is_allow_self_registration
 from app.legacy_migration import migrate_legacy_data_to_user
-from app.user_context import user_context_from_record
+from app.user_context import UserContext, user_context_from_record
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -33,6 +34,11 @@ class UserResponse(BaseModel):
 class ExistsResponse(BaseModel):
     exists: bool
     suggestions: list[str]
+
+
+class UserSearchResponse(BaseModel):
+    exact_match: bool
+    matches: list[str]
 
 
 class LoginConflictResponse(BaseModel):
@@ -53,6 +59,27 @@ async def check_username_exists(username: str = Query(..., min_length=1)) -> Exi
     if not exists:
         suggestions = suggest_similar_usernames(display)
     return ExistsResponse(exists=exists, suggestions=suggestions)
+
+
+@router.get("/users/search", response_model=UserSearchResponse)
+async def search_users(
+    q: str = Query(..., min_length=1, max_length=64),
+    limit: int = Query(default=8, ge=1, le=20),
+    user: UserContext = Depends(get_current_user),
+) -> UserSearchResponse:
+    query = q.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Search query is required")
+
+    norm = normalize_username(query)
+    exact_match = get_user_by_norm(norm) is not None
+    if exact_match:
+        record = get_user_by_norm(norm)
+        if record is not None and record.id == user.user_id:
+            exact_match = False
+
+    matches = search_usernames(query, limit=limit, exclude_user_id=user.user_id)
+    return UserSearchResponse(exact_match=exact_match, matches=matches)
 
 
 @router.post("/login", response_model=UserResponse)

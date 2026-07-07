@@ -20,37 +20,60 @@
 
       <label class="share-label">
         Имя получателя
-        <input
-          v-model="recipientUsername"
-          type="text"
-          class="share-input"
-          autocomplete="username"
-          placeholder="ivan"
-          required
-          autofocus
-          :disabled="submitting"
-          @input="onRecipientInput"
-        />
+        <div class="recipient-field">
+          <input
+            v-model="recipientUsername"
+            type="text"
+            class="share-input"
+            autocomplete="off"
+            placeholder="ivan"
+            required
+            autofocus
+            role="combobox"
+            :aria-expanded="showDropdown"
+            aria-autocomplete="list"
+            :disabled="submitting"
+            @input="onRecipientInput"
+            @focus="onRecipientFocus"
+            @blur="onRecipientBlur"
+            @keydown="onRecipientKeydown"
+          />
+          <ul
+            v-if="showDropdown"
+            class="recipient-dropdown"
+            role="listbox"
+            @mousedown.prevent
+          >
+            <li
+              v-for="(name, index) in userMatches"
+              :key="name"
+              class="recipient-option"
+              :class="{ highlighted: index === highlightedIndex }"
+              role="option"
+              :aria-selected="index === highlightedIndex"
+              @mousedown.prevent="pickSuggestion(name)"
+            >
+              {{ name }}
+            </li>
+          </ul>
+        </div>
       </label>
 
-      <p v-if="recipientChecking" class="share-hint">Проверка пользователя…</p>
+      <p v-if="recipientChecking" class="share-hint">Поиск пользователей…</p>
       <p v-else-if="recipientUsername.trim() && recipientExists === true" class="share-ok">
         Пользователь найден
       </p>
-      <p v-else-if="recipientUsername.trim() && recipientExists === false" class="share-error-inline">
+      <p
+        v-else-if="recipientUsername.trim() && recipientExists === false && !userMatches.length"
+        class="share-error-inline"
+      >
         Пользователь не найден
       </p>
-      <p v-if="suggestions.length" class="share-suggestions">
-        Возможно:
-        <button
-          v-for="name in suggestions"
-          :key="name"
-          type="button"
-          class="link-btn"
-          @click="pickSuggestion(name)"
-        >
-          {{ name }}
-        </button>
+      <p
+        v-else-if="recipientUsername.trim() && userMatches.length && recipientExists === false"
+        class="share-hint"
+      >
+        Выберите пользователя из списка
       </p>
 
       <label class="share-label">
@@ -84,7 +107,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { checkUsernameExists } from '../../api/auth'
+import { searchUsers } from '../../api/auth'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -103,9 +126,16 @@ const message = ref('')
 const successMessage = ref('')
 const recipientExists = ref(null)
 const recipientChecking = ref(false)
-const suggestions = ref([])
+const userMatches = ref([])
+const dropdownOpen = ref(false)
+const highlightedIndex = ref(-1)
 
 let recipientTimer = null
+let blurTimer = null
+
+const showDropdown = computed(
+  () => dropdownOpen.value && userMatches.value.length > 0 && recipientExists.value !== true,
+)
 
 const canSubmit = computed(() => {
   const recipient = recipientUsername.value.trim()
@@ -120,7 +150,9 @@ function resetForm() {
   successMessage.value = ''
   recipientExists.value = null
   recipientChecking.value = false
-  suggestions.value = []
+  userMatches.value = []
+  dropdownOpen.value = false
+  highlightedIndex.value = -1
 }
 
 function close() {
@@ -130,43 +162,87 @@ function close() {
 
 function pickSuggestion(name) {
   recipientUsername.value = name
-  suggestions.value = []
-  scheduleRecipientCheck()
+  userMatches.value = []
+  dropdownOpen.value = false
+  highlightedIndex.value = -1
+  scheduleRecipientSearch()
 }
 
 function onRecipientInput() {
   recipientExists.value = null
-  suggestions.value = []
-  scheduleRecipientCheck()
+  dropdownOpen.value = true
+  highlightedIndex.value = -1
+  scheduleRecipientSearch()
 }
 
-function scheduleRecipientCheck() {
+function onRecipientFocus() {
+  dropdownOpen.value = true
+  if (recipientUsername.value.trim()) {
+    scheduleRecipientSearch()
+  }
+}
+
+function onRecipientBlur() {
+  blurTimer = setTimeout(() => {
+    dropdownOpen.value = false
+    highlightedIndex.value = -1
+  }, 150)
+}
+
+function onRecipientKeydown(event) {
+  if (!showDropdown.value) return
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    highlightedIndex.value = Math.min(
+      highlightedIndex.value + 1,
+      userMatches.value.length - 1,
+    )
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    highlightedIndex.value = Math.max(highlightedIndex.value - 1, 0)
+  } else if (event.key === 'Enter' && highlightedIndex.value >= 0) {
+    event.preventDefault()
+    pickSuggestion(userMatches.value[highlightedIndex.value])
+  } else if (event.key === 'Escape') {
+    dropdownOpen.value = false
+    highlightedIndex.value = -1
+  }
+}
+
+function scheduleRecipientSearch() {
   if (recipientTimer) clearTimeout(recipientTimer)
   const value = recipientUsername.value.trim()
   if (!value) {
     recipientExists.value = null
+    userMatches.value = []
     recipientChecking.value = false
     return
   }
   recipientChecking.value = true
   recipientTimer = setTimeout(() => {
-    verifyRecipient(value)
-  }, 350)
+    fetchRecipientMatches(value)
+  }, 250)
 }
 
-async function verifyRecipient(username) {
-  if (username !== recipientUsername.value.trim()) return
+async function fetchRecipientMatches(query) {
+  if (query !== recipientUsername.value.trim()) return
   recipientChecking.value = true
   try {
-    const result = await checkUsernameExists(username)
-    if (username !== recipientUsername.value.trim()) return
-    recipientExists.value = result.exists
-    suggestions.value = result.exists ? [] : (result.suggestions || [])
-  } catch (err) {
-    if (username !== recipientUsername.value.trim()) return
+    const result = await searchUsers(query)
+    if (query !== recipientUsername.value.trim()) return
+    recipientExists.value = result.exact_match
+    userMatches.value = result.matches || []
+    if (result.exact_match) {
+      dropdownOpen.value = false
+      highlightedIndex.value = -1
+    }
+  } catch {
+    if (query !== recipientUsername.value.trim()) return
     recipientExists.value = null
+    userMatches.value = []
   } finally {
-    if (username === recipientUsername.value.trim()) {
+    if (query === recipientUsername.value.trim()) {
       recipientChecking.value = false
     }
   }
@@ -187,8 +263,9 @@ watch(
   (isOpen) => {
     if (isOpen) {
       resetForm()
-    } else if (recipientTimer) {
-      clearTimeout(recipientTimer)
+    } else {
+      if (recipientTimer) clearTimeout(recipientTimer)
+      if (blurTimer) clearTimeout(blurTimer)
     }
   },
 )
@@ -243,13 +320,47 @@ watch(
   color: var(--text-muted);
 }
 
+.recipient-field {
+  position: relative;
+}
+
 .share-input {
+  width: 100%;
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg);
   color: var(--text);
   font-size: 13px;
+  box-sizing: border-box;
+}
+
+.recipient-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.recipient-option {
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.recipient-option:hover,
+.recipient-option.highlighted {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .share-hint {
@@ -268,22 +379,6 @@ watch(
   margin: -6px 0 8px;
   font-size: 11px;
   color: var(--danger);
-}
-
-.share-suggestions {
-  margin: -4px 0 8px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.link-btn {
-  margin-left: 6px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--accent);
-  cursor: pointer;
-  font-size: inherit;
 }
 
 .share-error {

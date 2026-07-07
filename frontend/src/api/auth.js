@@ -5,6 +5,13 @@ export async function checkUsernameExists(username) {
   return data
 }
 
+export async function searchUsers(query, limit = 8) {
+  const { data } = await client.get('/auth/users/search', {
+    params: { q: query, limit },
+  })
+  return data
+}
+
 export async function login(username, create = false) {
   const { data } = await client.post('/auth/login', { username, create })
   return data

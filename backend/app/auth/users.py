@@ -86,6 +86,62 @@ def suggest_similar_usernames(username: str, *, limit: int = 5) -> list[str]:
     return matches
 
 
+def search_usernames(
+    query: str,
+    *,
+    limit: int = 8,
+    exclude_user_id: str | None = None,
+) -> list[str]:
+    """Return display names matching query prefix, with fuzzy fallback."""
+    display = query.strip()
+    if not display:
+        return []
+
+    norm = normalize_username(display)
+    prefix_pattern = f"{norm}%"
+    display_pattern = f"{display}%"
+
+    sql = """
+        SELECT display_name FROM users
+        WHERE (username_norm LIKE ? OR display_name LIKE ? COLLATE NOCASE)
+    """
+    params: list[object] = [prefix_pattern, display_pattern]
+    if exclude_user_id:
+        sql += " AND id != ?"
+        params.append(exclude_user_id)
+    sql += " ORDER BY display_name COLLATE NOCASE LIMIT ?"
+    params.append(limit)
+
+    with _connect() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    results: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        name = str(row["display_name"])
+        key = normalize_username(name)
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append(name)
+
+    if len(results) < limit:
+        for name in suggest_similar_usernames(display, limit=limit):
+            key = normalize_username(name)
+            if key in seen:
+                continue
+            if exclude_user_id:
+                record = get_user_by_norm(key)
+                if record is not None and record.id == exclude_user_id:
+                    continue
+            seen.add(key)
+            results.append(name)
+            if len(results) >= limit:
+                break
+
+    return results[:limit]
+
+
 def get_user_by_norm(username_norm: str) -> UserRecord | None:
     with _connect() as conn:
         row = conn.execute(
