@@ -14,6 +14,7 @@ import { useGeneratorMapping } from './useGeneratorMapping'
 import { useGeneratorSchema } from './useGeneratorSchema'
 import { useGeneratorXml } from './useGeneratorXml'
 import { useGeneratorActions } from './useGeneratorActions'
+import { useGeneratorCompare } from './useGeneratorCompare'
 
 export function useGenerator() {
   const error = ref('')
@@ -224,6 +225,12 @@ export function useGenerator() {
     focusResultsTab: tabs.focusResultsTab,
   })
 
+  const compare = useGeneratorCompare({
+    getEditorXmlText: xml.getEditorXmlText,
+    xmlEditorRef: xml.xmlEditorRef,
+    llmAlias: mapping.llmAlias,
+  })
+
   const elementCountLabel = computed(() => formatElements(schema.dtdMeta.value.elementCount))
 
   async function onDtdUploaded(result) {
@@ -337,6 +344,7 @@ export function useGenerator() {
     ...xml,
     ...tabs,
     ...actions,
+    ...compare,
     generating,
     filling,
     validating,

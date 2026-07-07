@@ -98,6 +98,7 @@ const props = defineProps({
   filename: { type: String, default: 'generated.xml' },
   validationErrors: { type: Array, default: () => [] },
   canSave: { type: Boolean, default: false },
+  uniqueRanges: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['content-change', 'import', 'clear', 'save', 'share'])
@@ -114,6 +115,7 @@ let editor = null
 let monaco = null
 let suppressEditorEvent = false
 let pasteFlushTimer = null
+let uniqueDecorations = null
 
 function applyModelValue(val) {
   if (!editor) return
@@ -125,9 +127,55 @@ function applyModelValue(val) {
   editor.layout()
 }
 
+function onModelContentChanged() {
+  clearUniqueDecorations()
+  notifyContentChange()
+}
+
 function notifyContentChange() {
   if (suppressEditorEvent || !editor) return
   emit('content-change', editor.getValue())
+}
+
+function applyUniqueDecorations(ranges) {
+  if (!editor || !monaco) return
+  const model = editor.getModel()
+  if (!model) return
+  const lineCount = model.getLineCount()
+  const list = (ranges || [])
+    .filter((r) => r && r.start_line > 0)
+    .map((r) => {
+      const start = Math.min(r.start_line, lineCount)
+      const end = Math.min(r.end_line || r.start_line, lineCount)
+      return {
+        range: new monaco.Range(start, 1, Math.max(end, start), 1),
+        options: {
+          isWholeLine: true,
+          className: 'xml-unique-line',
+          glyphMarginClassName: 'xml-unique-glyph',
+          glyphMarginHoverMessage: {
+            value: `Уникальный путь: ${r.path} (нет ни в одном эталоне)`,
+          },
+          overviewRuler: {
+            color: '#f59e0b',
+            position: monaco.editor.OverviewRulerLane.Right,
+          },
+        },
+      }
+    })
+
+  if (uniqueDecorations) {
+    uniqueDecorations.set(list)
+  } else {
+    uniqueDecorations = editor.createDecorationsCollection(list)
+  }
+}
+
+function clearUniqueDecorations() {
+  if (uniqueDecorations) {
+    uniqueDecorations.clear()
+    uniqueDecorations = null
+  }
 }
 
 function setValue(val) {
@@ -151,16 +199,24 @@ onMounted(async () => {
     wordWrap: 'on',
     fontSize: 13,
     tabSize: 2,
+    glyphMargin: true,
     scrollBeyondLastLine: false,
     automaticLayout: true,
   })
 
-  editor.onDidChangeModelContent(notifyContentChange)
+  editor.onDidChangeModelContent(onModelContentChanged)
   editor.onDidPaste(schedulePasteFlush)
   applyModelValue(props.modelValue)
+  if (props.uniqueRanges?.length) applyUniqueDecorations(props.uniqueRanges)
 })
 
 watch(() => props.modelValue, applyModelValue)
+
+watch(
+  () => props.uniqueRanges,
+  (ranges) => applyUniqueDecorations(ranges),
+  { deep: true },
+)
 
 watch(isDark, (dark) => {
   if (monaco) monaco.editor.setTheme(dark ? 'vs-dark' : 'vs')
@@ -271,7 +327,7 @@ function getValue() {
   return editor?.getValue() ?? props.modelValue ?? ''
 }
 
-defineExpose({ goToPosition, getValue, setValue })
+defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
 </script>
 
 <style scoped>
@@ -382,5 +438,19 @@ defineExpose({ goToPosition, getValue, setValue })
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+</style>
+
+<style>
+/* Not scoped: Monaco renders decoration nodes outside the component scope. */
+.xml-unique-line {
+  background: rgba(245, 158, 11, 0.16);
+}
+
+.xml-unique-glyph {
+  background: #f59e0b;
+  width: 4px !important;
+  margin-left: 3px;
+  border-radius: 2px;
 }
 </style>

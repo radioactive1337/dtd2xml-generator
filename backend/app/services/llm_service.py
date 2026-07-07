@@ -51,6 +51,17 @@ _FIELD_MAPPING_SYSTEM_PROMPT = (
     "Return only valid JSON without markdown fences or explanations."
 )
 
+_STRUCTURE_DIFF_SYSTEM_PROMPT = (
+    "Ты — QA-ревьюер XML-документов. На вход тебе дают уже посчитанный "
+    "алгоритмом список уникальных структурных путей элементов, которых нет ни в "
+    "одном эталонном документе того же типа, ближайший эталон и фрагменты этих "
+    "уникальных элементов. Ты НЕ ищешь различия сам — они уже найдены. "
+    "Кратко и по-деловому объясни на русском языке, что означают эти расхождения, "
+    "и для каждого оцени значимость одной из пометок: «критично», «косметика» или "
+    "«вероятная опечатка в имени тега». Отвечай обычным текстом или списком, без "
+    "markdown-разметки и без блоков кода."
+)
+
 _http_client: httpx.AsyncClient | None = None
 _http_client_lock = asyncio.Lock()
 
@@ -475,6 +486,73 @@ class LLMService:
             raise ValueError(f"LLM request failed: {exc}") from exc
 
         return f"Reachable (model: {self.model})"
+
+    def _build_structure_diff_prompt(
+        self,
+        *,
+        root_element: str,
+        unique_paths: list[str],
+        closest: dict | None,
+        snippets: list[dict],
+    ) -> str:
+        lines = [f"Корневой элемент: {root_element or '(неизвестен)'}"]
+        if closest:
+            title = closest.get("title") or closest.get("doc_id") or "(без названия)"
+            score = closest.get("score")
+            if isinstance(score, (int, float)):
+                lines.append(f"Ближайший эталон: {title} — похожесть {score:.0%}")
+            else:
+                lines.append(f"Ближайший эталон: {title}")
+        else:
+            lines.append("Эталоны того же типа не найдены.")
+
+        lines.append("")
+        lines.append("Уникальные структурные пути (нет ни в одном эталоне):")
+        for path in unique_paths:
+            lines.append(f"- {path}")
+
+        if snippets:
+            lines.append("")
+            lines.append("Фрагменты уникальных элементов:")
+            for snippet in snippets:
+                lines.append(f"# {snippet.get('path', '')}")
+                lines.append(snippet.get("xml", ""))
+
+        lines.append("")
+        lines.append(
+            "Объясни расхождения и пометь значимость каждого "
+            "(критично / косметика / вероятная опечатка в имени тега)."
+        )
+        return "\n".join(lines)
+
+    async def explain_structure_diff(
+        self,
+        *,
+        root_element: str,
+        unique_paths: list[str],
+        closest: dict | None = None,
+        snippets: list[dict] | None = None,
+    ) -> str:
+        """Return a human-readable explanation of pre-computed structural diffs."""
+        if not unique_paths:
+            raise ValueError("No unique paths to explain")
+        if not self.base_url:
+            logger.error("LLM base URL is not configured")
+            raise ValueError("LLM base URL is not configured in connections.json")
+
+        user_message = self._build_structure_diff_prompt(
+            root_element=root_element,
+            unique_paths=unique_paths,
+            closest=closest,
+            snippets=snippets or [],
+        )
+        content = await self._chat_completion(
+            system_prompt=_STRUCTURE_DIFF_SYSTEM_PROMPT,
+            user_message=user_message,
+            temperature=0.3,
+        )
+        return content.strip()
+
 
 def _extract_xml(content: str) -> str:
     content = content.strip()

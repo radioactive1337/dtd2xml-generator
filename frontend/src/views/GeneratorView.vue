@@ -84,6 +84,21 @@
             @clear-history="clearGenerationHistory"
           />
 
+          <GeneratorCompareTab
+            v-show="activeTab === 'compare'"
+            :report="compareReport"
+            :comparing="comparing"
+            :compare-error="compareError"
+            :has-unique-paths="hasUniquePaths"
+            :ai-available="llmAliases.length > 0"
+            :ai-explanation="aiExplanation"
+            :ai-loading="aiLoading"
+            :ai-error="aiError"
+            @run-compare="runCompare"
+            @run-explain="runExplain"
+            @go-to-path="goToComparePath"
+          />
+
           <GeneratorLibraryTab
             v-show="activeTab === 'library'"
             v-model:library-active-scope="libraryActiveScope"
@@ -153,6 +168,7 @@
         :filename="`${rootElement || 'generated'}.xml`"
         :validation-errors="validationResult?.valid === false ? validationResult.errors : []"
         :can-save="canSaveLibraryDocument"
+        :unique-ranges="uniqueRanges"
         @content-change="onEditorContentChange"
         @clear="onEditorClear"
         @import="onXmlFileImported"
@@ -184,6 +200,7 @@ import GeneratorLeftTabs from '../components/generator/GeneratorLeftTabs.vue'
 import GeneratorStructureTab from '../components/generator/GeneratorStructureTab.vue'
 import GeneratorDataTab from '../components/generator/GeneratorDataTab.vue'
 import GeneratorResultsTab from '../components/generator/GeneratorResultsTab.vue'
+import GeneratorCompareTab from '../components/generator/GeneratorCompareTab.vue'
 import GeneratorLibraryTab from '../components/generator/GeneratorLibraryTab.vue'
 import GeneratorActionFooter from '../components/generator/GeneratorActionFooter.vue'
 import ShareDocumentDialog from '../components/generator/ShareDocumentDialog.vue'
@@ -300,6 +317,17 @@ const {
   fill,
   cancelFill,
   validate,
+  compareReport,
+  comparing,
+  compareError,
+  uniqueRanges,
+  hasUniquePaths,
+  aiExplanation,
+  aiLoading,
+  aiError,
+  runCompare,
+  runExplain,
+  goToComparePath,
 } = useGenerator()
 </script>
 
