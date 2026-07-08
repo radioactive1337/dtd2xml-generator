@@ -25,6 +25,33 @@
       </div>
     </div>
 
+    <div class="library-search-row">
+      <div class="library-search-wrap">
+        <span class="library-search-icon">⌕</span>
+        <input
+          v-model="searchQuery"
+          type="search"
+          class="library-search-input"
+          :placeholder="activeScope === 'shared' ? 'Поиск по категориям и документам…' : 'Поиск по названию, описанию…'"
+          autocomplete="off"
+          @keydown.escape="searchQuery = ''"
+        />
+        <button
+          v-if="searchQuery"
+          type="button"
+          class="library-search-clear"
+          aria-label="Очистить поиск"
+          @click="searchQuery = ''"
+        >×</button>
+      </div>
+      <span v-if="searchQuery && activeScope === 'shared'" class="library-search-count">
+        {{ searchMatchCount }}
+      </span>
+      <span v-if="searchQuery && activeScope === 'personal'" class="library-search-count">
+        {{ filteredPersonalDocuments.length }}
+      </span>
+    </div>
+
     <p v-if="libraryError" class="library-error" role="alert">{{ libraryError }}</p>
 
     <div v-if="activeScope === 'shared'" class="library-pane">
@@ -71,41 +98,53 @@
         </p>
       </div>
 
-      <ul v-if="filteredCategories.length" class="category-list">
-        <li v-for="cat in filteredCategories" :key="cat.name" class="category-item">
+      <ul v-if="searchFilteredCategories.length" class="category-list">
+        <li v-for="cat in searchFilteredCategories" :key="cat.name" class="category-item">
           <button
             type="button"
             class="category-toggle"
-            :aria-expanded="expandedCategory === cat.name"
+            :aria-expanded="isCategoryExpanded(cat.name)"
             @click="toggleCategory(cat.name)"
           >
-            <span class="category-chevron" :class="{ 'category-chevron--open': expandedCategory === cat.name }">▶</span>
-            <span class="category-name">{{ cat.name }}</span>
+            <span class="category-chevron" :class="{ 'category-chevron--open': isCategoryExpanded(cat.name) }">▶</span>
+            <span class="category-name" v-html="highlightMatch(cat.name, searchQuery)" />
             <span v-if="cat.root_element" class="category-root">{{ cat.root_element }}</span>
             <span class="category-count">({{ cat.document_count }})</span>
           </button>
-          <ul v-if="expandedCategory === cat.name" class="doc-list">
-            <li v-for="doc in categoryDocuments[cat.name] || []" :key="doc.doc_id" class="doc-item">
-              <span class="doc-title">{{ doc.title }}</span>
-              <button
-                type="button"
-                class="btn-secondary btn-sm"
-                @click="$emit('open-shared', cat.name, doc.doc_id)"
+          <ul v-if="isCategoryExpanded(cat.name)" class="doc-list">
+            <template v-if="loadingCategory === cat.name">
+              <li class="doc-loading">Загрузка…</li>
+            </template>
+            <template v-else>
+              <li
+                v-for="doc in getVisibleDocs(cat.name)"
+                :key="doc.doc_id"
+                class="doc-item"
               >
-                Открыть
-              </button>
-            </li>
-            <li v-if="loadingCategory === cat.name" class="doc-loading">Загрузка…</li>
+                <span class="doc-title" v-html="highlightMatch(doc.title, searchQuery)" />
+                <button
+                  type="button"
+                  class="btn-secondary btn-sm"
+                  @click="$emit('open-shared', cat.name, doc.doc_id)"
+                >
+                  Открыть
+                </button>
+              </li>
+              <li v-if="(categoryDocuments[cat.name] || []).length === 0" class="doc-loading">Нет документов</li>
+            </template>
           </ul>
         </li>
       </ul>
+      <p v-else-if="searchQuery && !searchFilteredCategories.length" class="library-hint">
+        По запросу «{{ searchQuery }}» ничего не найдено.
+      </p>
     </div>
 
     <div v-else class="library-pane">
-      <ul v-if="personalDocuments.length" class="doc-list doc-list--flat">
-        <li v-for="doc in personalDocuments" :key="doc.name" class="doc-item">
+      <ul v-if="filteredPersonalDocuments.length" class="doc-list doc-list--flat">
+        <li v-for="doc in filteredPersonalDocuments" :key="doc.name" class="doc-item">
           <div class="doc-info">
-            <span class="doc-title">{{ doc.name }}</span>
+            <span class="doc-title" v-html="highlightMatch(doc.name, searchQuery)" />
             <span
               v-if="currentSchemaId && doc.schema_id && doc.schema_id !== currentSchemaId"
               class="doc-schema-hint"
@@ -113,7 +152,11 @@
               другая схема DTD
             </span>
             <span v-if="doc.shared_by_name" class="doc-shared-badge">от {{ doc.shared_by_name }}</span>
-            <span v-if="doc.description" class="doc-desc">{{ doc.description }}</span>
+            <span
+              v-if="doc.description"
+              class="doc-desc"
+              v-html="highlightMatch(doc.description, searchQuery)"
+            />
           </div>
           <div class="doc-actions">
             <button
@@ -143,7 +186,10 @@
           </div>
         </li>
       </ul>
-      <p v-else-if="!loading" class="library-hint">Нет сохранённых документов.</p>
+      <p v-else-if="!loading && !searchQuery" class="library-hint">Нет сохранённых документов.</p>
+      <p v-else-if="!loading && searchQuery" class="library-hint">
+        По запросу «{{ searchQuery }}» ничего не найдено.
+      </p>
     </div>
   </section>
 </template>
@@ -191,6 +237,12 @@ const canSyncFromGit = computed(() => {
 
 const expandedCategory = ref(null)
 const categoryRootFilter = ref('')
+const searchQuery = ref('')
+
+// Reset search when switching scopes
+watch(() => props.activeScope, () => { searchQuery.value = '' })
+
+// ── Root-element picker ──────────────────────────────────────────────────────
 
 const pickerElements = computed(() => {
   const fromSchema = props.elements || []
@@ -217,6 +269,96 @@ const filteredCategories = computed(() => {
   return props.sharedCategories.filter((cat) => categoryMatchesRoot(cat, categoryRootFilter.value))
 })
 
+// ── Text search helpers ──────────────────────────────────────────────────────
+
+function normalizeSearch(s) {
+  return (s || '').toLowerCase().trim()
+}
+
+function textContains(text, query) {
+  if (!query) return true
+  return normalizeSearch(text).includes(normalizeSearch(query))
+}
+
+function highlightMatch(text, query) {
+  if (!query || !text) return escapeHtml(text || '')
+  const escaped = escapeHtml(text)
+  const escapedQuery = escapeHtml(query.trim())
+  if (!escapedQuery) return escaped
+  const regex = new RegExp(`(${escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+  return escaped.replace(regex, '<mark class="search-highlight">$1</mark>')
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+// ── Shared search ────────────────────────────────────────────────────────────
+
+// Categories that match the root-element filter AND the text search query.
+// When a text query is set, also check document titles of already-loaded docs.
+const searchFilteredCategories = computed(() => {
+  const rootFiltered = filteredCategories.value
+  const q = normalizeSearch(searchQuery.value)
+  if (!q) return rootFiltered
+
+  return rootFiltered.filter((cat) => {
+    if (textContains(cat.name, q)) return true
+    if (textContains(cat.root_element, q)) return true
+    const docs = props.categoryDocuments[cat.name]
+    if (docs) return docs.some((d) => textContains(d.title, q))
+    return false
+  })
+})
+
+// For a category that is "expanded" via search, auto-expand it and return only matching docs.
+function isCategoryExpanded(name) {
+  if (searchQuery.value && props.categoryDocuments[name]) return true
+  return expandedCategory.value === name
+}
+
+function getVisibleDocs(catName) {
+  const docs = props.categoryDocuments[catName] || []
+  const q = normalizeSearch(searchQuery.value)
+  if (!q) return docs
+  return docs.filter((d) => textContains(d.title, q))
+}
+
+const searchMatchCount = computed(() => {
+  let n = 0
+  for (const cat of searchFilteredCategories.value) {
+    const docs = props.categoryDocuments[cat.name]
+    if (docs) n += getVisibleDocs(cat.name).length
+    else n += cat.document_count
+  }
+  return n
+})
+
+// When a search query is set, trigger lazy loading for visible categories.
+watch(searchQuery, (q) => {
+  if (!q) return
+  for (const cat of searchFilteredCategories.value) {
+    if (!props.categoryDocuments[cat.name] && props.loadingCategory !== cat.name) {
+      emit('expand-category', cat.name)
+    }
+  }
+})
+
+// ── Personal search ──────────────────────────────────────────────────────────
+
+const filteredPersonalDocuments = computed(() => {
+  const q = normalizeSearch(searchQuery.value)
+  if (!q) return props.personalDocuments
+  return props.personalDocuments.filter(
+    (doc) =>
+      textContains(doc.name, q) ||
+      textContains(doc.description, q) ||
+      textContains(doc.shared_by_name, q),
+  )
+})
+
+// ── Watchers ─────────────────────────────────────────────────────────────────
+
 watch(
   () => props.rootElement,
   (val) => {
@@ -226,6 +368,8 @@ watch(
   },
   { immediate: true },
 )
+
+// ── Handlers ─────────────────────────────────────────────────────────────────
 
 function onCategoryRootConfirm(name) {
   categoryRootFilter.value = name
@@ -252,7 +396,7 @@ function formatSyncTime(iso) {
 }
 
 async function toggleCategory(name) {
-  if (expandedCategory.value === name) {
+  if (expandedCategory.value === name && !searchQuery.value) {
     expandedCategory.value = null
     return
   }
@@ -479,5 +623,86 @@ function onSync() {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* ── Search ─────────────────────────────────────────────────────────────── */
+
+.library-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.library-search-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.library-search-icon {
+  position: absolute;
+  left: 7px;
+  font-size: 14px;
+  color: var(--text-muted);
+  pointer-events: none;
+  line-height: 1;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.library-search-input {
+  width: 100%;
+  padding: 5px 28px 5px 24px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface, #1e1e1e);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.library-search-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+}
+
+.library-search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.library-search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.library-search-clear:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+.library-search-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+:deep(.search-highlight) {
+  background: color-mix(in srgb, var(--accent, #4a9eff) 30%, transparent);
+  color: var(--text);
+  border-radius: 2px;
+  padding: 0 1px;
+  font-style: normal;
 }
 </style>
