@@ -299,6 +299,21 @@ export function useGenerator() {
     await xml.setProgrammaticXml('')
   }
 
+  async function onEditorClear() {
+    await xml.onEditorClear()
+    clearAllDatalistState()
+    error.value = ''
+    schema.rootElement.value = ''
+    schema.mode.value = 'minimal'
+    schema.repeatCount.value = 1
+    schema.repeatOverrides.value = {}
+    schema.customPaths.value = []
+    mapping.resetMappings()
+    mapping.mappingPresetName.value = ''
+    compare.clearCompareReport()
+    tabs.focusStructureTab()
+  }
+
   watch(mapping.wizardOpen, async (isOpen) => {
     if (isOpen) {
       await nextTick()
@@ -358,7 +373,7 @@ export function useGenerator() {
     restoreFromHistory: (entry) => xml.restoreFromHistory(entry, error),
     goToValidationError: xml.goToValidationError,
     onEditorContentChange: xml.onEditorContentChange,
-    onEditorClear: xml.onEditorClear,
+    onEditorClear,
     onXmlFileImported: xml.onXmlFileImported,
     libraryActiveScope: xmlLibrary.activeScope,
     sharedCategories: xmlLibrary.sharedCategories,
