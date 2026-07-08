@@ -1,7 +1,6 @@
 <template>
   <div class="xml-editor card">
     <div class="editor-header">
-      <div class="panel-title">Просмотр XML</div>
       <div class="editor-actions">
         <input
           ref="fileInput"
