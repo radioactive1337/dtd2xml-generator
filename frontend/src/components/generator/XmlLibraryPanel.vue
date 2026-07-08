@@ -83,20 +83,6 @@
         <router-link to="/settings">Настройках</router-link>.
       </div>
 
-      <div v-if="syncStatus?.enabled" class="field category-search-field">
-        <label>Корневой элемент</label>
-        <ElementPicker
-          v-model="categoryRootFilter"
-          :elements="pickerElements"
-          :element-docs="elementDocs"
-          :show-selected-doc="false"
-          placeholder="Имя элемента (введите или выберите из списка)"
-          @confirm="onCategoryRootConfirm"
-        />
-        <p v-if="categoryRootFilter && !filteredCategories.length" class="library-hint">
-          Нет папок для выбранного корневого элемента.
-        </p>
-      </div>
 
       <ul v-if="searchFilteredCategories.length" class="category-list">
         <li v-for="cat in searchFilteredCategories" :key="cat.name" class="category-item">
@@ -201,11 +187,6 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import ElementPicker from '../ElementPicker.vue'
-import {
-  normalizeElementSearchKey,
-  resolveElementName,
-} from '../../utils/elementFilter'
 
 const props = defineProps({
   activeScope: { type: String, default: 'shared' },
@@ -217,9 +198,6 @@ const props = defineProps({
   libraryError: { type: String, default: '' },
   categoryDocuments: { type: Object, default: () => ({}) },
   loadingCategory: { type: String, default: null },
-  elements: { type: Array, default: () => [] },
-  elementDocs: { type: Object, default: () => ({}) },
-  rootElement: { type: String, default: '' },
   currentSchemaId: { type: String, default: '' },
 })
 
@@ -241,38 +219,10 @@ const canSyncFromGit = computed(() => {
 })
 
 const expandedCategory = ref(null)
-const categoryRootFilter = ref('')
 const searchQuery = ref('')
 
 // Reset search when switching scopes
 watch(() => props.activeScope, () => { searchQuery.value = '' })
-
-// ── Root-element picker ──────────────────────────────────────────────────────
-
-const pickerElements = computed(() => {
-  const fromSchema = props.elements || []
-  const fromCategories = (props.sharedCategories || [])
-    .map((cat) => cat.root_element)
-    .filter(Boolean)
-  return [...new Set([...fromSchema, ...fromCategories])].sort()
-})
-
-function categoryMatchesRoot(cat, query) {
-  const trimmed = (query || '').trim()
-  if (!trimmed) return true
-  const resolved = resolveElementName(trimmed, pickerElements.value)
-  const key = normalizeElementSearchKey(resolved || trimmed)
-  const roots = [
-    normalizeElementSearchKey(cat.root_element || ''),
-    normalizeElementSearchKey(cat.name || ''),
-  ].filter(Boolean)
-  return roots.some((rootKey) => rootKey === key || rootKey.includes(key) || key.includes(rootKey))
-}
-
-const filteredCategories = computed(() => {
-  if (!categoryRootFilter.value.trim()) return props.sharedCategories
-  return props.sharedCategories.filter((cat) => categoryMatchesRoot(cat, categoryRootFilter.value))
-})
 
 // ── Text search helpers ──────────────────────────────────────────────────────
 
@@ -328,11 +278,8 @@ watch(
   { deep: false },
 )
 
-// Categories that match the root-element filter AND the text search query.
-// Categories with no loaded docs but matching name/root_element are always included —
-// they'll show a loading indicator while their docs are fetched.
 const searchFilteredCategories = computed(() => {
-  const rootFiltered = filteredCategories.value
+  const rootFiltered = props.sharedCategories
   const q = normalizeSearch(searchQuery.value)
   if (!q) return rootFiltered
 
@@ -426,31 +373,6 @@ const filteredPersonalDocuments = computed(() => {
       textContains(doc.shared_by_name, q),
   )
 })
-
-// ── Watchers ─────────────────────────────────────────────────────────────────
-
-watch(
-  () => props.rootElement,
-  (val) => {
-    if (val && !categoryRootFilter.value) {
-      categoryRootFilter.value = val
-    }
-  },
-  { immediate: true },
-)
-
-// ── Handlers ─────────────────────────────────────────────────────────────────
-
-function onCategoryRootConfirm(name) {
-  categoryRootFilter.value = name
-  const first = filteredCategories.value[0]
-  if (first) {
-    expandedCategory.value = first.name
-    if (!props.categoryDocuments[first.name]) {
-      emit('expand-category', first.name)
-    }
-  }
-}
 
 function setScope(scope) {
   emit('update:activeScope', scope)
@@ -681,19 +603,6 @@ function onSync() {
   line-height: 1;
 }
 
-.category-search-field label {
-  display: block;
-  font-size: 12px;
-  font-weight: 500;
-  margin-bottom: 4px;
-  color: var(--text-muted);
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
 
 /* ── Search ─────────────────────────────────────────────────────────────── */
 

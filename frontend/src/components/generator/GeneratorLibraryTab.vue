@@ -10,9 +10,6 @@
       :library-error="libraryError"
       :category-documents="categoryDocuments"
       :loading-category="loadingCategory"
-      :elements="elements"
-      :element-docs="elementDocs"
-      :root-element="rootElement"
       :current-schema-id="schemaId"
       @update:active-scope="$emit('update:library-active-scope', $event)"
       @sync="$emit('library-sync')"
@@ -38,9 +35,6 @@ defineProps({
   libraryError: { type: String, default: '' },
   categoryDocuments: { type: Object, default: () => ({}) },
   loadingCategory: { type: String, default: null },
-  elements: { type: Array, default: () => [] },
-  elementDocs: { type: Object, default: () => ({}) },
-  rootElement: { type: String, default: '' },
   schemaId: { type: String, default: '' },
 })
 
