@@ -64,6 +64,15 @@ class ReferenceXmlSettings(BaseModel):
     push_author_email: str = "xmlgenerator@noreply"
 
 
+class NexusDtdConfig(BaseModel):
+    base_url: str
+    repository: str
+    group_id: str
+    artifact_id: str
+    version: str = "LATEST"
+    inner_path: str = "META-INF/dtd/"
+
+
 def is_auth_disabled() -> bool:
     return os.getenv("AUTH_DISABLED", "").strip().lower() in {"1", "true", "yes"}
 
@@ -473,6 +482,14 @@ def get_reference_xml_settings() -> ReferenceXmlSettings | None:
     if not settings.enabled:
         return None
     return settings
+
+
+def get_nexus_dtd_config() -> NexusDtdConfig | None:
+    raw = _load_raw_app_config()
+    nexus = raw.get("nexus_dtd")
+    if not nexus or not isinstance(nexus, dict):
+        return None
+    return NexusDtdConfig(**nexus)
 
 
 def reference_xml_root() -> Path | None:

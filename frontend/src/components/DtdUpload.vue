@@ -23,6 +23,7 @@
         <span class="drop-icon">✓</span>
         <span class="drop-text">{{ fileName }}</span>
         <span class="drop-sub">Загружено элементов: {{ elementCount }}</span>
+        <span v-if="nexusMetaText" class="drop-sub">{{ nexusMetaText }}</span>
       </template>
       <template v-else>
         <span class="drop-icon">↑</span>
@@ -30,13 +31,22 @@
         <span class="drop-sub">до 3 .dtd или один .jar</span>
       </template>
     </div>
+    <button
+      v-if="nexusConfigured"
+      class="nexus-btn"
+      :disabled="loading"
+      type="button"
+      @click="refreshFromNexus"
+    >
+      Обновить из Nexus
+    </button>
     <p v-if="error" class="error-msg">{{ error }}</p>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { uploadDtd, uploadDtdJar } from '../api/dtd'
+import { onMounted, ref } from 'vue'
+import { getNexusConfig, pullDtdFromNexus, uploadDtd, uploadDtdJar } from '../api/dtd'
 import { normalizeDtdUploadResult } from '../utils/dtdSchema'
 
 defineProps({
@@ -51,6 +61,10 @@ const fileInput = ref(null)
 const isDragging = ref(false)
 const loading = ref(false)
 const error = ref('')
+const nexusConfigured = ref(false)
+const nexusArtifactId = ref('')
+const nexusVersion = ref('')
+const nexusMetaText = ref('')
 
 function isJarFile(file) {
   return file.name.toLowerCase().endsWith('.jar')
@@ -82,6 +96,7 @@ async function processFiles(fileList) {
   if (!fileList?.length) return
   loading.value = true
   error.value = ''
+  nexusMetaText.value = ''
   try {
     const selection = collectUploadFiles(fileList)
     if (!selection) return
@@ -98,6 +113,23 @@ async function processFiles(fileList) {
   }
 }
 
+async function refreshFromNexus() {
+  loading.value = true
+  error.value = ''
+  try {
+    const result = await pullDtdFromNexus()
+    emit('uploaded', normalizeDtdUploadResult(result))
+    if (nexusArtifactId.value) {
+      const versionLabel = nexusVersion.value || 'LATEST'
+      nexusMetaText.value = `Источник: Nexus ${nexusArtifactId.value}:${versionLabel}`
+    }
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    loading.value = false
+  }
+}
+
 function onDrop(e) {
   isDragging.value = false
   processFiles(e.dataTransfer.files)
@@ -107,6 +139,17 @@ function onFileSelect(e) {
   processFiles(e.target.files)
   e.target.value = ''
 }
+
+onMounted(async () => {
+  try {
+    const cfg = await getNexusConfig()
+    nexusConfigured.value = !!cfg?.configured
+    nexusArtifactId.value = cfg?.artifact_id || ''
+    nexusVersion.value = cfg?.version || ''
+  } catch (_e) {
+    nexusConfigured.value = false
+  }
+})
 </script>
 
 <style scoped>
@@ -151,5 +194,10 @@ function onFileSelect(e) {
 .drop-sub {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.nexus-btn {
+  margin-top: 10px;
+  width: 100%;
 }
 </style>

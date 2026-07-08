@@ -18,5 +18,13 @@
     "push_cache_dir": "data/reference-xml-push",
     "push_author_name": "XML Generator",
     "push_author_email": "xmlgenerator@noreply"
+  },
+  "nexus_dtd": {
+    "base_url": "https://nexus.company.com",
+    "repository": "maven-releases",
+    "group_id": "com.company.project",
+    "artifact_id": "schema-lib",
+    "version": "LATEST",
+    "inner_path": "META-INF/dtd/"
   }
 }
