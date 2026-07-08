@@ -112,7 +112,7 @@
             <span class="category-count">({{ cat.document_count }})</span>
           </button>
           <ul v-if="isCategoryExpanded(cat.name)" class="doc-list">
-            <template v-if="loadingCategory === cat.name">
+            <template v-if="isCategoryLoading(cat.name)">
               <li class="doc-loading">Загрузка…</li>
             </template>
             <template v-else>
@@ -130,7 +130,12 @@
                   Открыть
                 </button>
               </li>
-              <li v-if="(categoryDocuments[cat.name] || []).length === 0" class="doc-loading">Нет документов</li>
+              <li
+                v-if="categoryDocuments[cat.name] !== undefined && getVisibleDocs(cat.name).length === 0"
+                class="doc-loading"
+              >
+                {{ searchQuery ? 'Документов с таким названием нет' : 'Нет документов' }}
+              </li>
             </template>
           </ul>
         </li>
@@ -295,8 +300,37 @@ function escapeHtml(str) {
 
 // ── Shared search ────────────────────────────────────────────────────────────
 
+// Track categories where expand-category was emitted but docs haven't arrived yet.
+// Using a plain reactive object so Vue tracks property add/delete.
+const pendingLoadCategories = ref({})
+
+function requestCategoryLoad(name) {
+  if (
+    !props.categoryDocuments[name] &&
+    props.loadingCategory !== name &&
+    !pendingLoadCategories.value[name]
+  ) {
+    pendingLoadCategories.value[name] = true
+    emit('expand-category', name)
+  }
+}
+
+// When docs arrive for a pending category, clear its pending flag.
+watch(
+  () => props.categoryDocuments,
+  (docs) => {
+    for (const name of Object.keys(pendingLoadCategories.value)) {
+      if (docs[name] !== undefined) {
+        delete pendingLoadCategories.value[name]
+      }
+    }
+  },
+  { deep: false },
+)
+
 // Categories that match the root-element filter AND the text search query.
-// When a text query is set, also check document titles of already-loaded docs.
+// Categories with no loaded docs but matching name/root_element are always included —
+// they'll show a loading indicator while their docs are fetched.
 const searchFilteredCategories = computed(() => {
   const rootFiltered = filteredCategories.value
   const q = normalizeSearch(searchQuery.value)
@@ -305,16 +339,54 @@ const searchFilteredCategories = computed(() => {
   return rootFiltered.filter((cat) => {
     if (textContains(cat.name, q)) return true
     if (textContains(cat.root_element, q)) return true
+    // Check already-loaded docs for title match
     const docs = props.categoryDocuments[cat.name]
     if (docs) return docs.some((d) => textContains(d.title, q))
+    // Category docs not yet loaded — exclude from results by title,
+    // but keep if name/root_element already matched above.
     return false
   })
 })
 
-// For a category that is "expanded" via search, auto-expand it and return only matching docs.
+// Trigger lazy loading for all visible categories whenever search query changes.
+watch(searchQuery, (q) => {
+  if (!q) {
+    pendingLoadCategories.value = {}
+    return
+  }
+  for (const cat of searchFilteredCategories.value) {
+    requestCategoryLoad(cat.name)
+  }
+})
+
+// Also trigger when filtered set changes (e.g. root-element filter applied alongside text search).
+watch(searchFilteredCategories, (cats) => {
+  if (!searchQuery.value) return
+  for (const cat of cats) {
+    requestCategoryLoad(cat.name)
+  }
+})
+
+// A category is "expanded" when:
+//   - manually toggled, OR
+//   - search is active and docs are loaded / loading / pending
 function isCategoryExpanded(name) {
-  if (searchQuery.value && props.categoryDocuments[name]) return true
+  if (searchQuery.value) {
+    return (
+      props.categoryDocuments[name] !== undefined ||
+      props.loadingCategory === name ||
+      !!pendingLoadCategories.value[name]
+    )
+  }
   return expandedCategory.value === name
+}
+
+// True while we're waiting for this category's docs during a search.
+function isCategoryLoading(name) {
+  return (
+    props.loadingCategory === name ||
+    (!!searchQuery.value && !!pendingLoadCategories.value[name] && props.categoryDocuments[name] === undefined)
+  )
 }
 
 function getVisibleDocs(catName) {
@@ -332,16 +404,6 @@ const searchMatchCount = computed(() => {
     else n += cat.document_count
   }
   return n
-})
-
-// When a search query is set, trigger lazy loading for visible categories.
-watch(searchQuery, (q) => {
-  if (!q) return
-  for (const cat of searchFilteredCategories.value) {
-    if (!props.categoryDocuments[cat.name] && props.loadingCategory !== cat.name) {
-      emit('expand-category', cat.name)
-    }
-  }
 })
 
 // ── Personal search ──────────────────────────────────────────────────────────
