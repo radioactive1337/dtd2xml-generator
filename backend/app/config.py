@@ -10,6 +10,16 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# ---------------------------------------------------------------------------
+# Module-level caches
+# ---------------------------------------------------------------------------
+
+# Global app.json cache — populated once, invalidated only in ensure_app_config
+_app_config_cache: dict[str, Any] | None = None
+
+# Per-user connections.json cache: path -> (mtime, data)
+_connections_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
 # Project root: xml-generator/
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -116,7 +126,17 @@ def _load_raw_user_connections(user: "UserContext") -> dict[str, Any]:
     path = _connections_path_for_user(user)
     if not path.is_file():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    key = str(path)
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return {}
+    entry = _connections_cache.get(key)
+    if entry is not None and entry[0] == mtime:
+        return entry[1]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    _connections_cache[key] = (mtime, data)
+    return data
 
 
 def _save_raw_user_connections(user: "UserContext", raw: dict[str, Any]) -> None:
@@ -126,12 +146,24 @@ def _save_raw_user_connections(user: "UserContext", raw: dict[str, Any]) -> None
         json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    # Invalidate mtime cache so next read picks up the new file
+    _connections_cache.pop(str(path), None)
+
+
+def _invalidate_app_config_cache() -> None:
+    global _app_config_cache
+    _app_config_cache = None
 
 
 def _load_raw_app_config() -> dict[str, Any]:
+    global _app_config_cache
+    if _app_config_cache is not None:
+        return _app_config_cache
+
     raw = _load_json_file(APP_CONFIG_FILE)
     if raw:
-        return raw
+        _app_config_cache = raw
+        return _app_config_cache
 
     legacy = _find_legacy_connections_file()
     if legacy is not None:
@@ -140,8 +172,11 @@ def _load_raw_app_config() -> dict[str, Any]:
         for key in ("oracle_client_lib_dir", "oracle_home", "ora_tzfile"):
             if key in legacy_raw:
                 merged[key] = legacy_raw[key]
-        return merged
-    return {}
+        _app_config_cache = merged
+        return _app_config_cache
+
+    _app_config_cache = {}
+    return _app_config_cache
 
 
 def load_app_settings() -> AppSettings:
@@ -202,6 +237,8 @@ def ensure_app_config() -> None:
                 encoding="utf-8",
             )
 
+    # File may have just been created — clear stale cache before reading
+    _invalidate_app_config_cache()
     raw = _load_raw_app_config()
     app = raw.setdefault("app", {})
     if not str(app.get("session_secret", "")).strip() and not os.getenv("SESSION_SECRET"):
