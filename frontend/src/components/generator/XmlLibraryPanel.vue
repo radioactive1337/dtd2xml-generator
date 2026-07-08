@@ -389,10 +389,18 @@ function isCategoryLoading(name) {
   )
 }
 
+function categoryMatchesSearchDirectly(cat, q) {
+  return textContains(cat.name, q) || textContains(cat.root_element, q)
+}
+
 function getVisibleDocs(catName) {
   const docs = props.categoryDocuments[catName] || []
   const q = normalizeSearch(searchQuery.value)
   if (!q) return docs
+  // If the category itself matched (by name or root_element) — show all its docs.
+  const cat = props.sharedCategories.find((c) => c.name === catName)
+  if (cat && categoryMatchesSearchDirectly(cat, q)) return docs
+  // Category matched only because some doc titles match — filter to those docs.
   return docs.filter((d) => textContains(d.title, q))
 }
 
