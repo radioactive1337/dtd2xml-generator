@@ -11,14 +11,17 @@ from pathlib import Path
 from typing import Any
 
 import aiofiles
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app.auth.sessions import get_current_user
+from app.config import get_nexus_dtd_config
 from app.core.dtd_archive import extract_jar_dtd_files
 from app.core.dtd_merge import merge_dtd_schemas
 from app.core.dtd_models import DTDSchema, ElementDef
 from app.core.dtd_parser import DTDParser
+from app.services.nexus_dtd_service import fetch_jar_bytes, resolve_jar_url
 from app.user_context import UserContext
 
 router = APIRouter(prefix="/dtd", tags=["dtd"])
@@ -274,6 +277,12 @@ class MultiSchemaResponse(BaseModel):
     primary_schema_id: str
 
 
+class NexusDtdConfigResponse(BaseModel):
+    configured: bool
+    artifact_id: str | None = None
+    version: str | None = None
+
+
 def _pick_primary_schema_id(schemas: list[SchemaResponse]) -> str:
     if not schemas:
         raise ValueError("schemas must not be empty")
@@ -304,6 +313,44 @@ def _multi_schema_response(user: UserContext, schema_ids: list[str]) -> MultiSch
         schemas=schemas,
         primary_schema_id=_pick_primary_schema_id(schemas),
     )
+
+
+async def _extract_and_parse_jar(
+    user: UserContext,
+    jar_bytes: bytes,
+    *,
+    inner_path: str,
+) -> list[str]:
+    extracted = extract_jar_dtd_files(jar_bytes, user.dtd_dir, prefix=inner_path)
+    entry_points = _entry_point_paths(user.dtd_dir)
+    if not entry_points:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No .dtd entry points found in {inner_path}",
+        )
+
+    available_basenames = set(extracted)
+    try:
+        return await asyncio.to_thread(
+            _parse_entry_points,
+            user,
+            entry_points,
+            available_basenames=available_basenames,
+        )
+    except FileNotFoundError as exc:
+        logger.warning("DTD file not found during JAR parse: %s", exc)
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "DTD parsing failed [entries=%s size=%d]",
+            [path.name for path in entry_points],
+            len(jar_bytes),
+        )
+        raise HTTPException(
+            status_code=422, detail=f"DTD parsing failed: {exc}"
+        ) from exc
 
 
 class ElementDetailResponse(BaseModel):
@@ -400,44 +447,72 @@ async def upload_dtd_jar(
     jar_bytes = await file.read()
 
     try:
-        extracted = extract_jar_dtd_files(jar_bytes, user.dtd_dir, prefix=inner_path)
+        schema_ids = await _extract_and_parse_jar(
+            user,
+            jar_bytes,
+            inner_path=inner_path,
+        )
     except zipfile.BadZipFile as exc:
         raise HTTPException(status_code=400, detail="Invalid JAR archive") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    entry_points = _entry_point_paths(user.dtd_dir)
-    if not entry_points:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No .dtd entry points found in {inner_path}",
-        )
+    return _multi_schema_response(user, schema_ids)
 
-    available_basenames = set(extracted)
+
+@router.get("/nexus-config", response_model=NexusDtdConfigResponse)
+async def get_nexus_config() -> NexusDtdConfigResponse:
+    cfg = get_nexus_dtd_config()
+    if cfg is None:
+        return NexusDtdConfigResponse(configured=False)
+    return NexusDtdConfigResponse(
+        configured=True,
+        artifact_id=cfg.artifact_id,
+        version=cfg.version,
+    )
+
+
+@router.post("/pull-nexus", response_model=MultiSchemaResponse)
+async def pull_dtd_from_nexus(
+    user: UserContext = Depends(get_current_user),
+) -> MultiSchemaResponse:
+    cfg = get_nexus_dtd_config()
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="nexus_dtd is not configured")
+
+    user.dtd_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        schema_ids = await asyncio.to_thread(
-            _parse_entry_points,
-            user,
-            entry_points,
-            available_basenames=available_basenames,
+        jar_url, resolved_version = await resolve_jar_url(cfg)
+        jar_bytes = await fetch_jar_bytes(jar_url)
+    except httpx.HTTPStatusError as exc:
+        detail = (
+            "Nexus artifact request failed: "
+            f"HTTP {exc.response.status_code} ({exc.request.url})"
         )
-    except FileNotFoundError as exc:
-        logger.warning("DTD file not found during JAR parse: %s", exc)
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Nexus request failed: {exc}") from exc
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception(
-            "DTD parsing failed [jar=%s entries=%s size=%d]",
-            file.filename,
-            [path.name for path in entry_points],
-            len(jar_bytes),
-        )
-        raise HTTPException(
-            status_code=422, detail=f"DTD parsing failed: {exc}"
-        ) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    try:
+        schema_ids = await _extract_and_parse_jar(
+            user,
+            jar_bytes,
+            inner_path=cfg.inner_path,
+        )
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=502, detail="Nexus artifact is not a valid JAR") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    logger.info(
+        "DTD schemas pulled from Nexus [user=%s artifact=%s version=%s]",
+        user.display_name,
+        cfg.artifact_id,
+        resolved_version,
+    )
     return _multi_schema_response(user, schema_ids)
 
 

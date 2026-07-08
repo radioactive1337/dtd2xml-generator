@@ -23,6 +23,16 @@ export async function listSchemas() {
   return data
 }
 
+export async function getNexusConfig() {
+  const { data } = await client.get('/dtd/nexus-config')
+  return data
+}
+
+export async function pullDtdFromNexus() {
+  const { data } = await client.post('/dtd/pull-nexus')
+  return data
+}
+
 export async function listElements(schemaId) {
   const { data } = await client.get(`/dtd/${schemaId}/elements`)
   return data
