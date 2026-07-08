@@ -1,4 +1,4 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { generateXml } from '../../api/generate'
 import { fillXmlStream, stageFillXml } from '../../api/fill'
 import { validateXml } from '../../api/validate'
@@ -38,6 +38,7 @@ export function useGeneratorActions({
   let generateRequestSeq = 0
   let fillElapsedTimer = null
   let fillAbortController = null
+  let inlineValidationTimer = null
 
   const canGenerate = computed(() => schemaId.value && rootElement.value)
   const canValidate = computed(() => schemaId.value && xmlText.value)
@@ -125,6 +126,33 @@ export function useGeneratorActions({
       validating.value = false
     }
   }
+
+  function scheduleInlineValidation() {
+    if (inlineValidationTimer) clearTimeout(inlineValidationTimer)
+    inlineValidationTimer = setTimeout(async () => {
+      inlineValidationTimer = null
+      if (!schemaId.value || !xmlText.value || generating.value || filling.value) return
+      try {
+        const result = await validateXml(schemaId.value, getEditorXmlText() || xmlText.value)
+        validationResult.value = result
+        if (result?.valid === true) xmlSyncHint.value = ''
+      } catch {
+        // Inline validation failures are silent — errors show up via manual validate
+      }
+    }, 800)
+  }
+
+  watch([xmlText, xmlDirty], ([text, dirty]) => {
+    if (!dirty) return
+    if (!text) {
+      if (inlineValidationTimer) {
+        clearTimeout(inlineValidationTimer)
+        inlineValidationTimer = null
+      }
+      return
+    }
+    scheduleInlineValidation()
+  })
 
   async function fill() {
     filling.value = true
@@ -224,6 +252,7 @@ export function useGeneratorActions({
 
   function dispose() {
     stopFillProgressTimer()
+    if (inlineValidationTimer) clearTimeout(inlineValidationTimer)
   }
 
   return {
