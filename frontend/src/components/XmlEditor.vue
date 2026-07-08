@@ -374,21 +374,23 @@ watch(
     const model = editor.getModel()
     if (!model) return
 
-    const markers = errors
-      .filter((err) => err.line > 0)
-      .map((err) => {
-        const startCol = err.column > 0 ? err.column : 1
-        const lineContent = model.getLineContent(err.line) || ''
-        const endCol = err.column > 0 ? Math.min(startCol + lineContent.length, 9999) : 9999
-        return {
-          severity: monaco.MarkerSeverity.Error,
-          startLineNumber: err.line,
-          startColumn: startCol,
-          endLineNumber: err.line,
-          endColumn: endCol,
-          message: err.message,
-        }
-      })
+    const lineCount = model.getLineCount()
+    const markers = errors.map((err) => {
+      const line = err.line > 0 && err.line <= lineCount ? err.line : 1
+      const startCol = err.column > 0 ? err.column : 1
+      const lineContent = model.getLineContent(line) || ''
+      const endCol = line === err.line && err.column > 0
+        ? Math.min(startCol + lineContent.length, 9999)
+        : 9999
+      return {
+        severity: monaco.MarkerSeverity.Error,
+        startLineNumber: line,
+        startColumn: startCol,
+        endLineNumber: line,
+        endColumn: endCol,
+        message: err.message,
+      }
+    })
 
     monaco.editor.setModelMarkers(model, 'dtd-validation', markers)
   },
