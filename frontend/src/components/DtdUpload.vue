@@ -23,7 +23,8 @@
         <span class="drop-icon">✓</span>
         <span class="drop-text">{{ fileName }}</span>
         <span class="drop-sub">Загружено элементов: {{ elementCount }}</span>
-        <span v-if="nexusMetaText" class="drop-sub">{{ nexusMetaText }}</span>
+        <span v-if="importSourceLabel" class="drop-sub">{{ importSourceLabel }}</span>
+        <span v-if="updatedAtLabel" class="drop-sub">{{ updatedAtLabel }}</span>
       </template>
       <template v-else>
         <span class="drop-icon">↑</span>
@@ -45,14 +46,16 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { getNexusConfig, pullDtdFromNexus, uploadDtd, uploadDtdJar } from '../api/dtd'
-import { normalizeDtdUploadResult } from '../utils/dtdSchema'
+import { formatDtdUpdatedAt, normalizeDtdUploadResult } from '../utils/dtdSchema'
 
-defineProps({
+const props = defineProps({
   isLoaded: { type: Boolean, default: false },
   fileName: { type: String, default: '' },
   elementCount: { type: Number, default: 0 },
+  importSource: { type: String, default: '' },
+  updatedAt: { type: String, default: '' },
 })
 
 const emit = defineEmits(['uploaded'])
@@ -62,9 +65,14 @@ const isDragging = ref(false)
 const loading = ref(false)
 const error = ref('')
 const nexusConfigured = ref(false)
-const nexusArtifactId = ref('')
-const nexusVersion = ref('')
-const nexusMetaText = ref('')
+
+const importSourceLabel = computed(() =>
+  props.importSource ? `Источник: ${props.importSource}` : '',
+)
+const updatedAtLabel = computed(() => {
+  const formatted = formatDtdUpdatedAt(props.updatedAt)
+  return formatted ? `Обновлено: ${formatted}` : ''
+})
 
 function isJarFile(file) {
   return file.name.toLowerCase().endsWith('.jar')
@@ -96,7 +104,6 @@ async function processFiles(fileList) {
   if (!fileList?.length) return
   loading.value = true
   error.value = ''
-  nexusMetaText.value = ''
   try {
     const selection = collectUploadFiles(fileList)
     if (!selection) return
@@ -119,10 +126,6 @@ async function refreshFromNexus() {
   try {
     const result = await pullDtdFromNexus()
     emit('uploaded', normalizeDtdUploadResult(result))
-    if (nexusArtifactId.value) {
-      const versionLabel = nexusVersion.value || 'LATEST'
-      nexusMetaText.value = `Источник: Nexus ${nexusArtifactId.value}:${versionLabel}`
-    }
   } catch (e) {
     error.value = e.message
   } finally {
@@ -144,8 +147,6 @@ onMounted(async () => {
   try {
     const cfg = await getNexusConfig()
     nexusConfigured.value = !!cfg?.configured
-    nexusArtifactId.value = cfg?.artifact_id || ''
-    nexusVersion.value = cfg?.version || ''
   } catch (_e) {
     nexusConfigured.value = false
   }

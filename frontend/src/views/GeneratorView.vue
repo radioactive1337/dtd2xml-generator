@@ -7,6 +7,8 @@
         :file-name="dtdMeta.fileName"
         :element-count="dtdMeta.elementCount"
         :element-count-label="elementCountLabel"
+        :import-source="dtdMeta.importSource"
+        :updated-at="dtdMeta.updatedAt"
         @toggle-collapse="dtdCollapsed = !dtdCollapsed"
         @uploaded="onDtdUploaded"
       />

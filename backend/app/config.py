@@ -521,6 +521,13 @@ def get_reference_xml_settings() -> ReferenceXmlSettings | None:
     return settings
 
 
+def shared_dtd_dir() -> Path:
+    """Global DTD schema storage shared by all users."""
+    path = DATA_DIR / "dtd_schemas"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def get_nexus_dtd_config() -> NexusDtdConfig | None:
     raw = _load_raw_app_config()
     nexus = raw.get("nexus_dtd")

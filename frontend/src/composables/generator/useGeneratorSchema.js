@@ -6,7 +6,12 @@ import { loadRepeatablePaths } from '../../utils/repeatablePaths'
 
 export function useGeneratorSchema() {
   const schemaId = ref('')
-  const dtdMeta = ref({ fileName: '', elementCount: 0 })
+  const dtdMeta = ref({
+    fileName: '',
+    elementCount: 0,
+    importSource: '',
+    updatedAt: '',
+  })
   const elements = ref([])
   const elementAttributes = ref({})
   const elementDocs = ref({})
@@ -68,6 +73,8 @@ export function useGeneratorSchema() {
       fileName: schemaFileName(primary),
       elementCount: collectElementsFromSchemas(allSchemas).length,
       schemaCount: allSchemas.length,
+      importSource: primary.import_source || '',
+      updatedAt: primary.updated_at || '',
     }
     elements.value = collectElementsFromSchemas(allSchemas)
     rootElement.value = ''

@@ -8,9 +8,9 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _seed_types_dtd() -> None:
-    from app.user_context import dev_user_context
+    from app.config import shared_dtd_dir
 
-    dtd_dir = dev_user_context().dtd_dir
+    dtd_dir = shared_dtd_dir()
     dtd_dir.mkdir(parents=True, exist_ok=True)
     (dtd_dir / "types.dtd").write_bytes((FIXTURES / "types.dtd").read_bytes())
 
@@ -91,11 +91,14 @@ def test_list_schemas(client: TestClient):
 
     response = client.get("/api/dtd/schemas")
     assert response.status_code == 200
-    schemas = response.json()
+    data = response.json()
+    schemas = data["schemas"]
     assert len(schemas) == 1
     assert schemas[0]["schema_id"] == schema_id
     assert schemas[0]["element_count"] > 0
     assert "PayDoc" in schemas[0]["elements"]
+    assert data["import_source"] == "Загрузка: main.dtd"
+    assert data["updated_at"]
 
 
 def test_list_elements(client: TestClient):

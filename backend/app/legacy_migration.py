@@ -6,7 +6,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from app.config import DATA_DIR, PROJECT_ROOT
+from app.config import DATA_DIR, PROJECT_ROOT, shared_dtd_dir
 from app.user_context import UserContext
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ _LEGACY_CONNECTIONS = [
     PROJECT_ROOT / "connections.json",
 ]
 _LEGACY_DIR_MAP = {
-    "dtd_schemas": lambda user: user.dtd_dir,
+    "dtd_schemas": lambda _user: shared_dtd_dir(),
     "presets": lambda user: user.presets_dir,
     "mapping_presets": lambda user: user.mapping_presets_dir,
 }
