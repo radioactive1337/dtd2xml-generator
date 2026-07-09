@@ -2,7 +2,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { listSchemas } from '../../api/dtd'
 import { getConfigAliases } from '../../api/config'
 import { stageFillXml } from '../../api/fill'
-import { pickPrimarySchema, normalizeDtdUploadResult } from '../../utils/dtdSchema'
+import { pickPrimarySchema, normalizeDtdUploadResult, normalizeDtdListResult } from '../../utils/dtdSchema'
 import { clearAllDatalistState } from '../../utils/datalistInput'
 import { formatElements } from '../../utils/ruPlural'
 import { translateApiError } from '../../utils/apiErrors'
@@ -328,9 +328,18 @@ export function useGenerator() {
     const aliasesPromise = getConfigAliases().catch(() => null)
 
     try {
-      const schemas = await listSchemas()
-      const primary = pickPrimarySchema(schemas)
-      if (primary) await onDtdUploaded(normalizeDtdUploadResult({ schemas, primary_schema_id: primary.schema_id }))
+      const listResult = normalizeDtdListResult(await listSchemas())
+      const primary = pickPrimarySchema(listResult.schemas)
+      if (primary) {
+        await onDtdUploaded(
+          normalizeDtdUploadResult({
+            schemas: listResult.schemas,
+            primary_schema_id: primary.schema_id,
+            import_source: listResult.import_source,
+            updated_at: listResult.updated_at,
+          }),
+        )
+      }
     } catch {
       // No saved schemas or API unavailable.
     }

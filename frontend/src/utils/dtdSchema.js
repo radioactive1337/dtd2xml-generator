@@ -44,5 +44,31 @@ export function normalizeDtdUploadResult(result) {
     ...primary,
     schemas: result.schemas,
     primary_schema_id: result.primary_schema_id,
+    import_source: result.import_source ?? null,
+    updated_at: result.updated_at ?? null,
   }
+}
+
+export function normalizeDtdListResult(result) {
+  if (Array.isArray(result)) {
+    return { schemas: result, import_source: null, updated_at: null }
+  }
+  return {
+    schemas: result?.schemas ?? [],
+    import_source: result?.import_source ?? null,
+    updated_at: result?.updated_at ?? null,
+  }
+}
+
+export function formatDtdUpdatedAt(iso) {
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }

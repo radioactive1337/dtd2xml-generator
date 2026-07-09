@@ -71,11 +71,23 @@ def auth_client(auth_enabled: None) -> TestClient:
 
 @pytest.fixture(autouse=True)
 def clear_registries():
+    import shutil
+
+    from app.config import DATA_DIR, shared_dtd_dir
+
     dtd_routes._schema_registry.clear()
     generate_routes._last_generated.clear()
+    shared = shared_dtd_dir()
+    if shared.is_dir():
+        shutil.rmtree(shared)
+    migration_flag = DATA_DIR / ".dtd_shared_migrated"
+    migration_flag.unlink(missing_ok=True)
     yield
     dtd_routes._schema_registry.clear()
     generate_routes._last_generated.clear()
+    if shared.is_dir():
+        shutil.rmtree(shared)
+    migration_flag.unlink(missing_ok=True)
 
 
 @pytest.fixture

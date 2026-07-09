@@ -5,6 +5,12 @@
         <span class="panel-title">Схема DTD</span>
         <span v-if="schemaId && collapsed" class="dtd-header-status">
           ✓ {{ fileName }} · {{ elementCountLabel }}
+          <template v-if="importSourceLabel">
+            · {{ importSourceLabel }}
+          </template>
+          <template v-if="updatedAtLabel">
+            · {{ updatedAtLabel }}
+          </template>
         </span>
       </div>
       <span class="collapse-arrow" :class="{ rotated: collapsed }">▼</span>
@@ -14,6 +20,8 @@
         :is-loaded="!!schemaId"
         :file-name="fileName"
         :element-count="elementCount"
+        :import-source="importSource"
+        :updated-at="updatedAt"
         @uploaded="$emit('uploaded', $event)"
       />
     </div>
@@ -21,17 +29,29 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import DtdUpload from '../DtdUpload.vue'
+import { formatDtdUpdatedAt } from '../../utils/dtdSchema'
 
-defineProps({
+const props = defineProps({
   schemaId: { type: String, default: '' },
   collapsed: { type: Boolean, default: false },
   fileName: { type: String, default: '' },
   elementCount: { type: Number, default: 0 },
   elementCountLabel: { type: String, default: '' },
+  importSource: { type: String, default: '' },
+  updatedAt: { type: String, default: '' },
 })
 
 defineEmits(['toggle-collapse', 'uploaded'])
+
+const importSourceLabel = computed(() =>
+  props.importSource ? `Источник: ${props.importSource}` : '',
+)
+const updatedAtLabel = computed(() => {
+  const formatted = formatDtdUpdatedAt(props.updatedAt)
+  return formatted ? `обновлено ${formatted}` : ''
+})
 </script>
 
 <style scoped>

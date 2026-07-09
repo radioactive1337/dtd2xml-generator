@@ -58,7 +58,9 @@ def test_validate_schema_not_found(client: TestClient):
 
 
 def test_validate_uses_merged_schemas_from_registry(client: TestClient):
-    dtd_dir = _dev_user().dtd_dir
+    from app.config import shared_dtd_dir
+
+    dtd_dir = shared_dtd_dir()
     dtd_dir.mkdir(parents=True, exist_ok=True)
 
     uploads = [
@@ -86,7 +88,9 @@ def test_validate_uses_merged_schemas_from_registry(client: TestClient):
 
 
 def _upload_fixture(client: TestClient) -> str:
-    dtd_dir = _dev_user().dtd_dir
+    from app.config import shared_dtd_dir
+
+    dtd_dir = shared_dtd_dir()
     dtd_dir.mkdir(parents=True, exist_ok=True)
     (dtd_dir / "types.dtd").write_bytes((FIXTURES / "types.dtd").read_bytes())
 

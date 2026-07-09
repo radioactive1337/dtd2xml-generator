@@ -14,12 +14,20 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
-def dtd_user(tmp_path: Path) -> UserContext:
+def dtd_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> UserContext:
     root = tmp_path / "jar-user"
     root.mkdir(parents=True, exist_ok=True)
-    ctx = UserContext(user_id="jar-test", display_name="jar", root=root)
-    ctx.dtd_dir.mkdir(parents=True, exist_ok=True)
-    return ctx
+    dtd_dir = root / "dtd_schemas"
+    dtd_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(dtd_routes, "_dtd_dir", lambda: dtd_dir)
+    migration_flag = tmp_path / ".dtd_shared_migrated"
+    migration_flag.write_text("test\n", encoding="utf-8")
+    monkeypatch.setattr(dtd_routes, "_migration_flag_path", lambda: migration_flag)
+    return UserContext(user_id="jar-test", display_name="jar", root=root)
+
+
+def _shared_dir(dtd_user: UserContext) -> Path:
+    return dtd_user.root / "dtd_schemas"
 
 
 def _build_jar(entries: dict[str, bytes]) -> bytes:
@@ -36,17 +44,17 @@ def _upload_jar_from_bytes(
     *,
     inner_path: str = "META-INF/dtd/",
 ) -> dtd_routes.MultiSchemaResponse:
-    extracted = extract_jar_dtd_files(jar_bytes, dtd_user.dtd_dir, prefix=inner_path)
-    entry_points = dtd_routes._entry_point_paths(dtd_user.dtd_dir)
+    shared = _shared_dir(dtd_user)
+    extracted = extract_jar_dtd_files(jar_bytes, shared, prefix=inner_path)
+    entry_points = dtd_routes._entry_point_paths(shared)
     if not entry_points:
         raise LookupError(f"No .dtd entry points found in {inner_path}")
 
     schema_ids = dtd_routes._parse_entry_points(
-        dtd_user,
         entry_points,
         available_basenames=set(extracted),
     )
-    return dtd_routes._multi_schema_response(dtd_user, schema_ids)
+    return dtd_routes._multi_schema_response(schema_ids)
 
 
 def test_upload_jar_parses_all_entry_points_and_cleans_stale_files(dtd_user: UserContext):
@@ -77,9 +85,10 @@ def test_upload_jar_parses_all_entry_points_and_cleans_stale_files(dtd_user: Use
     }
     assert source_basenames == {"v1.dtd", "v2.dtd", "types.dtd"}
 
-    assert (dtd_user.dtd_dir / "v2.dtd").is_file()
-    assert (dtd_user.dtd_dir / "v1.dtd").is_file()
-    assert (dtd_user.dtd_dir / "types.dtd").is_file()
+    shared = _shared_dir(dtd_user)
+    assert (shared / "v2.dtd").is_file()
+    assert (shared / "v1.dtd").is_file()
+    assert (shared / "types.dtd").is_file()
 
 
 def test_upload_jar_no_entry_points(dtd_user: UserContext):

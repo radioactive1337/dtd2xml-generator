@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
+import shutil
 import uuid
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +19,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app.auth.sessions import get_current_user
-from app.config import get_nexus_dtd_config
+from app.config import DATA_DIR, PROJECT_ROOT, get_nexus_dtd_config, shared_dtd_dir
 from app.core.dtd_archive import extract_jar_dtd_files
 from app.core.dtd_merge import merge_dtd_schemas
 from app.core.dtd_models import DTDSchema, ElementDef
@@ -48,17 +51,123 @@ async def _read_upload_limited(file: UploadFile, max_bytes: int, label: str) -> 
     return data
 
 
-# user_id -> schema_id -> DTDSchema
-_schema_registry: dict[str, dict[str, DTDSchema]] = {}
+# schema_id -> DTDSchema (shared across all users)
+_schema_registry: dict[str, DTDSchema] = {}
 
-# Legacy export for tests (dev-user path)
+# Legacy export for tests
 DTD_SCHEMA_DIR: Path | None = None
 
+_IMPORT_META_FILE = "import_meta.json"
 
-def _user_registry(user: UserContext) -> dict[str, DTDSchema]:
-    if user.user_id not in _schema_registry:
-        _schema_registry[user.user_id] = {}
-    return _schema_registry[user.user_id]
+
+def _migration_flag_path() -> Path:
+    return DATA_DIR / ".dtd_shared_migrated"
+
+
+def _dtd_dir() -> Path:
+    return shared_dtd_dir()
+
+
+def _registry() -> dict[str, DTDSchema]:
+    return _schema_registry
+
+
+def _user_registry(_user: UserContext | None = None) -> dict[str, DTDSchema]:
+    """Backward-compatible alias used by tests."""
+    return _registry()
+
+
+class DtdImportMeta(BaseModel):
+    import_source: str
+    updated_at: str
+    updated_by: str | None = None
+
+
+def _read_import_meta() -> DtdImportMeta | None:
+    meta_path = _dtd_dir() / _IMPORT_META_FILE
+    if not meta_path.is_file():
+        return None
+    try:
+        raw = json.loads(meta_path.read_text(encoding="utf-8"))
+        return DtdImportMeta(**raw)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def _write_import_meta(
+    import_source: str,
+    *,
+    updated_by: str | None = None,
+) -> DtdImportMeta:
+    meta = DtdImportMeta(
+        import_source=import_source,
+        updated_at=datetime.now(UTC).isoformat(),
+        updated_by=updated_by,
+    )
+    (_dtd_dir() / _IMPORT_META_FILE).write_text(
+        json.dumps(meta.model_dump(), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return meta
+
+
+def _import_meta_fields() -> dict[str, str | None]:
+    meta = _read_import_meta()
+    if meta is None:
+        return {"import_source": None, "updated_at": None}
+    return {
+        "import_source": meta.import_source,
+        "updated_at": meta.updated_at,
+    }
+
+
+def _dir_has_dtd_files(directory: Path) -> bool:
+    if not directory.is_dir():
+        return False
+    return any(
+        path.is_file() and path.suffix.lower() in DTD_EXTENSIONS
+        for path in directory.iterdir()
+    )
+
+
+def _copy_dtd_tree(src: Path, dst: Path) -> None:
+    dst.mkdir(parents=True, exist_ok=True)
+    for item in src.iterdir():
+        if not item.is_file():
+            continue
+        target = dst / item.name
+        if not target.exists():
+            shutil.copy2(item, target)
+
+
+def _maybe_migrate_to_shared_dtd() -> None:
+    """One-time copy of legacy per-user or project-root DTD files into shared storage."""
+    flag = _migration_flag_path()
+    if flag.is_file():
+        return
+
+    shared = _dtd_dir()
+    if _dir_has_dtd_files(shared):
+        flag.parent.mkdir(parents=True, exist_ok=True)
+        flag.write_text("already_shared\n", encoding="utf-8")
+        return
+
+    candidates: list[Path] = [PROJECT_ROOT / "dtd_schemas"]
+    users_root = DATA_DIR / "users"
+    if users_root.is_dir():
+        for user_dir in sorted(users_root.iterdir()):
+            user_dtd = user_dir / "dtd_schemas"
+            if _dir_has_dtd_files(user_dtd):
+                candidates.append(user_dtd)
+
+    for candidate in candidates:
+        if _dir_has_dtd_files(candidate):
+            _copy_dtd_tree(candidate, shared)
+            logger.info("Migrated DTD schemas to shared storage from %s", candidate)
+            break
+
+    flag.parent.mkdir(parents=True, exist_ok=True)
+    flag.write_text("done\n", encoding="utf-8")
 
 
 def _schema_id_sidecar(dtd_path: Path) -> Path:
@@ -78,16 +187,15 @@ def _write_schema_id(dtd_path: Path, schema_id: str) -> None:
 
 
 def _parse_and_register(
-    user: UserContext,
     dtd_path: Path,
     schema_id: str | None = None,
 ) -> str:
-    parser = DTDParser(base_dir=user.dtd_dir)
+    parser = DTDParser(base_dir=_dtd_dir())
     schema = parser.parse_file(dtd_path)
 
     sid = schema_id or _read_schema_id(dtd_path) or str(uuid.uuid4())
     _write_schema_id(dtd_path, sid)
-    _user_registry(user)[sid] = schema
+    _registry()[sid] = schema
     return sid
 
 
@@ -156,7 +264,6 @@ def _entry_point_paths(schema_dir: Path) -> list[Path]:
 
 
 def _parse_entry_points(
-    user: UserContext,
     entry_paths: list[Path],
     *,
     available_basenames: set[str],
@@ -168,17 +275,15 @@ def _parse_entry_points(
     for entry_path in entry_paths:
         _validate_dtd_references(entry_path, available_basenames)
         schema_id = _parse_and_register(
-            user,
             entry_path,
             schema_id=_read_schema_id(entry_path),
         )
-        schema = _user_registry(user)[schema_id]
+        schema = _registry()[schema_id]
         schema_ids.append(schema_id)
         keep_schema_ids.add(schema_id)
         keep_basenames.update(_source_basenames(schema))
 
     _cleanup_schema_storage(
-        user,
         keep_basenames=keep_basenames,
         keep_schema_ids=keep_schema_ids,
     )
@@ -194,22 +299,24 @@ def _delete_schema_artifacts(path: Path) -> None:
 
 
 def _cleanup_schema_storage(
-    user: UserContext,
     *,
     keep_basenames: set[str],
     keep_schema_ids: set[str],
 ) -> None:
-    registry = _user_registry(user)
+    registry = _registry()
     for schema_id in list(registry):
         if schema_id not in keep_schema_ids:
             del registry[schema_id]
 
-    schema_dir = user.dtd_dir
+    schema_dir = _dtd_dir()
     if not schema_dir.is_dir():
         return
 
     for path in list(schema_dir.iterdir()):
         if not path.is_file():
+            continue
+
+        if path.name == _IMPORT_META_FILE:
             continue
 
         if path.name.endswith(".schema_id"):
@@ -222,34 +329,31 @@ def _cleanup_schema_storage(
             _delete_schema_artifacts(path)
 
 
-def ensure_user_registry_loaded(user: UserContext) -> int:
-    """Scan user's dtd_schemas/ and load all entry points if registry is empty."""
-    registry = _user_registry(user)
+def ensure_user_registry_loaded(_user: UserContext | None = None) -> int:
+    """Scan shared dtd_schemas/ and load all entry points if registry is empty."""
+    _maybe_migrate_to_shared_dtd()
+    registry = _registry()
     if registry:
         return len(registry)
 
-    user.dtd_dir.mkdir(parents=True, exist_ok=True)
-    entry_points = _entry_point_paths(user.dtd_dir)
+    schema_dir = _dtd_dir()
+    entry_points = _entry_point_paths(schema_dir)
     if not entry_points:
         return 0
 
     available_basenames = {
-        path.name for path in user.dtd_dir.iterdir() if path.is_file()
+        path.name for path in schema_dir.iterdir() if path.is_file()
     }
     loaded = 0
 
     try:
         schema_ids = _parse_entry_points(
-            user,
             entry_points,
             available_basenames=available_basenames,
         )
         loaded = len(schema_ids)
     except Exception:
-        logger.exception(
-            "Failed to load DTD schemas from disk [user=%s]",
-            user.display_name,
-        )
+        logger.exception("Failed to load DTD schemas from shared storage")
         return 0
 
     for schema_id in schema_ids:
@@ -262,8 +366,7 @@ def ensure_user_registry_loaded(user: UserContext) -> int:
             schema_id,
         )
         logger.info(
-            "Loaded DTD schema from disk [user=%s file=%s schema_id=%s]",
-            user.display_name,
+            "Loaded DTD schema from disk [file=%s schema_id=%s]",
             primary_name,
             schema_id,
         )
@@ -271,7 +374,7 @@ def ensure_user_registry_loaded(user: UserContext) -> int:
 
 
 def initialize_schema_registry() -> int:
-    """Legacy startup hook — no-op; registries load lazily per user."""
+    """Legacy startup hook — no-op; registry loads lazily on first access."""
     return 0
 
 
@@ -294,6 +397,14 @@ class SchemaResponse(BaseModel):
 class MultiSchemaResponse(BaseModel):
     schemas: list[SchemaResponse]
     primary_schema_id: str
+    import_source: str | None = None
+    updated_at: str | None = None
+
+
+class SchemaListResponse(BaseModel):
+    schemas: list[SchemaResponse]
+    import_source: str | None = None
+    updated_at: str | None = None
 
 
 class NexusDtdConfigResponse(BaseModel):
@@ -316,8 +427,8 @@ def _known_element_names(schema: DTDSchema) -> list[str]:
     return sorted(schema.elements)
 
 
-def _schema_response(user: UserContext, schema_id: str) -> SchemaResponse:
-    schema = _user_registry(user)[schema_id]
+def _schema_response(schema_id: str) -> SchemaResponse:
+    schema = _registry()[schema_id]
     return SchemaResponse(
         schema_id=schema_id,
         source_files=schema.source_files,
@@ -326,22 +437,22 @@ def _schema_response(user: UserContext, schema_id: str) -> SchemaResponse:
     )
 
 
-def _multi_schema_response(user: UserContext, schema_ids: list[str]) -> MultiSchemaResponse:
-    schemas = [_schema_response(user, schema_id) for schema_id in schema_ids]
+def _multi_schema_response(schema_ids: list[str]) -> MultiSchemaResponse:
+    schemas = [_schema_response(schema_id) for schema_id in schema_ids]
     return MultiSchemaResponse(
         schemas=schemas,
         primary_schema_id=_pick_primary_schema_id(schemas),
+        **_import_meta_fields(),
     )
 
 
 async def _extract_and_parse_jar(
-    user: UserContext,
     jar_bytes: bytes,
     *,
     inner_path: str,
 ) -> list[str]:
-    extracted = extract_jar_dtd_files(jar_bytes, user.dtd_dir, prefix=inner_path)
-    entry_points = _entry_point_paths(user.dtd_dir)
+    extracted = extract_jar_dtd_files(jar_bytes, _dtd_dir(), prefix=inner_path)
+    entry_points = _entry_point_paths(_dtd_dir())
     if not entry_points:
         raise HTTPException(
             status_code=404,
@@ -352,7 +463,6 @@ async def _extract_and_parse_jar(
     try:
         return await asyncio.to_thread(
             _parse_entry_points,
-            user,
             entry_points,
             available_basenames=available_basenames,
         )
@@ -415,26 +525,25 @@ async def upload_dtd(
                 detail="Only .dtd files are supported (up to 3 at once)",
             )
 
-    user.dtd_dir.mkdir(parents=True, exist_ok=True)
+    _dtd_dir().mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
     for upload in files:
         content = await _read_upload_limited(
             upload, _MAX_DTD_FILE_BYTES, upload.filename or "DTD file"
         )
-        saved_path = user.dtd_dir / upload.filename
+        saved_path = _dtd_dir() / upload.filename
         async with aiofiles.open(saved_path, "wb") as f:
             await f.write(content)
         saved_paths.append(saved_path)
 
     available_basenames = {
-        path.name for path in user.dtd_dir.iterdir() if path.is_file()
+        path.name for path in _dtd_dir().iterdir() if path.is_file()
     }
 
     try:
         schema_ids = await asyncio.to_thread(
             _parse_entry_points,
-            user,
             saved_paths,
             available_basenames=available_basenames,
         )
@@ -449,7 +558,12 @@ async def upload_dtd(
             status_code=422, detail=f"DTD parsing failed: {exc}"
         ) from exc
 
-    return _multi_schema_response(user, schema_ids)
+    file_names = ", ".join(upload.filename for upload in files if upload.filename)
+    _write_import_meta(
+        f"Загрузка: {file_names}",
+        updated_by=user.display_name,
+    )
+    return _multi_schema_response(schema_ids)
 
 
 @router.post("/upload-jar", response_model=MultiSchemaResponse)
@@ -464,14 +578,13 @@ async def upload_dtd_jar(
     if not file.filename.lower().endswith(".jar"):
         raise HTTPException(status_code=400, detail="Only .jar files are supported")
 
-    user.dtd_dir.mkdir(parents=True, exist_ok=True)
+    _dtd_dir().mkdir(parents=True, exist_ok=True)
     jar_bytes = await _read_upload_limited(
         file, _MAX_JAR_FILE_BYTES, file.filename or "JAR file"
     )
 
     try:
         schema_ids = await _extract_and_parse_jar(
-            user,
             jar_bytes,
             inner_path=inner_path,
         )
@@ -480,7 +593,11 @@ async def upload_dtd_jar(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return _multi_schema_response(user, schema_ids)
+    _write_import_meta(
+        f"JAR: {file.filename}",
+        updated_by=user.display_name,
+    )
+    return _multi_schema_response(schema_ids)
 
 
 @router.get("/nexus-config", response_model=NexusDtdConfigResponse)
@@ -503,7 +620,7 @@ async def pull_dtd_from_nexus(
     if cfg is None:
         raise HTTPException(status_code=404, detail="nexus_dtd is not configured")
 
-    user.dtd_dir.mkdir(parents=True, exist_ok=True)
+    _dtd_dir().mkdir(parents=True, exist_ok=True)
 
     try:
         jar_url, resolved_version = await resolve_jar_url(cfg)
@@ -521,7 +638,6 @@ async def pull_dtd_from_nexus(
 
     try:
         schema_ids = await _extract_and_parse_jar(
-            user,
             jar_bytes,
             inner_path=cfg.inner_path,
         )
@@ -530,28 +646,36 @@ async def pull_dtd_from_nexus(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    version_label = resolved_version or cfg.version or "LATEST"
+    _write_import_meta(
+        f"Nexus {cfg.artifact_id}:{version_label}",
+        updated_by=user.display_name,
+    )
     logger.info(
         "DTD schemas pulled from Nexus [user=%s artifact=%s version=%s]",
         user.display_name,
         cfg.artifact_id,
         resolved_version,
     )
-    return _multi_schema_response(user, schema_ids)
+    return _multi_schema_response(schema_ids)
 
 
-@router.get("/schemas", response_model=list[SchemaResponse])
-async def list_schemas(user: UserContext = Depends(get_current_user)) -> list[SchemaResponse]:
+@router.get("/schemas", response_model=SchemaListResponse)
+async def list_schemas(user: UserContext = Depends(get_current_user)) -> SchemaListResponse:
     ensure_user_registry_loaded(user)
-    registry = _user_registry(user)
-    return [
-        SchemaResponse(
-            schema_id=sid,
-            source_files=schema.source_files,
-            element_count=len(schema.elements),
-            elements=_known_element_names(schema),
-        )
-        for sid, schema in registry.items()
-    ]
+    registry = _registry()
+    return SchemaListResponse(
+        schemas=[
+            SchemaResponse(
+                schema_id=sid,
+                source_files=schema.source_files,
+                element_count=len(schema.elements),
+                elements=_known_element_names(schema),
+            )
+            for sid, schema in registry.items()
+        ],
+        **_import_meta_fields(),
+    )
 
 
 @router.get("/{schema_id}/elements", response_model=list[ElementSummary])
@@ -604,18 +728,18 @@ async def get_element_tree(
     }
 
 
-def _get_schema(user: UserContext, schema_id: str) -> DTDSchema:
-    ensure_user_registry_loaded(user)
-    registry = _user_registry(user)
+def _get_schema(_user: UserContext, schema_id: str) -> DTDSchema:
+    ensure_user_registry_loaded(_user)
+    registry = _registry()
     if schema_id not in registry:
         raise HTTPException(status_code=404, detail=f"Schema '{schema_id}' not found")
     return registry[schema_id]
 
 
-def get_schema_registry(user: UserContext) -> dict[str, DTDSchema]:
+def get_schema_registry(user: UserContext | None = None) -> dict[str, DTDSchema]:
     """Expose registry for other modules."""
     ensure_user_registry_loaded(user)
-    return _user_registry(user)
+    return _registry()
 
 
 def get_merged_schema(user: UserContext, schema_id: str) -> DTDSchema:
