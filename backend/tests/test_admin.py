@@ -76,6 +76,38 @@ def test_admin_list_users(auth_client: TestClient):
     assert "charlie" in names
 
 
+def test_admin_create_user(auth_client: TestClient):
+    admin_client = TestClient(auth_client.app)
+    _login_admin(admin_client)
+
+    response = admin_client.post("/api/admin/users", json={"username": "newbie"})
+    assert response.status_code == 201
+    data = response.json()
+    assert data["display_name"] == "newbie"
+    assert data["is_admin"] is False
+    assert data["presets_count"] == 0
+
+    names = {u["display_name"] for u in admin_client.get("/api/admin/users").json()["users"]}
+    assert "newbie" in names
+
+
+def test_admin_create_user_duplicate(auth_client: TestClient):
+    admin_client = TestClient(auth_client.app)
+    _login_admin(admin_client)
+    admin_client.post("/api/admin/users", json={"username": "dup"})
+
+    response = admin_client.post("/api/admin/users", json={"username": "dup"})
+    assert response.status_code == 409
+
+
+def test_admin_create_user_requires_admin(auth_client: TestClient):
+    bob_client = TestClient(auth_client.app)
+    login_as(bob_client, "bob", create=True)
+
+    response = bob_client.post("/api/admin/users", json={"username": "hacker"})
+    assert response.status_code == 403
+
+
 def test_admin_delete_user(auth_client: TestClient):
     admin_client = TestClient(auth_client.app)
     _login_admin(admin_client)

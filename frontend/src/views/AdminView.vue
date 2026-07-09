@@ -76,8 +76,28 @@
         <section class="admin-section">
           <div class="section-header">
             <h3>Пользователи</h3>
-            <span class="user-count">{{ users.length }} всего</span>
+            <div class="section-actions">
+              <span class="user-count">{{ users.length }} всего</span>
+              <button class="btn-secondary btn-small" @click="showAddUser = !showAddUser">
+                {{ showAddUser ? 'Отмена' : '+ Добавить' }}
+              </button>
+            </div>
           </div>
+
+          <form v-if="showAddUser" class="add-user-form" @submit.prevent="handleCreateUser">
+            <input
+              v-model.trim="newUsername"
+              type="text"
+              placeholder="Имя пользователя"
+              maxlength="64"
+              :disabled="creatingUser"
+              required
+            />
+            <button class="btn-primary btn-small" type="submit" :disabled="creatingUser || !newUsername">
+              {{ creatingUser ? 'Создание…' : 'Создать' }}
+            </button>
+          </form>
+          <p v-if="createError" class="error-msg">{{ createError }}</p>
 
           <table v-if="users.length" class="users-table">
             <thead>
@@ -139,6 +159,10 @@ const backingUp = ref(false)
 const backupError = ref('')
 const deletingId = ref(null)
 const deleteError = ref('')
+const showAddUser = ref(false)
+const newUsername = ref('')
+const creatingUser = ref(false)
+const createError = ref('')
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B'
@@ -207,6 +231,28 @@ async function saveSettings() {
     settingsError.value = err.message || 'Не удалось сохранить настройки'
   } finally {
     savingSettings.value = false
+  }
+}
+
+async function handleCreateUser() {
+  if (!newUsername.value) return
+
+  creatingUser.value = true
+  createError.value = ''
+  try {
+    const created = await adminApi.createAdminUser(newUsername.value)
+    users.value = [...users.value, created].sort((a, b) =>
+      a.display_name.localeCompare(b.display_name, 'ru', { sensitivity: 'base' }),
+    )
+    if (stats.value) {
+      stats.value = { ...stats.value, users_count: users.value.length }
+    }
+    newUsername.value = ''
+    showAddUser.value = false
+  } catch (err) {
+    createError.value = err.message || 'Не удалось создать пользователя'
+  } finally {
+    creatingUser.value = false
   }
 }
 
@@ -292,6 +338,34 @@ onMounted(loadAll)
 .user-count {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.add-user-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.add-user-form input {
+  flex: 1;
+  max-width: 280px;
+  padding: 8px 12px;
+  font-size: 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+
+.add-user-form input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .stats-grid {

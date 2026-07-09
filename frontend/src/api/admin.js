@@ -10,6 +10,11 @@ export async function fetchAdminUsers() {
   return data
 }
 
+export async function createAdminUser(username) {
+  const { data } = await client.post('/admin/users', { username })
+  return data
+}
+
 export async function deleteAdminUser(userId) {
   const { data } = await client.delete(`/admin/users/${userId}`)
   return data

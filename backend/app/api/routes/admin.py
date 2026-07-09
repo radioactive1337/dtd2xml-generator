@@ -14,13 +14,13 @@ from pydantic import BaseModel
 
 from app import config
 from app.auth.sessions import get_current_admin
-from app.auth.users import delete_user, get_user_by_id, list_all_users
+from app.auth.users import create_user, delete_user, get_user_by_id, list_all_users, validate_username
 from app.config import (
     is_allow_self_registration,
     load_app_settings,
     shared_dtd_dir,
 )
-from app.user_context import UserContext
+from app.user_context import UserContext, user_context_from_record
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -58,6 +58,25 @@ class AdminSettingsResponse(BaseModel):
 
 class AdminSettingsUpdate(BaseModel):
     allow_self_registration: bool | None = None
+
+
+class AdminCreateUserRequest(BaseModel):
+    username: str
+
+
+def _user_to_admin_info(user) -> AdminUserInfo:
+    presets, mapping, xml_docs, workspace_bytes = _user_workspace_stats(user.id)
+    return AdminUserInfo(
+        id=user.id,
+        display_name=user.display_name,
+        created_at=user.created_at,
+        last_seen=user.last_seen,
+        is_admin=user.is_admin,
+        presets_count=presets,
+        mapping_presets_count=mapping,
+        xml_documents_count=xml_docs,
+        workspace_bytes=workspace_bytes,
+    )
 
 
 def _count_json_files(directory: Path) -> int:
@@ -125,21 +144,27 @@ async def admin_list_users(_admin: UserContext = Depends(get_current_admin)) -> 
     users = list_all_users()
     items: list[AdminUserInfo] = []
     for user in users:
-        presets, mapping, xml_docs, workspace_bytes = _user_workspace_stats(user.id)
-        items.append(
-            AdminUserInfo(
-                id=user.id,
-                display_name=user.display_name,
-                created_at=user.created_at,
-                last_seen=user.last_seen,
-                is_admin=user.is_admin,
-                presets_count=presets,
-                mapping_presets_count=mapping,
-                xml_documents_count=xml_docs,
-                workspace_bytes=workspace_bytes,
-            )
-        )
+        items.append(_user_to_admin_info(user))
     return AdminUsersResponse(users=items, total=len(items))
+
+
+@router.post("/users", response_model=AdminUserInfo, status_code=201)
+async def admin_create_user(
+    body: AdminCreateUserRequest,
+    _admin: UserContext = Depends(get_current_admin),
+) -> AdminUserInfo:
+    try:
+        display = validate_username(body.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        record = create_user(display)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    user_context_from_record(record)
+    return _user_to_admin_info(record)
 
 
 @router.delete("/users/{user_id}")
