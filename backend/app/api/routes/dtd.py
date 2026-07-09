@@ -519,7 +519,12 @@ async def upload_dtd(
     for upload in files:
         if not upload.filename:
             raise HTTPException(status_code=400, detail="Filename is required")
-        if not upload.filename.lower().endswith(".dtd"):
+        filename = Path(upload.filename).name
+        if not filename:
+            raise HTTPException(status_code=400, detail="Filename is required")
+        if filename.startswith("."):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        if not filename.lower().endswith(".dtd"):
             raise HTTPException(
                 status_code=400,
                 detail="Only .dtd files are supported (up to 3 at once)",
@@ -529,10 +534,11 @@ async def upload_dtd(
     saved_paths: list[Path] = []
 
     for upload in files:
+        filename = Path(upload.filename).name
         content = await _read_upload_limited(
-            upload, _MAX_DTD_FILE_BYTES, upload.filename or "DTD file"
+            upload, _MAX_DTD_FILE_BYTES, filename
         )
-        saved_path = _dtd_dir() / upload.filename
+        saved_path = _dtd_dir() / filename
         async with aiofiles.open(saved_path, "wb") as f:
             await f.write(content)
         saved_paths.append(saved_path)
@@ -558,7 +564,7 @@ async def upload_dtd(
             status_code=422, detail=f"DTD parsing failed: {exc}"
         ) from exc
 
-    file_names = ", ".join(upload.filename for upload in files if upload.filename)
+    file_names = ", ".join(Path(upload.filename).name for upload in files)
     _write_import_meta(
         f"Загрузка: {file_names}",
         updated_by=user.display_name,

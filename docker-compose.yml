@@ -7,8 +7,9 @@ services:
       - ./config:/app/config
       - ./data:/app/data
     environment:
-      - ALLOW_SELF_REGISTRATION=true
-      # - SESSION_SECRET=replace-with-random-value-on-production
+      - ALLOW_SELF_REGISTRATION=false
+      # - SESSION_SECURE=1
+      # - SESSION_SECRET=replace-with-random-value- openssl rand -hex 32
     extra_hosts:
       - "host.docker.internal:host-gateway"
     init: true
