@@ -2,6 +2,7 @@
 connections.json
 config/connections.json
 config/app.json
+data/
 
 # Python
 __pycache__/

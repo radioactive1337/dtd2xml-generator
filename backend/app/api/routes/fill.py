@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from typing import Literal
 
@@ -27,6 +28,12 @@ from app.user_context import UserContext
 
 router = APIRouter(prefix="/fill", tags=["fill"])
 logger = logging.getLogger(__name__)
+
+# Allow at most this many LLM requests to run concurrently across all users.
+# Keeps the LLM backend responsive and prevents a single runaway client from
+# starving everyone else.  Adjust via env var LLM_CONCURRENCY if needed.
+_LLM_CONCURRENCY = int(os.getenv("LLM_CONCURRENCY", "5"))
+_llm_semaphore = asyncio.Semaphore(_LLM_CONCURRENCY)
 
 # fmt: off
 Strategy = Literal[
@@ -208,18 +215,19 @@ async def execute_fill(
             async def llm_progress(step: str, message: str, percent: int) -> None:
                 await on_progress(step, message, percent)
 
-            result = await populate_with_llm(
-                xml,
-                schema,
-                user,
-                alias=resolved_llm,
-                fill_empty_only=fill_empty_only,
-                protected_attrs=protected_attrs,
-                on_progress=llm_progress,
-                progress_base=llm_percent,
-                progress_span=50 if request.strategy == "hybrid_db_ai" else 75,
-                cancel_event=cancel_event,
-            )
+            async with _llm_semaphore:
+                result = await populate_with_llm(
+                    xml,
+                    schema,
+                    user,
+                    alias=resolved_llm,
+                    fill_empty_only=fill_empty_only,
+                    protected_attrs=protected_attrs,
+                    on_progress=llm_progress,
+                    progress_base=llm_percent,
+                    progress_span=50 if request.strategy == "hybrid_db_ai" else 75,
+                    cancel_event=cancel_event,
+                )
             if request.strategy == "hybrid_db_ai":
                 await on_progress(
                     "faker_fallback",
@@ -288,14 +296,15 @@ async def suggest_field_mappings_route(
     resolved_llm = resolve_llm_alias(user, request.llm_alias)
 
     try:
-        mappings, matcher = await suggest_field_mappings_service(
-            schema,
-            target_element,
-            columns,
-            user,
-            existing_pairs=existing,
-            llm_alias=resolved_llm,
-        )
+        async with _llm_semaphore:
+            mappings, matcher = await suggest_field_mappings_service(
+                schema,
+                target_element,
+                columns,
+                user,
+                existing_pairs=existing,
+                llm_alias=resolved_llm,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

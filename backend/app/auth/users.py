@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,6 +18,9 @@ _USERNAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{2,64}$")
 
 def _db_path() -> Path:
     return DATA_DIR / "users.db"
+
+
+_thread_local = threading.local()
 
 
 @dataclass(frozen=True)
@@ -45,9 +49,17 @@ def validate_username(username: str) -> str:
 
 
 def _connect() -> sqlite3.Connection:
+    conn: sqlite3.Connection | None = getattr(_thread_local, "conn", None)
+    if conn is not None:
+        return conn
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(_db_path(), check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # WAL allows concurrent readers without blocking writers and is significantly
+    # faster for the write-heavy touch_user() pattern (one write per request).
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    _thread_local.conn = conn
     return conn
 
 

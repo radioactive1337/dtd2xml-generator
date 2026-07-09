@@ -29,6 +29,25 @@ logger = logging.getLogger(__name__)
 
 DTD_EXTENSIONS = (".dtd", ".ent", ".mod")
 
+_MAX_DTD_FILE_BYTES = 2 * 1024 * 1024   # 2 MB per DTD file
+_MAX_JAR_FILE_BYTES = 50 * 1024 * 1024  # 50 MB for JAR archive
+
+
+async def _read_upload_limited(file: UploadFile, max_bytes: int, label: str) -> bytes:
+    """Read an uploaded file, refusing payloads that exceed *max_bytes*.
+
+    Reads at most ``max_bytes + 1`` bytes from the stream so oversized uploads
+    never fully land in RAM before we reject them.
+    """
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{label} exceeds maximum allowed size ({max_bytes // (1024 * 1024)} MB)",
+        )
+    return data
+
+
 # user_id -> schema_id -> DTDSchema
 _schema_registry: dict[str, dict[str, DTDSchema]] = {}
 
@@ -400,8 +419,10 @@ async def upload_dtd(
     saved_paths: list[Path] = []
 
     for upload in files:
+        content = await _read_upload_limited(
+            upload, _MAX_DTD_FILE_BYTES, upload.filename or "DTD file"
+        )
         saved_path = user.dtd_dir / upload.filename
-        content = await upload.read()
         async with aiofiles.open(saved_path, "wb") as f:
             await f.write(content)
         saved_paths.append(saved_path)
@@ -444,7 +465,9 @@ async def upload_dtd_jar(
         raise HTTPException(status_code=400, detail="Only .jar files are supported")
 
     user.dtd_dir.mkdir(parents=True, exist_ok=True)
-    jar_bytes = await file.read()
+    jar_bytes = await _read_upload_limited(
+        file, _MAX_JAR_FILE_BYTES, file.filename or "JAR file"
+    )
 
     try:
         schema_ids = await _extract_and_parse_jar(

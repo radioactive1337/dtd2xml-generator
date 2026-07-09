@@ -83,7 +83,10 @@ def validate_xml(xml_text: str, schema: DTDSchema) -> ValidationResult:
             errors=[ValidationError(line=0, column=0, message=f"DTD error: {exc}")],
         )
 
-    validation_root = normalize_xml_for_dtd_validation(root)
+    # Normalization strips sourceline info from elements (lxml sets it read-only during
+    # parsing only). Skip it when no namespace prefixes are present — which covers
+    # virtually all DTD-validated XML — so error_log entries get correct line numbers.
+    validation_root = normalize_xml_for_dtd_validation(root) if root.nsmap else root
 
     try:
         dtd.assertValid(validation_root)
