@@ -22,6 +22,7 @@ export function useGeneratorXml({
   generating,
   filling,
   dtdCollapsed,
+  ytext,
 }) {
   const xmlText = ref('')
   const xmlDirty = ref(false)
@@ -68,6 +69,10 @@ export function useGeneratorXml({
   }
 
   function getEditorXmlText() {
+    const activeYtext = ytext?.value
+    if (activeYtext) {
+      return activeYtext.toString()
+    }
     return xmlEditorRef.value?.getValue?.() ?? xmlText.value
   }
 
@@ -75,10 +80,20 @@ export function useGeneratorXml({
     ignoreNextXmlWatch = true
     const xml = text || ''
     liveXmlText.value = xml
-    xmlText.value = xml
+    const activeYtext = ytext?.value
+    if (activeYtext) {
+      const doc = activeYtext.doc
+      doc.transact(() => {
+        activeYtext.delete(0, activeYtext.length)
+        if (xml) activeYtext.insert(0, xml)
+      })
+      xmlText.value = xml
+    } else {
+      xmlText.value = xml
+      await nextTick()
+      xmlEditorRef.value?.setValue?.(xml)
+    }
     xmlDirty.value = dirty
-    await nextTick()
-    xmlEditorRef.value?.setValue?.(xml)
     ignoreNextXmlWatch = false
   }
 
@@ -89,6 +104,29 @@ export function useGeneratorXml({
     xmlDirty.value = true
     scheduleTreeSyncFromEditor()
   }
+
+  function onYtextChange() {
+    if (ignoreNextXmlWatch || generating.value || filling.value) return
+    const activeYtext = ytext?.value
+    if (!activeYtext) return
+    const text = activeYtext.toString()
+    liveXmlText.value = text
+    xmlText.value = text
+    xmlDirty.value = true
+    scheduleTreeSyncFromEditor()
+  }
+
+  watch(
+    () => ytext?.value,
+    (activeYtext, _, onCleanup) => {
+      if (!activeYtext) return
+      const handler = () => onYtextChange()
+      activeYtext.observe(handler)
+      onYtextChange()
+      onCleanup(() => activeYtext.unobserve(handler))
+    },
+    { immediate: true },
+  )
 
   function scheduleTreeSyncFromEditor() {
     if (mode.value !== 'custom') return

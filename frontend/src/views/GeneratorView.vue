@@ -160,6 +160,7 @@
     <div class="col-divider" @mousedown.prevent="startHResize" title="Потяните для изменения ширины" />
 
     <div class="generator-right">
+      <CollabBar :current-xml="liveXmlText || xmlText" />
       <XmlEditor
         ref="xmlEditorRef"
         :model-value="xmlText"
@@ -174,6 +175,8 @@
         :git-push-error="gitPushError"
         :show-compare-button="!!schemaId"
         :comparing="comparing"
+        :ytext="collab.ytext"
+        :awareness="collab.awareness"
         @content-change="onEditorContentChange"
         @clear="onEditorClear"
         @import="onXmlFileImported"
@@ -203,6 +206,7 @@
 defineOptions({ name: 'GeneratorView' })
 
 import XmlEditor from '../components/XmlEditor.vue'
+import CollabBar from '../components/CollabBar.vue'
 import MappingWizard from '../components/MappingWizard.vue'
 import GeneratorDtdSection from '../components/generator/GeneratorDtdSection.vue'
 import GeneratorLeftTabs from '../components/generator/GeneratorLeftTabs.vue'
@@ -342,6 +346,7 @@ const {
   runExplain,
   goToComparePath,
   focusCompareTab,
+  collab,
 } = useGenerator()
 
 function runCompareAndFocusTab() {

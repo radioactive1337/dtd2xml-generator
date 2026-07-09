@@ -9,3 +9,5 @@ oracledb==2.5.1
 aiofiles==24.1.0
 python-multipart==0.0.9
 itsdangerous==2.2.0
+pycrdt==0.10.*
+pycrdt-websocket==0.15.*

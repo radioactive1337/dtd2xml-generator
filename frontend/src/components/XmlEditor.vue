@@ -181,6 +181,8 @@ const props = defineProps({
   gitPushError: { type: String, default: '' },
   showCompareButton: { type: Boolean, default: false },
   comparing: { type: Boolean, default: false },
+  ytext: { type: Object, default: null },
+  awareness: { type: Object, default: null },
 })
 
 const emit = defineEmits([
@@ -219,9 +221,12 @@ function defaultPushFilename() {
 }
 let editor = null
 let monaco = null
+let monacoBinding = null
 let suppressEditorEvent = false
 let pasteFlushTimer = null
 let uniqueDecorations = null
+let contentChangeDisposable = null
+let pasteDisposable = null
 
 function applyModelValue(val) {
   if (!editor) return
@@ -332,6 +337,42 @@ function schedulePasteFlush() {
   pasteFlushTimer = setTimeout(notifyContentChange, 0)
 }
 
+function enableStandaloneListeners() {
+  if (!editor || contentChangeDisposable) return
+  contentChangeDisposable = editor.onDidChangeModelContent(onModelContentChanged)
+  pasteDisposable = editor.onDidPaste(schedulePasteFlush)
+}
+
+function disableStandaloneListeners() {
+  contentChangeDisposable?.dispose()
+  pasteDisposable?.dispose()
+  contentChangeDisposable = null
+  pasteDisposable = null
+}
+
+async function setupCollaborativeBinding() {
+  if (!editor || !props.ytext) return
+
+  disableStandaloneListeners()
+  monacoBinding?.destroy()
+  monacoBinding = null
+
+  const { MonacoBinding } = await import('y-monaco')
+  monacoBinding = new MonacoBinding(
+    props.ytext,
+    editor.getModel(),
+    new Set([editor]),
+    props.awareness,
+  )
+}
+
+async function teardownCollaborativeBinding() {
+  monacoBinding?.destroy()
+  monacoBinding = null
+  enableStandaloneListeners()
+  applyModelValue(props.modelValue)
+}
+
 onMounted(async () => {
   monaco = await loader.init()
   registerXmlFormatter(monaco)
@@ -349,13 +390,32 @@ onMounted(async () => {
     automaticLayout: true,
   })
 
-  editor.onDidChangeModelContent(onModelContentChanged)
-  editor.onDidPaste(schedulePasteFlush)
-  applyModelValue(props.modelValue)
+  if (props.ytext) {
+    await setupCollaborativeBinding()
+  } else {
+    enableStandaloneListeners()
+    applyModelValue(props.modelValue)
+  }
   if (props.uniqueRanges?.length) applyUniqueDecorations(props.uniqueRanges)
 })
 
-watch(() => props.modelValue, applyModelValue)
+watch(() => props.modelValue, (val) => {
+  if (!props.ytext) applyModelValue(val)
+})
+
+watch(
+  () => props.ytext,
+  async (next, prev) => {
+    if (!editor) return
+    if (next && next !== prev) {
+      await setupCollaborativeBinding()
+      return
+    }
+    if (!next && prev) {
+      await teardownCollaborativeBinding()
+    }
+  },
+)
 
 watch(
   () => props.uniqueRanges,
@@ -399,6 +459,9 @@ watch(
 
 onBeforeUnmount(() => {
   clearTimeout(pasteFlushTimer)
+  monacoBinding?.destroy()
+  monacoBinding = null
+  disableStandaloneListeners()
   editor?.dispose()
 })
 

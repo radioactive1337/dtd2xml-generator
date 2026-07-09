@@ -15,6 +15,7 @@ import { useGeneratorSchema } from './useGeneratorSchema'
 import { useGeneratorXml } from './useGeneratorXml'
 import { useGeneratorActions } from './useGeneratorActions'
 import { useGeneratorCompare } from './useGeneratorCompare'
+import { useCollaboration } from '../useCollaboration'
 
 export function useGenerator() {
   const error = ref('')
@@ -31,6 +32,7 @@ export function useGenerator() {
 
   const { leftWidth, dtdCollapsed, startHResize } = useGeneratorLayout()
   const schema = useGeneratorSchema()
+  const collab = useCollaboration()
 
   const mapping = useGeneratorMapping({
     schemaId: schema.schemaId,
@@ -50,6 +52,7 @@ export function useGenerator() {
     generating,
     filling,
     dtdCollapsed,
+    ytext: collab.ytext,
   })
 
   const {
@@ -354,6 +357,7 @@ export function useGenerator() {
 
     await xmlLibrary.refreshSharedCategories()
     await xmlLibrary.refreshPersonalDocuments()
+    collab.restoreSession()
   })
 
   onBeforeUnmount(() => {
@@ -421,6 +425,7 @@ export function useGenerator() {
     ...tabs,
     ...actions,
     ...compare,
+    collab,
     generating,
     filling,
     validating,
