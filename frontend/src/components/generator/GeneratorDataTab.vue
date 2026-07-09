@@ -63,16 +63,6 @@
             >
               Сохранить
             </button>
-            <button class="btn-secondary" @click="triggerImport">
-              Импорт
-            </button>
-            <input
-              ref="importFileInputRef"
-              type="file"
-              accept=".json,application/json"
-              class="preset-import-input"
-              @change="onImportFileSelect"
-            />
             <div ref="presetDropdownRef" class="preset-dropdown">
               <button
                 type="button"
@@ -101,14 +91,15 @@
                     <span class="preset-dropdown-item-name">{{ p.name }}</span>
                     <span class="preset-meta">
                       {{ formatMappings(p.mapping_count) }}
+                      <template v-if="p.shared_by_name"> · от {{ p.shared_by_name }}</template>
                     </span>
                   </span>
                   <button
                     class="btn-icon-action"
-                    title="Экспорт JSON"
-                    @click.prevent="$emit('export-mapping-preset', p.name)"
+                    title="Поделиться"
+                    @click.prevent="openShareDialog(p.name)"
                   >
-                    ↓
+                    ↗
                   </button>
                   <button
                     class="btn-icon-remove"
@@ -193,12 +184,26 @@
       </div>
     </div>
   </div>
+
+  <ShareDocumentDialog
+    :open="shareDialogOpen"
+    dialog-title="Поделиться пресетом маппинга"
+    item-label-prefix="Пресет"
+    :document-label="sharePresetName"
+    :submitting="shareDialogSubmitting"
+    :error-message="shareDialogError"
+    @close="closeShareDialog"
+    @submit="handleShareSubmit"
+  />
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { formatMappings } from '../../utils/ruPlural'
+import { shareMappingPreset } from '../../api/mappingPresets'
+import { translateApiError } from '../../utils/apiErrors'
 import FieldOverridesPanel from './FieldOverridesPanel.vue'
+import ShareDocumentDialog from './ShareDocumentDialog.vue'
 
 const props = defineProps({
   fillStrategy: { type: String, default: 'faker' },
@@ -232,8 +237,6 @@ const emit = defineEmits([
   'remove-field-override',
   'update-field-override',
   'save-mapping-preset',
-  'import-mapping-preset',
-  'export-mapping-preset',
   'open-mapping-wizard',
   'remove-mapping',
   'delete-mapping-preset',
@@ -242,7 +245,45 @@ const emit = defineEmits([
 
 const presetDropdownOpen = ref(false)
 const presetDropdownRef = ref(null)
-const importFileInputRef = ref(null)
+const shareDialogOpen = ref(false)
+const sharePresetName = ref('')
+const shareDialogSubmitting = ref(false)
+const shareDialogError = ref('')
+
+function openShareDialog(name) {
+  sharePresetName.value = name
+  shareDialogError.value = ''
+  shareDialogOpen.value = true
+  presetDropdownOpen.value = false
+}
+
+function closeShareDialog() {
+  if (shareDialogSubmitting.value) return
+  shareDialogOpen.value = false
+  shareDialogError.value = ''
+}
+
+async function handleShareSubmit({ recipientUsername, message }) {
+  shareDialogSubmitting.value = true
+  shareDialogError.value = ''
+  try {
+    await shareMappingPreset({
+      recipientUsername,
+      sourcePresetName: sharePresetName.value,
+      message,
+    })
+    shareDialogOpen.value = false
+  } catch (err) {
+    const detail = err?.response?.data?.detail
+    if (detail && typeof detail === 'object') {
+      shareDialogError.value = translateApiError(detail.message || 'Пользователь не найден')
+    } else {
+      shareDialogError.value = translateApiError(detail || err?.message || String(err))
+    }
+  } finally {
+    shareDialogSubmitting.value = false
+  }
+}
 
 function filledMappingFields(mapping) {
   return (mapping.fields || []).filter((f) => f.db_col && f.xml_attr)
@@ -255,17 +296,6 @@ function onPresetCheckboxChange(name, checked) {
   } else if (!checked) {
     emit('update:selectedMappingPresetNames', current.filter((n) => n !== name))
   }
-}
-
-function triggerImport() {
-  importFileInputRef.value?.click()
-}
-
-function onImportFileSelect(event) {
-  const file = event.target.files?.[0]
-  event.target.value = ''
-  if (!file) return
-  emit('import-mapping-preset', file)
 }
 
 function onPresetDropdownOutsideClick(event) {
@@ -381,10 +411,6 @@ onBeforeUnmount(() => {
 
 .preset-input {
   width: 130px;
-}
-
-.preset-import-input {
-  display: none;
 }
 
 .preset-dropdown {

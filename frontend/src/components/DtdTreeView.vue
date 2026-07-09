@@ -6,6 +6,7 @@
       :presets="presets"
       @save="savePreset"
       @load="onLoadPreset"
+      @share="openShareDialog"
     />
 
     <div class="scroller-wrap">
@@ -42,13 +43,28 @@
         </template>
       </div>
     </div>
+
+    <ShareDocumentDialog
+      :open="shareDialogOpen"
+      dialog-title="Поделиться пресетом генерации"
+      item-label-prefix="Пресет"
+      :document-label="sharePresetName"
+      :submitting="shareDialogSubmitting"
+      :error-message="shareDialogError"
+      @close="closeShareDialog"
+      @submit="handleShareSubmit"
+    />
   </div>
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import DtdTreePresetsBar from './dtd-tree/DtdTreePresetsBar.vue'
 import DtdTreeRow from './dtd-tree/DtdTreeRow.vue'
+import ShareDocumentDialog from './generator/ShareDocumentDialog.vue'
+import { sharePreset } from '../api/presets'
+import { translateApiError } from '../utils/apiErrors'
 import { useDtdTree } from '../composables/useDtdTree'
 
 const props = defineProps({
@@ -75,6 +91,45 @@ const {
   applyXmlElementPaths,
   revealElement,
 } = useDtdTree(props, emit)
+
+const shareDialogOpen = ref(false)
+const sharePresetName = ref('')
+const shareDialogSubmitting = ref(false)
+const shareDialogError = ref('')
+
+function openShareDialog(name) {
+  sharePresetName.value = name
+  shareDialogError.value = ''
+  shareDialogOpen.value = true
+}
+
+function closeShareDialog() {
+  if (shareDialogSubmitting.value) return
+  shareDialogOpen.value = false
+  shareDialogError.value = ''
+}
+
+async function handleShareSubmit({ recipientUsername, message }) {
+  shareDialogSubmitting.value = true
+  shareDialogError.value = ''
+  try {
+    await sharePreset({
+      recipientUsername,
+      sourcePresetName: sharePresetName.value,
+      message,
+    })
+    shareDialogOpen.value = false
+  } catch (err) {
+    const detail = err?.response?.data?.detail
+    if (detail && typeof detail === 'object') {
+      shareDialogError.value = translateApiError(detail.message || 'Пользователь не найден')
+    } else {
+      shareDialogError.value = translateApiError(detail || err?.message || String(err))
+    }
+  } finally {
+    shareDialogSubmitting.value = false
+  }
+}
 
 defineExpose({ applyXmlElementPaths, revealElement })
 </script>

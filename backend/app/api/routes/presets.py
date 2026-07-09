@@ -10,6 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth.sessions import get_current_user
+from app.services.preset_share_service import (
+    SharePresetRequest,
+    SharePresetResponse,
+    share_tree_preset,
+)
 from app.user_context import UserContext
 
 router = APIRouter(prefix="/presets", tags=["presets"])
@@ -19,6 +24,7 @@ class PresetSummary(BaseModel):
     name: str
     schema_id: str
     path_count: int
+    shared_by_name: str = ""
 
 
 class PresetData(BaseModel):
@@ -49,6 +55,7 @@ async def list_presets(user: UserContext = Depends(get_current_user)) -> list[Pr
                 name=data.get("name", path.stem),
                 schema_id=data.get("schema_id", ""),
                 path_count=len(data.get("custom_paths", [])),
+                shared_by_name=data.get("shared_by_name", ""),
             )
         )
     return summaries
@@ -65,6 +72,14 @@ async def save_preset(
         encoding="utf-8",
     )
     return preset
+
+
+@router.post("/share", response_model=SharePresetResponse)
+async def share_preset_route(
+    body: SharePresetRequest,
+    user: UserContext = Depends(get_current_user),
+) -> SharePresetResponse:
+    return share_tree_preset(user, body)
 
 
 @router.get("/{name}", response_model=PresetData)

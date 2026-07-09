@@ -10,6 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.auth.sessions import get_current_user
+from app.services.preset_share_service import (
+    SharePresetRequest,
+    SharePresetResponse,
+    share_mapping_preset,
+)
 from app.user_context import UserContext
 
 router = APIRouter(prefix="/mapping-presets", tags=["mapping-presets"])
@@ -40,6 +45,7 @@ class MappingPresetSummary(BaseModel):
     schema_id: str = ""
     mapping_count: int
     field_override_count: int = 0
+    shared_by_name: str = ""
 
 
 class MappingPresetData(BaseModel):
@@ -87,6 +93,7 @@ async def list_mapping_presets(
                 schema_id=preset_schema,
                 mapping_count=len(data.get("mappings", [])),
                 field_override_count=len(data.get("field_overrides", [])),
+                shared_by_name=data.get("shared_by_name", ""),
             )
         )
     return summaries
@@ -103,6 +110,14 @@ async def save_mapping_preset(
         encoding="utf-8",
     )
     return preset
+
+
+@router.post("/share", response_model=SharePresetResponse)
+async def share_mapping_preset_route(
+    body: SharePresetRequest,
+    user: UserContext = Depends(get_current_user),
+) -> SharePresetResponse:
+    return share_mapping_preset(user, body)
 
 
 @router.get("/{name}", response_model=MappingPresetData)
