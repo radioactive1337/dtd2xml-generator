@@ -1,10 +1,10 @@
 <template>
   <div v-if="open" class="share-dialog-backdrop" @click.self="close">
     <form class="share-dialog" @submit.prevent="submit">
-      <h4 class="share-dialog-title">Поделиться XML</h4>
+      <h4 class="share-dialog-title">{{ dialogTitle }}</h4>
 
       <p v-if="documentLabel" class="share-document-label">
-        Документ: <strong>{{ documentLabel }}</strong>
+        {{ itemLabelPrefix }}: <strong>{{ documentLabel }}</strong>
       </p>
 
       <label v-if="requireDocumentName" class="share-label">
@@ -111,6 +111,8 @@ import { searchUsers } from '../../api/auth'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
+  dialogTitle: { type: String, default: 'Поделиться XML' },
+  itemLabelPrefix: { type: String, default: 'Документ' },
   documentLabel: { type: String, default: '' },
   requireDocumentName: { type: Boolean, default: false },
   defaultDocumentName: { type: String, default: '' },

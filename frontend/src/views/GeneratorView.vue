@@ -62,8 +62,6 @@
             :mapping-preview="mappingPreview"
             :mapping-validation="mappingValidation"
             @save-mapping-preset="saveMappingPreset"
-            @import-mapping-preset="importMappingPreset"
-            @export-mapping-preset="exportMappingPreset"
             @open-mapping-wizard="openMappingWizard"
             @add-field-override="addFieldOverride"
             @remove-field-override="removeFieldOverride"
@@ -289,8 +287,6 @@ const {
   saveMappingPreset,
   removeSelectedPreset,
   deleteMappingPreset,
-  exportMappingPreset,
-  importMappingPreset,
   onWizardFinish,
   goToValidationError,
   onEditorContentChange,

@@ -17,8 +17,18 @@
         @change="onPresetSelect"
       >
         <option value="">Выберите пресет…</option>
-        <option v-for="p in presets" :key="p.name" :value="p.name">{{ p.name }}</option>
+        <option v-for="p in presets" :key="p.name" :value="p.name">
+          {{ p.name }}{{ p.shared_by_name ? ` (от ${p.shared_by_name})` : '' }}
+        </option>
       </select>
+      <button
+        class="btn-secondary"
+        :disabled="!loadPresetName"
+        title="Поделиться пресетом"
+        @click="emit('share', loadPresetName)"
+      >
+        Поделиться
+      </button>
     </div>
   </div>
 </template>
@@ -30,7 +40,7 @@ defineProps({
   presets: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['update:presetName', 'update:loadPresetName', 'save', 'load'])
+const emit = defineEmits(['update:presetName', 'update:loadPresetName', 'save', 'load', 'share'])
 
 function onPresetSelect(event) {
   const value = event.target.value
@@ -53,8 +63,9 @@ function onPresetSelect(event) {
   display: flex;
   gap: 6px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .preset-input { width: 140px; }
-.preset-select { width: 150px; }
+.preset-select { width: 180px; }
 </style>

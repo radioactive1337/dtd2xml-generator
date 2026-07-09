@@ -5,8 +5,6 @@ import {
   saveMappingPreset as apiSaveMappingPreset,
   loadMappingPreset as apiLoadMappingPreset,
   deleteMappingPreset as apiDeleteMappingPreset,
-  exportMappingPreset as apiExportMappingPreset,
-  parseMappingPresetFile,
 } from '../../api/mappingPresets'
 import { getMappingValidationIssues } from '../../utils/mappingUtils'
 
@@ -183,30 +181,6 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
     await refreshMappingPresets()
   }
 
-  async function exportMappingPreset(name) {
-    error.value = ''
-    try {
-      await apiExportMappingPreset(name)
-    } catch (e) {
-      error.value = e.message
-    }
-  }
-
-  async function importMappingPreset(file) {
-    error.value = ''
-    try {
-      const text = await file.text()
-      const preset = parseMappingPresetFile(text)
-      await apiSaveMappingPreset(preset)
-      await refreshMappingPresets()
-      if (!selectedMappingPresetNames.value.includes(preset.name)) {
-        selectedMappingPresetNames.value = [...selectedMappingPresetNames.value, preset.name]
-      }
-    } catch (e) {
-      error.value = e.message
-    }
-  }
-
   async function refreshMappingPreview(mi) {
     const mapping = sqlMappings.value[mi]
     if (!mapping?.db_alias || !mapping?.query?.trim()) {
@@ -335,8 +309,6 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
     saveMappingPreset,
     removeSelectedPreset,
     deleteMappingPreset,
-    exportMappingPreset,
-    importMappingPreset,
     onWizardFinish,
     refreshMappingPresets,
     resetMappings,
