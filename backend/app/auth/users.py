@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import re
+import shutil
 import sqlite3
 import threading
 import uuid
@@ -12,6 +15,10 @@ from difflib import get_close_matches
 from pathlib import Path
 
 from app.config import DATA_DIR
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_ADMIN_USERNAME = "admin"
 
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{2,64}$")
 
@@ -30,6 +37,19 @@ class UserRecord:
     display_name: str
     created_at: str
     last_seen: str
+    is_admin: bool = False
+
+
+def _row_to_record(row: sqlite3.Row) -> UserRecord:
+    is_admin_raw = row["is_admin"] if "is_admin" in row.keys() else 0
+    return UserRecord(
+        id=str(row["id"]),
+        username_norm=str(row["username_norm"]),
+        display_name=str(row["display_name"]),
+        created_at=str(row["created_at"]),
+        last_seen=str(row["last_seen"]),
+        is_admin=bool(is_admin_raw),
+    )
 
 
 def normalize_username(username: str) -> str:
@@ -48,6 +68,16 @@ def validate_username(username: str) -> str:
     return display
 
 
+def _reset_db_connections() -> None:
+    conn: sqlite3.Connection | None = getattr(_thread_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except sqlite3.Error:
+            pass
+    _thread_local.conn = None
+
+
 def _connect() -> sqlite3.Connection:
     conn: sqlite3.Connection | None = getattr(_thread_local, "conn", None)
     if conn is not None:
@@ -63,7 +93,16 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _migrate_users_schema(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "is_admin" not in columns:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"
+        )
+
+
 def init_user_db() -> None:
+    _reset_db_connections()
     with _connect() as conn:
         conn.execute(
             """
@@ -72,11 +111,83 @@ def init_user_db() -> None:
                 username_norm TEXT NOT NULL UNIQUE,
                 display_name TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                last_seen TEXT NOT NULL
+                last_seen TEXT NOT NULL,
+                is_admin INTEGER NOT NULL DEFAULT 0
             )
             """
         )
+        _migrate_users_schema(conn)
         conn.commit()
+    ensure_admin_user()
+
+
+def get_admin_user() -> UserRecord | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE is_admin = 1 LIMIT 1"
+        ).fetchone()
+    if row is None:
+        return None
+    return _row_to_record(row)
+
+
+def is_user_admin(user_id: str) -> bool:
+    record = get_user_by_id(user_id)
+    return record is not None and record.is_admin
+
+
+def ensure_admin_user() -> UserRecord | None:
+    """Create the single bootstrap admin if none exists yet."""
+    existing = get_admin_user()
+    if existing is not None:
+        return existing
+
+    raw_username = os.getenv("ADMIN_USERNAME", DEFAULT_ADMIN_USERNAME).strip()
+    if not raw_username:
+        raw_username = DEFAULT_ADMIN_USERNAME
+
+    try:
+        display = validate_username(raw_username)
+    except ValueError:
+        logger.warning(
+            "Invalid ADMIN_USERNAME %r, falling back to %r",
+            raw_username,
+            DEFAULT_ADMIN_USERNAME,
+        )
+        display = DEFAULT_ADMIN_USERNAME
+
+    norm = normalize_username(display)
+    existing_user = get_user_by_norm(norm)
+    if existing_user is not None:
+        logger.error(
+            "Cannot bootstrap admin: user %r already exists without admin flag",
+            display,
+        )
+        return None
+
+    now = datetime.now(UTC).isoformat()
+    user_id = str(uuid.uuid4())
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO users (id, username_norm, display_name, created_at, last_seen, is_admin)
+            VALUES (?, ?, ?, ?, ?, 1)
+            """,
+            (user_id, norm, display, now, now),
+        )
+        conn.commit()
+
+    logger.info("Bootstrap admin user created: %s", display)
+    record = UserRecord(
+        id=user_id,
+        username_norm=norm,
+        display_name=display,
+        created_at=now,
+        last_seen=now,
+        is_admin=True,
+    )
+    user_data_root(user_id).mkdir(parents=True, exist_ok=True)
+    return record
 
 
 def list_display_names() -> list[str]:
@@ -162,13 +273,7 @@ def get_user_by_norm(username_norm: str) -> UserRecord | None:
         ).fetchone()
     if row is None:
         return None
-    return UserRecord(
-        id=str(row["id"]),
-        username_norm=str(row["username_norm"]),
-        display_name=str(row["display_name"]),
-        created_at=str(row["created_at"]),
-        last_seen=str(row["last_seen"]),
-    )
+    return _row_to_record(row)
 
 
 def get_user_by_id(user_id: str) -> UserRecord | None:
@@ -176,13 +281,31 @@ def get_user_by_id(user_id: str) -> UserRecord | None:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     if row is None:
         return None
-    return UserRecord(
-        id=str(row["id"]),
-        username_norm=str(row["username_norm"]),
-        display_name=str(row["display_name"]),
-        created_at=str(row["created_at"]),
-        last_seen=str(row["last_seen"]),
-    )
+    return _row_to_record(row)
+
+
+def list_all_users() -> list[UserRecord]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM users ORDER BY display_name COLLATE NOCASE"
+        ).fetchall()
+    return [_row_to_record(row) for row in rows]
+
+
+def delete_user(user_id: str) -> None:
+    record = get_user_by_id(user_id)
+    if record is None:
+        raise ValueError("User not found")
+    if record.is_admin:
+        raise ValueError("Cannot delete the admin user")
+
+    with _connect() as conn:
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+
+    workspace = user_data_root(user_id)
+    if workspace.is_dir():
+        shutil.rmtree(workspace)
 
 
 def touch_user(user_id: str) -> None:
@@ -219,6 +342,7 @@ def create_user(display_name: str) -> UserRecord:
         display_name=display,
         created_at=now,
         last_seen=now,
+        is_admin=False,
     )
 
 
