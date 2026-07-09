@@ -7,6 +7,7 @@ const loading = ref(false)
 
 export function useAuth() {
   const isAuthenticated = computed(() => user.value !== null)
+  const isAdmin = computed(() => Boolean(user.value?.is_admin))
 
   async function refresh() {
     loading.value = true
@@ -50,6 +51,7 @@ export function useAuth() {
     checked,
     loading,
     isAuthenticated,
+    isAdmin,
     refresh,
     checkExists,
     login,

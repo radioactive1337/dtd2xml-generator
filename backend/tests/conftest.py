@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.api.routes import dtd as dtd_routes
 from app.api.routes import generate as generate_routes
-from app.auth.users import init_user_db
+from app.auth.users import _reset_db_connections, init_user_db
 from app.config import is_auth_disabled
 from app.main import app
 from app.user_context import UserContext
@@ -23,6 +23,7 @@ def _isolate_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr("app.auth.users.DATA_DIR", data_dir)
     monkeypatch.setattr("app.legacy_migration.DATA_DIR", data_dir)
     monkeypatch.setattr("app.legacy_migration._MIGRATION_FLAG", data_dir / ".legacy_migrated")
+    _reset_db_connections()
     init_user_db()
 
 
@@ -56,6 +57,7 @@ def auth_enabled(monkeypatch: pytest.MonkeyPatch):
     from app.auth.sessions import get_current_user
 
     monkeypatch.delenv("AUTH_DISABLED", raising=False)
+    monkeypatch.setenv("ALLOW_SELF_REGISTRATION", "1")
     app.dependency_overrides.pop(get_current_user, None)
 
 

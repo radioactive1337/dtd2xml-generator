@@ -29,6 +29,7 @@ class LoginRequest(BaseModel):
 class UserResponse(BaseModel):
     id: str
     display_name: str
+    is_admin: bool = False
 
 
 class ExistsResponse(BaseModel):
@@ -109,7 +110,11 @@ async def login(request: Request, body: LoginRequest) -> UserResponse:
         migrate_legacy_data_to_user(ctx)
 
     set_session_user(request, record)
-    return UserResponse(id=record.id, display_name=record.display_name)
+    return UserResponse(
+        id=record.id,
+        display_name=record.display_name,
+        is_admin=record.is_admin,
+    )
 
 
 @router.post("/logout")
@@ -130,4 +135,8 @@ async def me(request: Request) -> UserResponse:
     record = get_user_by_id(user_id)
     if record is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return UserResponse(id=record.id, display_name=record.display_name)
+    return UserResponse(
+        id=record.id,
+        display_name=record.display_name,
+        is_admin=record.is_admin,
+    )

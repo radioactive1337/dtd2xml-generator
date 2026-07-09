@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import Depends, HTTPException, Request
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.auth.users import UserRecord, get_user_by_id, touch_user
+from app.auth.users import UserRecord, get_user_by_id, is_user_admin, touch_user
 from app.config import get_session_secret, is_auth_disabled
 from app.user_context import UserContext, dev_user_context, get_user_context_for_session
 
@@ -58,6 +58,16 @@ async def get_current_user(request: Request) -> UserContext:
         raise HTTPException(status_code=401, detail="Session expired")
 
     return get_user_context_for_session(record.id, record.display_name)
+
+
+async def get_current_admin(request: Request) -> UserContext:
+    if is_auth_disabled():
+        raise HTTPException(status_code=403, detail="Admin access requires authentication")
+
+    user = await get_current_user(request)
+    if not is_user_admin(user.user_id):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
 
 
 async def get_optional_user(request: Request) -> UserContext | None:

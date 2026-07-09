@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import GeneratorView from '../views/GeneratorView.vue'
 import SettingsView from '../views/SettingsView.vue'
+import AdminView from '../views/AdminView.vue'
 import LoginView from '../views/LoginView.vue'
 import { useAuth } from '../composables/useAuth'
 
@@ -8,6 +9,7 @@ const routes = [
   { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
   { path: '/', name: 'generator', component: GeneratorView },
   { path: '/settings', name: 'settings', component: SettingsView },
+  { path: '/admin', name: 'admin', component: AdminView, meta: { admin: true } },
 ]
 
 const router = createRouter({
@@ -16,7 +18,7 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
-  const { isAuthenticated, checked, refresh } = useAuth()
+  const { isAuthenticated, isAdmin, checked, refresh } = useAuth()
   if (!checked.value) {
     await refresh()
   }
@@ -31,6 +33,11 @@ router.beforeEach(async (to) => {
   if (!isAuthenticated.value) {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
+
+  if (to.meta.admin && !isAdmin.value) {
+    return { path: '/' }
+  }
+
   return true
 })
 

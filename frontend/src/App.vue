@@ -8,6 +8,7 @@
       <nav class="nav">
         <router-link to="/" class="header-btn">Генератор</router-link>
         <router-link to="/settings" class="header-btn">Настройки</router-link>
+        <router-link v-if="isAdmin" to="/admin" class="header-btn">Админ</router-link>
         <span v-if="user" class="user-badge" :title="user.display_name">{{ user.display_name }}</span>
         <button
           v-if="user"
@@ -48,7 +49,7 @@ import { useTheme } from './composables/useTheme'
 import { useAuth } from './composables/useAuth'
 
 const { isDark, toggleTheme } = useTheme()
-const { user, refresh, logout } = useAuth()
+const { user, isAdmin, refresh, logout } = useAuth()
 const router = useRouter()
 
 onMounted(() => {
