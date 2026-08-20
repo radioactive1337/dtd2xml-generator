@@ -60,7 +60,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { getNexusConfig, pullDtdFromNexus, uploadDtd, uploadDtdJar } from '../api/dtd'
 import { formatDtdUpdatedAt, normalizeDtdUploadResult } from '../utils/dtdSchema'
 
@@ -158,15 +158,22 @@ function onFileSelect(e) {
   e.target.value = ''
 }
 
-onMounted(async () => {
-  if (!props.canUpdate) return
-  try {
-    const cfg = await getNexusConfig()
-    nexusConfigured.value = !!cfg?.configured
-  } catch (_e) {
-    nexusConfigured.value = false
-  }
-})
+watch(
+  () => props.canUpdate,
+  async (canUpdate) => {
+    if (!canUpdate) {
+      nexusConfigured.value = false
+      return
+    }
+    try {
+      const cfg = await getNexusConfig()
+      nexusConfigured.value = !!cfg?.configured
+    } catch (_e) {
+      nexusConfigured.value = false
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>
