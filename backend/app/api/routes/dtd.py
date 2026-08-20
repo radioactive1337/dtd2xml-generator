@@ -18,7 +18,7 @@ import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from app.auth.sessions import get_current_user
+from app.auth.sessions import get_current_admin, get_current_user
 from app.config import DATA_DIR, PROJECT_ROOT, get_nexus_dtd_config, shared_dtd_dir
 from app.core.dtd_archive import extract_jar_dtd_files
 from app.core.dtd_merge import merge_dtd_schemas
@@ -508,7 +508,7 @@ def _element_to_summary(elem: ElementDef) -> ElementSummary:
 @router.post("/upload", response_model=MultiSchemaResponse)
 async def upload_dtd(
     files: list[UploadFile] = File(...),
-    user: UserContext = Depends(get_current_user),
+    user: UserContext = Depends(get_current_admin),
 ) -> MultiSchemaResponse:
     if not files:
         raise HTTPException(status_code=400, detail="At least one file is required")
@@ -576,7 +576,7 @@ async def upload_dtd(
 async def upload_dtd_jar(
     file: UploadFile = File(...),
     inner_path: str = Form("META-INF/dtd/"),
-    user: UserContext = Depends(get_current_user),
+    user: UserContext = Depends(get_current_admin),
 ) -> MultiSchemaResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
@@ -620,7 +620,7 @@ async def get_nexus_config() -> NexusDtdConfigResponse:
 
 @router.post("/pull-nexus", response_model=MultiSchemaResponse)
 async def pull_dtd_from_nexus(
-    user: UserContext = Depends(get_current_user),
+    user: UserContext = Depends(get_current_admin),
 ) -> MultiSchemaResponse:
     cfg = get_nexus_dtd_config()
     if cfg is None:

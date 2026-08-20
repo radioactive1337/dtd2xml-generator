@@ -19,6 +19,7 @@
     </div>
     <div v-show="!collapsed">
       <DtdUpload
+        :can-update="canUpdateDtd"
         :is-loaded="!!schemaId"
         :file-name="fileName"
         :element-count="elementCount"
@@ -36,6 +37,7 @@ import DtdUpload from '../DtdUpload.vue'
 import { formatDtdUpdatedAt } from '../../utils/dtdSchema'
 
 const props = defineProps({
+  canUpdateDtd: { type: Boolean, default: false },
   schemaId: { type: String, default: '' },
   collapsed: { type: Boolean, default: false },
   fileName: { type: String, default: '' },

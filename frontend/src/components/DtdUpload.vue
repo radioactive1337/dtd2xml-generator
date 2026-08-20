@@ -1,6 +1,7 @@
 <template>
   <div class="dtd-upload">
     <div
+      v-if="canUpdate"
       class="drop-zone"
       :class="{ dragging: isDragging, loaded: isLoaded }"
       @dragover.prevent="isDragging = true"
@@ -32,8 +33,21 @@
         <span class="drop-sub">до 3 .dtd или один .jar</span>
       </template>
     </div>
+    <div v-else class="drop-zone loaded dtd-readonly">
+      <template v-if="isLoaded">
+        <span class="drop-icon">✓</span>
+        <span class="drop-text">{{ fileName }}</span>
+        <span class="drop-sub">Загружено элементов: {{ elementCount }}</span>
+        <span v-if="importSourceLabel" class="drop-sub">{{ importSourceLabel }}</span>
+        <span v-if="updatedAtLabel" class="drop-sub">{{ updatedAtLabel }}</span>
+      </template>
+      <template v-else>
+        <span class="drop-text">Схема DTD не загружена</span>
+        <span class="drop-sub">Обновление схемы доступно только администратору</span>
+      </template>
+    </div>
     <button
-      v-if="nexusConfigured"
+      v-if="canUpdate && nexusConfigured"
       class="nexus-btn"
       :disabled="loading"
       type="button"
@@ -51,6 +65,7 @@ import { getNexusConfig, pullDtdFromNexus, uploadDtd, uploadDtdJar } from '../ap
 import { formatDtdUpdatedAt, normalizeDtdUploadResult } from '../utils/dtdSchema'
 
 const props = defineProps({
+  canUpdate: { type: Boolean, default: true },
   isLoaded: { type: Boolean, default: false },
   fileName: { type: String, default: '' },
   elementCount: { type: Number, default: 0 },
@@ -144,6 +159,7 @@ function onFileSelect(e) {
 }
 
 onMounted(async () => {
+  if (!props.canUpdate) return
   try {
     const cfg = await getNexusConfig()
     nexusConfigured.value = !!cfg?.configured
@@ -176,6 +192,10 @@ onMounted(async () => {
 .drop-zone.loaded {
   border-color: var(--success);
   border-style: solid;
+}
+
+.dtd-readonly {
+  cursor: default;
 }
 
 .drop-icon {
