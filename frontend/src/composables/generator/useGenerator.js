@@ -18,7 +18,7 @@ import { useGeneratorCompare } from './useGeneratorCompare'
 
 export function useGenerator() {
   const error = ref('')
-  const fillStrategy = ref('faker')
+  const fillStrategy = ref('ai')
   const structureTabRef = ref(null)
   const generatorRef = ref(null)
   const generating = ref(false)
