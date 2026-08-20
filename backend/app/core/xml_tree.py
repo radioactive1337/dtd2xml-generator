@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from lxml import etree
 
 if TYPE_CHECKING:
-    from app.core.dtd_models import AttributeDef
+    from app.core.dtd_models import AttributeDef, DTDSchema
 
 ElementPath = tuple[tuple[str, int], ...]
 ProtectedAttrs = frozenset[tuple[ElementPath, str]]
@@ -127,3 +128,62 @@ def is_fillable_attribute_value(
     if attr_def.attr_type == "ENUM" and attr_def.allowed_values:
         return stripped == attr_def.allowed_values[0]
     return False
+
+
+MIN_GIT_PUSH_ATTRIBUTE_FILL_RATE = 0.15
+
+
+@dataclass(frozen=True)
+class AttributeFillStats:
+    total: int
+    filled: int
+
+    @property
+    def fill_rate(self) -> float:
+        if self.total == 0:
+            return 1.0
+        return self.filled / self.total
+
+    @property
+    def fill_percent(self) -> float:
+        return round(self.fill_rate * 100, 1)
+
+
+def compute_attribute_fill_stats(
+    xml_text: str,
+    schema: DTDSchema | None = None,
+) -> AttributeFillStats:
+    """Count attribute occurrences in XML and how many have real (non-placeholder) values."""
+    root = etree.fromstring(xml_text.encode("utf-8"))
+    total = 0
+    filled = 0
+
+    for el in root.iter():
+        elem_def = schema.elements.get(el.tag) if schema else None
+        for attr_name, attr_value in el.attrib.items():
+            if attr_name == "xmlns" or attr_name.startswith("xmlns:"):
+                continue
+            total += 1
+            attr_def = elem_def.attributes.get(attr_name) if elem_def else None
+            if not is_fillable_attribute_value(attr_value, attr_def=attr_def):
+                filled += 1
+
+    return AttributeFillStats(total=total, filled=filled)
+
+
+def git_push_attribute_fill_error(
+    xml_text: str,
+    schema: DTDSchema,
+    *,
+    min_fill_rate: float = MIN_GIT_PUSH_ATTRIBUTE_FILL_RATE,
+) -> str | None:
+    """Return a user-facing error when fill rate is below the Git push minimum."""
+    stats = compute_attribute_fill_stats(xml_text, schema)
+    if stats.fill_rate >= min_fill_rate:
+        return None
+    min_pct = round(min_fill_rate * 100)
+    return (
+        f"Недостаточно заполненных атрибутов для отправки в Git: "
+        f"заполнено {stats.fill_percent}% ({stats.filled} из {stats.total}). "
+        f"Минимум — {min_pct}%. Дозаполните документ перед отправкой."
+    )

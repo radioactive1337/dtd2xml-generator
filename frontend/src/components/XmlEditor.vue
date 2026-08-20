@@ -114,6 +114,9 @@
         <p class="push-overwrite-hint">
           Если файл уже есть в репозитории, он будет перезаписан.
         </p>
+        <p class="push-fill-hint">
+          Для отправки в Git должно быть заполнено не менее 15% атрибутов документа.
+        </p>
         <label class="save-label">
           Имя файла
           <input
@@ -761,7 +764,8 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   font-size: 11px;
 }
 
-.push-overwrite-hint {
+.push-overwrite-hint,
+.push-fill-hint {
   margin: 0;
   font-size: 12px;
   color: var(--text-muted);

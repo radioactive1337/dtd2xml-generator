@@ -105,8 +105,13 @@ export function useGenerator() {
   async function handleGitPush({ filename, commitMessage }) {
     const xmlText = xml.getEditorXmlText() || xml.xmlText.value || ''
     const rootElement = schema.rootElement.value
+    const schemaId = schema.schemaId.value
     if (!rootElement) {
       gitPushError.value = 'Выберите корневой элемент перед отправкой в Git'
+      return
+    }
+    if (!schemaId) {
+      gitPushError.value = 'Выберите DTD-схему перед отправкой в Git'
       return
     }
     resetGitPushFeedback()
@@ -115,6 +120,7 @@ export function useGenerator() {
         rootElement,
         filename,
         xmlText,
+        schemaId,
         commitMessage,
       })
       if (result?.status === 'ok') {
