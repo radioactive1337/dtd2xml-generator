@@ -1,4 +1,4 @@
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, onBeforeUnmount, nextTick } from 'vue'
 import { listSchemas } from '../../api/dtd'
 import { getConfigAliases } from '../../api/config'
 import { stageFillXml } from '../../api/fill'
@@ -321,11 +321,26 @@ export function useGenerator() {
     }
   })
 
+  async function refreshConnectionAliases() {
+    const aliases = await getConfigAliases().catch(() => null)
+    if (!aliases) return
+
+    mapping.dbAliases.value = aliases.databases || []
+    mapping.llmAliases.value = aliases.llm || []
+    mapping.defaultLlmAlias.value = aliases.default_llm || ''
+
+    const available = mapping.llmAliases.value
+    const current = mapping.llmAlias.value
+    if (current && available.includes(current)) return
+
+    mapping.llmAlias.value = mapping.defaultLlmAlias.value || available[0] || ''
+  }
+
   onMounted(async () => {
     // Run config-aliases fetch concurrently with schema loading so that LLM/DB
     // aliases are available as soon as possible (avoids a race where the user
     // triggers compare before aliases are populated).
-    const aliasesPromise = getConfigAliases().catch(() => null)
+    const aliasesPromise = refreshConnectionAliases()
 
     try {
       const listResult = normalizeDtdListResult(await listSchemas())
@@ -344,16 +359,21 @@ export function useGenerator() {
       // No saved schemas or API unavailable.
     }
 
-    const aliases = await aliasesPromise
-    if (aliases) {
-      mapping.dbAliases.value = aliases.databases || []
-      mapping.llmAliases.value = aliases.llm || []
-      mapping.defaultLlmAlias.value = aliases.default_llm || ''
-      mapping.llmAlias.value = mapping.defaultLlmAlias.value || mapping.llmAliases.value[0] || ''
-    }
+    await aliasesPromise
 
     await xmlLibrary.refreshSharedCategories()
     await xmlLibrary.refreshPersonalDocuments()
+  })
+
+  // GeneratorView is kept alive — refresh aliases when returning from Settings
+  // (e.g. after deleting and recreating an LLM alias).
+  let skipNextActivationRefresh = true
+  onActivated(() => {
+    if (skipNextActivationRefresh) {
+      skipNextActivationRefresh = false
+      return
+    }
+    refreshConnectionAliases()
   })
 
   onBeforeUnmount(() => {
