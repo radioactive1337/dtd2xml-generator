@@ -3,15 +3,17 @@
     <div class="dtd-collapse-header" @click="$emit('toggle-collapse')">
       <div class="dtd-header-main">
         <span class="panel-title">Схема DTD</span>
-        <span v-if="schemaId && collapsed" class="dtd-header-status">
-          ✓ {{ fileName }} · {{ elementCountLabel }}
-          <template v-if="importSourceLabel">
-            · {{ importSourceLabel }}
-          </template>
-          <template v-if="updatedAtLabel">
-            · {{ updatedAtLabel }}
-          </template>
-        </span>
+        <div v-if="schemaId && collapsed" class="dtd-header-status">
+          <span class="dtd-header-status-primary">
+            ✓ {{ fileName }} · {{ elementCountLabel }}
+          </span>
+          <span v-if="importSourceLabel" class="dtd-header-status-line">
+            {{ importSourceLabel }}
+          </span>
+          <span v-if="updatedAtLabel" class="dtd-header-status-line">
+            {{ updatedAtLabel }}
+          </span>
+        </div>
       </div>
       <span class="collapse-arrow" :class="{ rotated: collapsed }">▼</span>
     </div>
@@ -61,8 +63,9 @@ const updatedAtLabel = computed(() => {
 
 .dtd-collapse-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 8px;
   cursor: pointer;
   padding: 2px 0 8px;
   user-select: none;
@@ -72,16 +75,24 @@ const updatedAtLabel = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1;
   min-width: 0;
 }
 
 .dtd-header-status {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
   font-size: 12px;
   color: var(--success);
   font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.dtd-header-status-primary,
+.dtd-header-status-line {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .dtd-collapse-header:hover .panel-title {
@@ -94,6 +105,8 @@ const updatedAtLabel = computed(() => {
 }
 
 .collapse-arrow {
+  flex-shrink: 0;
+  margin-top: 2px;
   font-size: 11px;
   color: var(--text-muted);
   transition: transform 0.2s ease, color 0.15s;
