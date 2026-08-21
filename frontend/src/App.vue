@@ -8,8 +8,6 @@
       <nav class="nav">
         <router-link to="/" class="header-btn">Генератор</router-link>
         <router-link to="/settings" class="header-btn">Настройки</router-link>
-        <a href="/utils/sksj-chrome.html" class="header-btn">mDSE (Chrome)</a>
-        <a href="/utils/sksb-ie.html" class="header-btn">mDSE (IE)</a>
         <router-link v-if="isAdmin" to="/admin" class="header-btn">Админ</router-link>
         <span v-if="user" class="user-badge" :title="user.display_name">{{ user.display_name }}</span>
         <button
