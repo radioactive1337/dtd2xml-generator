@@ -81,6 +81,9 @@ class NexusDtdConfig(BaseModel):
     artifact_id: str
     version: str = "LATEST"
     inner_path: str = "META-INF/dtd/"
+    auto_update: bool = False
+    check_interval_minutes: int = 60
+    on_startup: bool = True
 
 
 def is_auth_disabled() -> bool:

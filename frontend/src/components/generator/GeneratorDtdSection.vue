@@ -25,6 +25,7 @@
         :element-count="elementCount"
         :import-source="importSource"
         :updated-at="updatedAt"
+        :source-type="sourceType"
         @uploaded="$emit('uploaded', $event)"
       />
     </div>
@@ -45,6 +46,7 @@ const props = defineProps({
   elementCountLabel: { type: String, default: '' },
   importSource: { type: String, default: '' },
   updatedAt: { type: String, default: '' },
+  sourceType: { type: String, default: '' },
 })
 
 defineEmits(['toggle-collapse', 'uploaded'])

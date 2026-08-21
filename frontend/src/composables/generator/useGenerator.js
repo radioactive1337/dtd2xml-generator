@@ -358,6 +358,8 @@ export function useGenerator() {
             primary_schema_id: primary.schema_id,
             import_source: listResult.import_source,
             updated_at: listResult.updated_at,
+            source_type: listResult.source_type,
+            resolved_version: listResult.resolved_version,
           }),
         )
       }

@@ -25,6 +25,9 @@
     "group_id": "com.company.project",
     "artifact_id": "schema-lib",
     "version": "LATEST",
-    "inner_path": "META-INF/dtd/"
+    "inner_path": "META-INF/dtd/",
+    "auto_update": false,
+    "check_interval_minutes": 60,
+    "on_startup": true
   }
 }

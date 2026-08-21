@@ -11,6 +11,8 @@ export function useGeneratorSchema() {
     elementCount: 0,
     importSource: '',
     updatedAt: '',
+    sourceType: '',
+    resolvedVersion: '',
   })
   const elements = ref([])
   const elementAttributes = ref({})
@@ -75,6 +77,8 @@ export function useGeneratorSchema() {
       schemaCount: allSchemas.length,
       importSource: primary.import_source || '',
       updatedAt: primary.updated_at || '',
+      sourceType: primary.source_type || '',
+      resolvedVersion: primary.resolved_version || '',
     }
     elements.value = collectElementsFromSchemas(allSchemas)
     rootElement.value = ''

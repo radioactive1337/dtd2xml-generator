@@ -1,19 +1,25 @@
 import client from './client'
 
-export async function uploadDtd(files) {
+function appendForce(form, force) {
+  form.append('force', force ? 'true' : 'false')
+}
+
+export async function uploadDtd(files, { force = false } = {}) {
   const list = Array.isArray(files) ? files : [files]
   const form = new FormData()
   for (const file of list) {
     form.append('files', file)
   }
+  appendForce(form, force)
   const { data } = await client.post('/dtd/upload', form)
   return data
 }
 
-export async function uploadDtdJar(file) {
+export async function uploadDtdJar(file, { force = false } = {}) {
   const form = new FormData()
   form.append('file', file)
   form.append('inner_path', 'META-INF/dtd/')
+  appendForce(form, force)
   const { data } = await client.post('/dtd/upload-jar', form)
   return data
 }
@@ -28,8 +34,10 @@ export async function getNexusConfig() {
   return data
 }
 
-export async function pullDtdFromNexus() {
-  const { data } = await client.post('/dtd/pull-nexus')
+export async function pullDtdFromNexus({ force = false } = {}) {
+  const { data } = await client.post('/dtd/pull-nexus', null, {
+    params: { force },
+  })
   return data
 }
 

@@ -10,6 +10,7 @@
         :element-count-label="elementCountLabel"
         :import-source="dtdMeta.importSource"
         :updated-at="dtdMeta.updatedAt"
+        :source-type="dtdMeta.sourceType"
         @toggle-collapse="dtdCollapsed = !dtdCollapsed"
         @uploaded="onDtdUploaded"
       />

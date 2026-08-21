@@ -71,6 +71,7 @@ const props = defineProps({
   elementCount: { type: Number, default: 0 },
   importSource: { type: String, default: '' },
   updatedAt: { type: String, default: '' },
+  sourceType: { type: String, default: '' },
 })
 
 const emit = defineEmits(['uploaded'])
@@ -87,6 +88,13 @@ const importSourceLabel = computed(() =>
 const updatedAtLabel = computed(() => {
   const formatted = formatDtdUpdatedAt(props.updatedAt)
   return formatted ? `Обновлено: ${formatted}` : ''
+})
+
+const isCustomSource = computed(() => {
+  const type = props.sourceType
+  if (type) return type !== 'nexus'
+  if (!props.importSource) return false
+  return !props.importSource.startsWith('Nexus ')
 })
 
 function isJarFile(file) {
@@ -115,34 +123,84 @@ function collectUploadFiles(fileList) {
   return { kind: 'dtd', files: dtdFiles }
 }
 
-async function processFiles(fileList) {
+function confirmCustomOverwrite() {
+  if (!props.isLoaded || !isCustomSource.value) return true
+  const source = props.importSource || 'ручная загрузка'
+  return window.confirm(
+    `Текущая схема DTD загружена не из Nexus (${source}).\n\n` +
+      'В ней могут быть локальные или новые фичи. ' +
+      'Уточните у коллеги, можно ли заменять схему.\n\n' +
+      'Продолжить обновление?',
+  )
+}
+
+function isCustomOverwriteError(err) {
+  const detail = err?.response?.data?.detail
+  if (detail && typeof detail === 'object') {
+    return detail.code === 'DTD_CUSTOM_OVERWRITE'
+  }
+  return false
+}
+
+function errorMessage(err) {
+  const detail = err?.response?.data?.detail
+  if (detail && typeof detail === 'object' && detail.message) {
+    return detail.message
+  }
+  return err.message
+}
+
+async function processFiles(fileList, { force = false } = {}) {
   if (!fileList?.length) return
+  let useForce = force
+  if (!useForce && props.isLoaded && isCustomSource.value) {
+    if (!confirmCustomOverwrite()) return
+    useForce = true
+  }
+
   loading.value = true
   error.value = ''
   try {
     const selection = collectUploadFiles(fileList)
     if (!selection) return
 
+    const options = { force: useForce }
     const result =
       selection.kind === 'jar'
-        ? await uploadDtdJar(selection.files[0])
-        : await uploadDtd(selection.files)
+        ? await uploadDtdJar(selection.files[0], options)
+        : await uploadDtd(selection.files, options)
     emit('uploaded', normalizeDtdUploadResult(result))
   } catch (e) {
-    error.value = e.message
+    if (!useForce && isCustomOverwriteError(e) && confirmCustomOverwrite()) {
+      loading.value = false
+      await processFiles(fileList, { force: true })
+      return
+    }
+    error.value = errorMessage(e)
   } finally {
     loading.value = false
   }
 }
 
-async function refreshFromNexus() {
+async function refreshFromNexus({ force = false } = {}) {
+  let useForce = force
+  if (!useForce && props.isLoaded && isCustomSource.value) {
+    if (!confirmCustomOverwrite()) return
+    useForce = true
+  }
+
   loading.value = true
   error.value = ''
   try {
-    const result = await pullDtdFromNexus()
+    const result = await pullDtdFromNexus({ force: useForce })
     emit('uploaded', normalizeDtdUploadResult(result))
   } catch (e) {
-    error.value = e.message
+    if (!useForce && isCustomOverwriteError(e) && confirmCustomOverwrite()) {
+      loading.value = false
+      await refreshFromNexus({ force: true })
+      return
+    }
+    error.value = errorMessage(e)
   } finally {
     loading.value = false
   }

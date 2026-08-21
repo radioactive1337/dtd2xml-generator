@@ -17,6 +17,7 @@ client.interceptors.response.use(
     const method = error.config?.method?.toUpperCase()
     const detail = error.response?.data?.detail
     const message =
+      (detail && typeof detail === 'object' && detail.message) ||
       detail ||
       error.message ||
       'Unknown error'
