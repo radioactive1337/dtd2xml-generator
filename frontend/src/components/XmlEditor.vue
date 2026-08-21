@@ -30,6 +30,22 @@
             <span class="format-icon" aria-hidden="true">{ }</span>Форматировать
           </button>
           <button
+            class="btn-secondary btn-tint btn-tint-escape"
+            :disabled="!hasSelection"
+            title="Экранировать спецсимволы в выделении (&, &lt;, &gt;, &quot;, &apos;)"
+            @click="escapeSelection"
+          >
+            Экранировать
+          </button>
+          <button
+            class="btn-secondary btn-tint btn-tint-escape"
+            :disabled="!hasSelection"
+            title="Деэкранировать сущности в выделении (&amp;, &lt;, &gt;, &quot;, &apos;)"
+            @click="unescapeSelection"
+          >
+            Деэкранировать
+          </button>
+          <button
             class="btn-secondary btn-tint btn-tint-danger"
             :disabled="!modelValue"
             title="Очистить содержимое редактора"
@@ -98,6 +114,9 @@
         <p class="push-overwrite-hint">
           Если файл уже есть в репозитории, он будет перезаписан.
         </p>
+        <p class="push-fill-hint">
+          Для отправки в Git должно быть заполнено не менее 15% атрибутов документа.
+        </p>
         <label class="save-label">
           Имя файла
           <input
@@ -165,6 +184,7 @@
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import loader from '@monaco-editor/loader'
 import { registerXmlFormatter } from '../utils/formatXml'
+import { escapeXmlText, unescapeXmlText } from '../utils/escapeXml'
 import { readXmlFileAsText } from '../utils/readXmlFile'
 import { useTheme } from '../composables/useTheme'
 
@@ -206,6 +226,7 @@ const saveName = ref('')
 const saveDescription = ref('')
 const pushFilename = ref('')
 const pushCommitMessage = ref('')
+const hasSelection = ref(false)
 
 const pushTargetPath = computed(() => {
   const folder = props.rootElement || 'root'
@@ -351,6 +372,9 @@ onMounted(async () => {
 
   editor.onDidChangeModelContent(onModelContentChanged)
   editor.onDidPaste(schedulePasteFlush)
+  editor.onDidChangeCursorSelection(() => {
+    hasSelection.value = !editor.getSelection()?.isEmpty()
+  })
   applyModelValue(props.modelValue)
   if (props.uniqueRanges?.length) applyUniqueDecorations(props.uniqueRanges)
 })
@@ -439,6 +463,29 @@ async function onFileSelect(e) {
 async function formatDocument() {
   if (!editor) return
   await editor.getAction('editor.action.formatDocument')?.run()
+}
+
+function replaceSelection(transform) {
+  if (!editor) return
+  const selection = editor.getSelection()
+  const model = editor.getModel()
+  if (!selection?.isEmpty() && model) {
+    const text = model.getValueInRange(selection)
+    editor.executeEdits('xml-text-transform', [{
+      range: selection,
+      text: transform(text),
+      forceMoveMarkers: true,
+    }])
+    notifyContentChange()
+  }
+}
+
+function escapeSelection() {
+  replaceSelection(escapeXmlText)
+}
+
+function unescapeSelection() {
+  replaceSelection(unescapeXmlText)
 }
 
 function clearEditor() {
@@ -566,6 +613,15 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
 .editor-actions .btn-tint-format:hover:not(:disabled) {
   background: color-mix(in srgb, var(--llm-accent) 22%, var(--surface2));
   border-color: color-mix(in srgb, var(--llm-accent) 46%, var(--border));
+}
+
+.editor-actions .btn-tint-escape {
+  background: color-mix(in srgb, #8b5cf6 13%, var(--surface2));
+  border-color: color-mix(in srgb, #8b5cf6 35%, var(--border));
+}
+.editor-actions .btn-tint-escape:hover:not(:disabled) {
+  background: color-mix(in srgb, #8b5cf6 21%, var(--surface2));
+  border-color: color-mix(in srgb, #8b5cf6 45%, var(--border));
 }
 
 .editor-actions .btn-tint-danger {
@@ -708,7 +764,8 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   font-size: 11px;
 }
 
-.push-overwrite-hint {
+.push-overwrite-hint,
+.push-fill-hint {
   margin: 0;
   font-size: 12px;
   color: var(--text-muted);

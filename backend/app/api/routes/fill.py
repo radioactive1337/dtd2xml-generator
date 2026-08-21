@@ -45,6 +45,7 @@ Strategy = Literal[
 # fmt: on
 
 _HYBRID = frozenset({"hybrid_db_faker", "hybrid_db_ai"})
+_AI_STRATEGIES = frozenset({"ai", "hybrid_db_ai"})
 
 ProgressCallback = Callable[[str, str, int], Awaitable[None]]
 
@@ -122,7 +123,12 @@ async def execute_fill(
     on_progress: ProgressCallback = _noop_progress,
     cancel_event: asyncio.Event | None = None,
 ) -> tuple[str, list[str]]:
-    resolved_llm = resolve_llm_alias(user, request.llm_alias)
+    resolved_llm: str | None = None
+    if request.strategy in _AI_STRATEGIES:
+        try:
+            resolved_llm = resolve_llm_alias(user, request.llm_alias)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     registry = get_schema_registry(user)
     if request.schema_id not in registry:
@@ -204,7 +210,7 @@ async def execute_fill(
                 fill_empty_only=fill_empty_only,
                 protected_attrs=protected_attrs,
             )
-        elif request.strategy in ("ai", "hybrid_db_ai"):
+        elif request.strategy in _AI_STRATEGIES:
             llm_percent = 40 if request.strategy in _HYBRID else 15
             await on_progress(
                 "llm_request",
@@ -215,6 +221,7 @@ async def execute_fill(
             async def llm_progress(step: str, message: str, percent: int) -> None:
                 await on_progress(step, message, percent)
 
+            assert resolved_llm is not None
             async with _llm_semaphore:
                 result = await populate_with_llm(
                     xml,
@@ -249,14 +256,14 @@ async def execute_fill(
     except HTTPException:
         raise
     except Exception as exc:
-        stage = "LLM" if request.strategy in ("ai", "hybrid_db_ai") else "Faker"
+        stage = "LLM" if request.strategy in _AI_STRATEGIES else "Faker"
         logger.error(
             "Fill %s stage failed [schema_id=%s strategy=%s locale=%s llm_alias=%s]: %s",
             stage,
             request.schema_id,
             request.strategy,
             request.faker_locale,
-            resolved_llm,
+            resolved_llm or request.llm_alias,
             exc,
         )
         raise HTTPException(

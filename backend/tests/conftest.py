@@ -34,7 +34,7 @@ def _default_auth_disabled(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True)
 def _dev_user_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    from app.auth.sessions import get_current_user
+    from app.auth.sessions import get_current_admin, get_current_user
     from app.user_context import UserContext
 
     root = tmp_path / "dev-user-root"
@@ -48,17 +48,20 @@ def _dev_user_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         return ctx
 
     app.dependency_overrides[get_current_user] = _dev_user
+    app.dependency_overrides[get_current_admin] = _dev_user
     yield
     app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_current_admin, None)
 
 
 @pytest.fixture
 def auth_enabled(monkeypatch: pytest.MonkeyPatch):
-    from app.auth.sessions import get_current_user
+    from app.auth.sessions import get_current_admin, get_current_user
 
     monkeypatch.delenv("AUTH_DISABLED", raising=False)
     monkeypatch.setenv("ALLOW_SELF_REGISTRATION", "1")
     app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_current_admin, None)
 
 
 @pytest.fixture

@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.routes import dtd as dtd_routes
 from app.config import ReferenceXmlSettings
+from app.core.dtd_models import AttributeDef, ContentNode, DTDSchema, ElementDef
 from app.services.reference_xml_sync import SyncResult
 from app.user_context import dev_user_context
 
@@ -149,3 +151,70 @@ def test_list_personal_filters_by_schema(client: TestClient):
     assert response.status_code == 200
     names = [d["name"] for d in response.json()]
     assert names == ["Мой тест"]
+
+
+@pytest.fixture
+def reference_xml_push_enabled(reference_xml_tree: Path, monkeypatch: pytest.MonkeyPatch):
+    settings = ReferenceXmlSettings(
+        enabled=True,
+        push_enabled=True,
+        repo_url="https://github.com/org/xml-library.git",
+        branch="main",
+        subdir="xml-library",
+        cache_dir=str(reference_xml_tree.parent),
+    )
+    monkeypatch.setattr("app.config.get_reference_xml_settings", lambda: settings)
+    monkeypatch.setattr("app.api.routes.xml_library.get_reference_xml_settings", lambda: settings)
+    return settings
+
+
+def _register_test_schema(schema_id: str = "push-test-schema") -> str:
+    schema = DTDSchema(
+        elements={
+            "PayDoc": ElementDef(
+                name="PayDoc",
+                content_raw="(Body)",
+                content_model=ContentNode(
+                    kind="SEQUENCE",
+                    children=[ContentNode(kind="REF", ref="Body")],
+                ),
+                attributes={
+                    "id": AttributeDef(name="id", attr_type="ID", default_decl="#REQUIRED"),
+                    "kladr": AttributeDef(name="kladr", attr_type="CDATA", default_decl="#IMPLIED"),
+                    "active": AttributeDef(name="active", attr_type="CDATA", default_decl="#IMPLIED"),
+                },
+            ),
+            "Body": ElementDef(
+                name="Body",
+                content_raw="EMPTY",
+                content_model=ContentNode(kind="EMPTY"),
+                attributes={},
+            ),
+        }
+    )
+    dtd_routes._schema_registry[schema_id] = schema
+    return schema_id
+
+
+def test_push_rejects_insufficient_attribute_fill(
+    client: TestClient,
+    reference_xml_push_enabled: ReferenceXmlSettings,
+):
+    schema_id = _register_test_schema()
+    xml_text = '<PayDoc id="id-1" kladr="" active=""><Body/></PayDoc>'
+
+    with patch("app.api.routes.xml_library.push_document", new=AsyncMock()) as push_mock:
+        response = client.post(
+            "/api/xml-library/shared/push",
+            json={
+                "schema_id": schema_id,
+                "root_element": "PayDoc",
+                "filename": "sparse.xml",
+                "xml_text": xml_text,
+            },
+        )
+
+    assert response.status_code == 400
+    assert "15%" in response.json()["detail"]
+    assert "заполнено" in response.json()["detail"]
+    push_mock.assert_not_called()

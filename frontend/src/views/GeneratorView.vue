@@ -2,6 +2,7 @@
   <div class="generator" ref="generatorRef">
     <div class="generator-left" :style="{ width: leftWidth + 'px' }">
       <GeneratorDtdSection
+        :can-update-dtd="isAdmin"
         :schema-id="schemaId"
         :collapsed="dtdCollapsed"
         :file-name="dtdMeta.fileName"
@@ -9,6 +10,7 @@
         :element-count-label="elementCountLabel"
         :import-source="dtdMeta.importSource"
         :updated-at="dtdMeta.updatedAt"
+        :source-type="dtdMeta.sourceType"
         @toggle-collapse="dtdCollapsed = !dtdCollapsed"
         @uploaded="onDtdUploaded"
       />
@@ -214,6 +216,9 @@ import GeneratorLibraryTab from '../components/generator/GeneratorLibraryTab.vue
 import GeneratorActionFooter from '../components/generator/GeneratorActionFooter.vue'
 import ShareDocumentDialog from '../components/generator/ShareDocumentDialog.vue'
 import { useGenerator } from '../composables/generator/useGenerator'
+import { useAuth } from '../composables/useAuth'
+
+const { isAdmin } = useAuth()
 
 const {
   generatorRef,

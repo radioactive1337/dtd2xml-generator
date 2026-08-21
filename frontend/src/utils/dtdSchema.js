@@ -46,17 +46,27 @@ export function normalizeDtdUploadResult(result) {
     primary_schema_id: result.primary_schema_id,
     import_source: result.import_source ?? null,
     updated_at: result.updated_at ?? null,
+    source_type: result.source_type ?? null,
+    resolved_version: result.resolved_version ?? null,
   }
 }
 
 export function normalizeDtdListResult(result) {
   if (Array.isArray(result)) {
-    return { schemas: result, import_source: null, updated_at: null }
+    return {
+      schemas: result,
+      import_source: null,
+      updated_at: null,
+      source_type: null,
+      resolved_version: null,
+    }
   }
   return {
     schemas: result?.schemas ?? [],
     import_source: result?.import_source ?? null,
     updated_at: result?.updated_at ?? null,
+    source_type: result?.source_type ?? null,
+    resolved_version: result?.resolved_version ?? null,
   }
 }
 

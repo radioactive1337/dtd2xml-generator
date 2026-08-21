@@ -6,6 +6,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.auth.users import get_admin_user
+from tests.conftest import login_as
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
@@ -18,6 +21,9 @@ def _seed_types_dtd() -> None:
 
 
 def _upload_dtd(client: TestClient) -> str:
+    admin = get_admin_user()
+    assert admin is not None
+    login_as(client, admin.display_name, create=False)
     _seed_types_dtd()
     dtd_path = FIXTURES / "main.dtd"
     with dtd_path.open("rb") as f:

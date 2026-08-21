@@ -11,15 +11,15 @@ import uuid
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import aiofiles
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from pydantic import BaseModel
 
-from app.auth.sessions import get_current_user
-from app.config import DATA_DIR, PROJECT_ROOT, get_nexus_dtd_config, shared_dtd_dir
+from app.auth.sessions import get_current_admin, get_current_user
+from app.config import DATA_DIR, PROJECT_ROOT, NexusDtdConfig, get_nexus_dtd_config, shared_dtd_dir
 from app.core.dtd_archive import extract_jar_dtd_files
 from app.core.dtd_merge import merge_dtd_schemas
 from app.core.dtd_models import DTDSchema, ElementDef
@@ -31,9 +31,11 @@ router = APIRouter(prefix="/dtd", tags=["dtd"])
 logger = logging.getLogger(__name__)
 
 DTD_EXTENSIONS = (".dtd", ".ent", ".mod")
+DtdSourceType = Literal["nexus", "upload", "jar"]
 
 _MAX_DTD_FILE_BYTES = 2 * 1024 * 1024   # 2 MB per DTD file
 _MAX_JAR_FILE_BYTES = 50 * 1024 * 1024  # 50 MB for JAR archive
+_nexus_sync_lock = asyncio.Lock()
 
 
 async def _read_upload_limited(file: UploadFile, max_bytes: int, label: str) -> bytes:
@@ -81,6 +83,28 @@ class DtdImportMeta(BaseModel):
     import_source: str
     updated_at: str
     updated_by: str | None = None
+    source_type: DtdSourceType | None = None
+    resolved_version: str | None = None
+    artifact_id: str | None = None
+
+
+def _infer_source_type(import_source: str, source_type: DtdSourceType | None) -> DtdSourceType | None:
+    if source_type in {"nexus", "upload", "jar"}:
+        return source_type
+    text = (import_source or "").strip()
+    if text.startswith("Nexus "):
+        return "nexus"
+    if text.startswith("JAR:"):
+        return "jar"
+    if text.startswith("Загрузка:"):
+        return "upload"
+    return "upload" if text else None
+
+
+def _resolve_source_type(meta: DtdImportMeta | None) -> DtdSourceType | None:
+    if meta is None:
+        return None
+    return _infer_source_type(meta.import_source, meta.source_type)
 
 
 def _read_import_meta() -> DtdImportMeta | None:
@@ -89,7 +113,11 @@ def _read_import_meta() -> DtdImportMeta | None:
         return None
     try:
         raw = json.loads(meta_path.read_text(encoding="utf-8"))
-        return DtdImportMeta(**raw)
+        meta = DtdImportMeta(**raw)
+        inferred = _infer_source_type(meta.import_source, meta.source_type)
+        if meta.source_type is None and inferred is not None:
+            meta = meta.model_copy(update={"source_type": inferred})
+        return meta
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None
 
@@ -97,12 +125,18 @@ def _read_import_meta() -> DtdImportMeta | None:
 def _write_import_meta(
     import_source: str,
     *,
+    source_type: DtdSourceType,
+    resolved_version: str | None = None,
+    artifact_id: str | None = None,
     updated_by: str | None = None,
 ) -> DtdImportMeta:
     meta = DtdImportMeta(
         import_source=import_source,
         updated_at=datetime.now(UTC).isoformat(),
         updated_by=updated_by,
+        source_type=source_type,
+        resolved_version=resolved_version,
+        artifact_id=artifact_id,
     )
     (_dtd_dir() / _IMPORT_META_FILE).write_text(
         json.dumps(meta.model_dump(), ensure_ascii=False, indent=2) + "\n",
@@ -114,11 +148,42 @@ def _write_import_meta(
 def _import_meta_fields() -> dict[str, str | None]:
     meta = _read_import_meta()
     if meta is None:
-        return {"import_source": None, "updated_at": None}
+        return {
+            "import_source": None,
+            "updated_at": None,
+            "source_type": None,
+            "resolved_version": None,
+        }
     return {
         "import_source": meta.import_source,
         "updated_at": meta.updated_at,
+        "source_type": _resolve_source_type(meta),
+        "resolved_version": meta.resolved_version,
     }
+
+
+def _require_force_for_custom_overwrite(force: bool) -> None:
+    """Block overwriting a non-Nexus DTD unless the caller explicitly forces it."""
+    meta = _read_import_meta()
+    source_type = _resolve_source_type(meta)
+    if source_type is None or source_type == "nexus":
+        return
+    if force:
+        return
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "DTD_CUSTOM_OVERWRITE",
+            "message": (
+                "Текущая схема DTD загружена не из Nexus "
+                f"({meta.import_source if meta else source_type}). "
+                "В ней могут быть локальные/новые фичи. "
+                "Уточните у коллеги, можно ли заменять, затем повторите с force=true."
+            ),
+            "import_source": meta.import_source if meta else None,
+            "source_type": source_type,
+        },
+    )
 
 
 def _dir_has_dtd_files(directory: Path) -> bool:
@@ -399,18 +464,26 @@ class MultiSchemaResponse(BaseModel):
     primary_schema_id: str
     import_source: str | None = None
     updated_at: str | None = None
+    source_type: str | None = None
+    resolved_version: str | None = None
 
 
 class SchemaListResponse(BaseModel):
     schemas: list[SchemaResponse]
     import_source: str | None = None
     updated_at: str | None = None
+    source_type: str | None = None
+    resolved_version: str | None = None
 
 
 class NexusDtdConfigResponse(BaseModel):
     configured: bool
     artifact_id: str | None = None
     version: str | None = None
+    auto_update: bool = False
+    check_interval_minutes: int | None = None
+    installed_version: str | None = None
+    installed_source_type: str | None = None
 
 
 def _pick_primary_schema_id(schemas: list[SchemaResponse]) -> str:
@@ -508,7 +581,8 @@ def _element_to_summary(elem: ElementDef) -> ElementSummary:
 @router.post("/upload", response_model=MultiSchemaResponse)
 async def upload_dtd(
     files: list[UploadFile] = File(...),
-    user: UserContext = Depends(get_current_user),
+    force: bool = Form(False),
+    user: UserContext = Depends(get_current_admin),
 ) -> MultiSchemaResponse:
     if not files:
         raise HTTPException(status_code=400, detail="At least one file is required")
@@ -529,6 +603,8 @@ async def upload_dtd(
                 status_code=400,
                 detail="Only .dtd files are supported (up to 3 at once)",
             )
+
+    _require_force_for_custom_overwrite(force)
 
     _dtd_dir().mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
@@ -567,6 +643,7 @@ async def upload_dtd(
     file_names = ", ".join(Path(upload.filename).name for upload in files)
     _write_import_meta(
         f"Загрузка: {file_names}",
+        source_type="upload",
         updated_by=user.display_name,
     )
     return _multi_schema_response(schema_ids)
@@ -576,13 +653,16 @@ async def upload_dtd(
 async def upload_dtd_jar(
     file: UploadFile = File(...),
     inner_path: str = Form("META-INF/dtd/"),
-    user: UserContext = Depends(get_current_user),
+    force: bool = Form(False),
+    user: UserContext = Depends(get_current_admin),
 ) -> MultiSchemaResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
 
     if not file.filename.lower().endswith(".jar"):
         raise HTTPException(status_code=400, detail="Only .jar files are supported")
+
+    _require_force_for_custom_overwrite(force)
 
     _dtd_dir().mkdir(parents=True, exist_ok=True)
     jar_bytes = await _read_upload_limited(
@@ -601,6 +681,7 @@ async def upload_dtd_jar(
 
     _write_import_meta(
         f"JAR: {file.filename}",
+        source_type="jar",
         updated_by=user.display_name,
     )
     return _multi_schema_response(schema_ids)
@@ -609,60 +690,177 @@ async def upload_dtd_jar(
 @router.get("/nexus-config", response_model=NexusDtdConfigResponse)
 async def get_nexus_config() -> NexusDtdConfigResponse:
     cfg = get_nexus_dtd_config()
+    meta = _read_import_meta()
+    installed_source = _resolve_source_type(meta)
+    installed_version = meta.resolved_version if meta else None
     if cfg is None:
-        return NexusDtdConfigResponse(configured=False)
+        return NexusDtdConfigResponse(
+            configured=False,
+            installed_version=installed_version,
+            installed_source_type=installed_source,
+        )
     return NexusDtdConfigResponse(
         configured=True,
         artifact_id=cfg.artifact_id,
         version=cfg.version,
+        auto_update=cfg.auto_update,
+        check_interval_minutes=cfg.check_interval_minutes,
+        installed_version=installed_version,
+        installed_source_type=installed_source,
     )
+
+
+async def _apply_nexus_jar(
+    *,
+    jar_bytes: bytes,
+    cfg: NexusDtdConfig,
+    resolved_version: str,
+    updated_by: str | None,
+) -> list[str]:
+    schema_ids = await _extract_and_parse_jar(
+        jar_bytes,
+        inner_path=cfg.inner_path,
+    )
+    version_label = resolved_version or cfg.version or "LATEST"
+    _write_import_meta(
+        f"Nexus {cfg.artifact_id}:{version_label}",
+        source_type="nexus",
+        resolved_version=resolved_version,
+        artifact_id=cfg.artifact_id,
+        updated_by=updated_by,
+    )
+    return schema_ids
+
+
+async def sync_dtd_from_nexus(
+    *,
+    updated_by: str | None = None,
+    force: bool = False,
+    skip_if_same_version: bool = False,
+    allow_custom_overwrite: bool = False,
+) -> tuple[str, list[str] | None]:
+    """Download DTD from Nexus and optionally apply.
+
+    Returns ``(status, schema_ids)``. ``schema_ids`` is set when schemas were
+    applied or when skipping same version (current registry ids).
+    """
+    cfg = get_nexus_dtd_config()
+    if cfg is None:
+        return "skipped_not_configured", None
+
+    async with _nexus_sync_lock:
+        if not allow_custom_overwrite:
+            _require_force_for_custom_overwrite(force)
+
+        try:
+            jar_url, resolved_version = await resolve_jar_url(cfg)
+        except httpx.HTTPStatusError as exc:
+            detail = (
+                "Nexus artifact request failed: "
+                f"HTTP {exc.response.status_code} ({exc.request.url})"
+            )
+            raise HTTPException(status_code=502, detail=detail) from exc
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Nexus request failed: {exc}"
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        meta = _read_import_meta()
+        source_type = _resolve_source_type(meta)
+        if (
+            skip_if_same_version
+            and source_type == "nexus"
+            and meta is not None
+            and meta.resolved_version
+            and meta.resolved_version == resolved_version
+        ):
+            ensure_user_registry_loaded()
+            return "skipped_same_version", list(_registry())
+
+        try:
+            jar_bytes = await fetch_jar_bytes(jar_url)
+        except httpx.HTTPStatusError as exc:
+            detail = (
+                "Nexus artifact request failed: "
+                f"HTTP {exc.response.status_code} ({exc.request.url})"
+            )
+            raise HTTPException(status_code=502, detail=detail) from exc
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Nexus request failed: {exc}"
+            ) from exc
+
+        _dtd_dir().mkdir(parents=True, exist_ok=True)
+        try:
+            schema_ids = await _apply_nexus_jar(
+                jar_bytes=jar_bytes,
+                cfg=cfg,
+                resolved_version=resolved_version,
+                updated_by=updated_by,
+            )
+        except zipfile.BadZipFile as exc:
+            raise HTTPException(
+                status_code=502, detail="Nexus artifact is not a valid JAR"
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        logger.info(
+            "DTD schemas synced from Nexus [user=%s artifact=%s version=%s]",
+            updated_by or "system",
+            cfg.artifact_id,
+            resolved_version,
+        )
+        return "updated", schema_ids
+
+
+async def auto_update_dtd_from_nexus() -> str:
+    """Background-safe Nexus sync: never overwrites custom DTDs; skip same version."""
+    cfg = get_nexus_dtd_config()
+    if cfg is None:
+        return "skipped_not_configured"
+    if not cfg.auto_update:
+        return "skipped_disabled"
+
+    meta = _read_import_meta()
+    source_type = _resolve_source_type(meta)
+    if source_type is not None and source_type != "nexus":
+        logger.info(
+            "Nexus DTD auto-update skipped: current schema is custom (%s)",
+            meta.import_source if meta else source_type,
+        )
+        return "skipped_custom"
+
+    try:
+        status, _schema_ids = await sync_dtd_from_nexus(
+            updated_by="auto-update",
+            force=False,
+            skip_if_same_version=True,
+            allow_custom_overwrite=False,
+        )
+    except HTTPException as exc:
+        logger.warning("Nexus DTD auto-update HTTP error: %s", exc.detail)
+        return f"error_http_{exc.status_code}"
+    return status
 
 
 @router.post("/pull-nexus", response_model=MultiSchemaResponse)
 async def pull_dtd_from_nexus(
-    user: UserContext = Depends(get_current_user),
+    force: bool = Query(False),
+    user: UserContext = Depends(get_current_admin),
 ) -> MultiSchemaResponse:
-    cfg = get_nexus_dtd_config()
-    if cfg is None:
-        raise HTTPException(status_code=404, detail="nexus_dtd is not configured")
-
-    _dtd_dir().mkdir(parents=True, exist_ok=True)
-
-    try:
-        jar_url, resolved_version = await resolve_jar_url(cfg)
-        jar_bytes = await fetch_jar_bytes(jar_url)
-    except httpx.HTTPStatusError as exc:
-        detail = (
-            "Nexus artifact request failed: "
-            f"HTTP {exc.response.status_code} ({exc.request.url})"
-        )
-        raise HTTPException(status_code=502, detail=detail) from exc
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail=f"Nexus request failed: {exc}") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    try:
-        schema_ids = await _extract_and_parse_jar(
-            jar_bytes,
-            inner_path=cfg.inner_path,
-        )
-    except zipfile.BadZipFile as exc:
-        raise HTTPException(status_code=502, detail="Nexus artifact is not a valid JAR") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    version_label = resolved_version or cfg.version or "LATEST"
-    _write_import_meta(
-        f"Nexus {cfg.artifact_id}:{version_label}",
+    status, schema_ids = await sync_dtd_from_nexus(
         updated_by=user.display_name,
+        force=force,
+        skip_if_same_version=False,
     )
-    logger.info(
-        "DTD schemas pulled from Nexus [user=%s artifact=%s version=%s]",
-        user.display_name,
-        cfg.artifact_id,
-        resolved_version,
-    )
+    if schema_ids is None:
+        raise HTTPException(status_code=404, detail="nexus_dtd is not configured")
+    if status == "skipped_same_version":
+        ensure_user_registry_loaded(user)
+        return _multi_schema_response(list(_registry()) or schema_ids)
     return _multi_schema_response(schema_ids)
 
 

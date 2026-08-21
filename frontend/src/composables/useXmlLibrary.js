@@ -98,6 +98,7 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
     rootElement,
     filename,
     xmlText,
+    schemaId,
     commitMessage = '',
   }) {
     if (gitPushing.value) return
@@ -108,6 +109,7 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
         root_element: rootElement,
         filename,
         xml_text: xmlText,
+        schema_id: schemaId,
         commit_message: commitMessage.trim() || null,
       })
       if (result.status === 'ok') {

@@ -3,7 +3,6 @@
     <div class="field">
       <label>Стратегия заполнения</label>
       <select :value="fillStrategy" @change="$emit('update:fillStrategy', $event.target.value)">
-        <option value="faker">Faker (быстро, локально)</option>
         <option value="ai">AI / LLM (контекстная генерация)</option>
         <option value="hybrid_db_faker">Гибрид: БД + Faker</option>
         <option value="hybrid_db_ai">Гибрид: БД + AI</option>
@@ -183,18 +182,18 @@
         <button type="button" class="btn-add-mapping" @click="$emit('open-mapping-wizard')">+ Добавить маппинг</button>
       </div>
     </div>
-  </div>
 
-  <ShareDocumentDialog
-    :open="shareDialogOpen"
-    dialog-title="Поделиться пресетом маппинга"
-    item-label-prefix="Пресет"
-    :document-label="sharePresetName"
-    :submitting="shareDialogSubmitting"
-    :error-message="shareDialogError"
-    @close="closeShareDialog"
-    @submit="handleShareSubmit"
-  />
+    <ShareDocumentDialog
+      :open="shareDialogOpen"
+      dialog-title="Поделиться пресетом маппинга"
+      item-label-prefix="Пресет"
+      :document-label="sharePresetName"
+      :submitting="shareDialogSubmitting"
+      :error-message="shareDialogError"
+      @close="closeShareDialog"
+      @submit="handleShareSubmit"
+    />
+  </div>
 </template>
 
 <script setup>
@@ -206,7 +205,7 @@ import FieldOverridesPanel from './FieldOverridesPanel.vue'
 import ShareDocumentDialog from './ShareDocumentDialog.vue'
 
 const props = defineProps({
-  fillStrategy: { type: String, default: 'faker' },
+  fillStrategy: { type: String, default: 'ai' },
   llmAlias: { type: String, default: '' },
   llmAliases: { type: Array, default: () => [] },
   defaultLlmAlias: { type: String, default: '' },

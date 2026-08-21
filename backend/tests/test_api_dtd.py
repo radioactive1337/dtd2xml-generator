@@ -4,6 +4,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from tests.conftest import login_as
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
@@ -28,6 +30,18 @@ def test_config_aliases_no_secrets(client: TestClient):
     assert "databases" in data
     assert "llm" in data
     assert "default_llm" in data
+
+
+def test_upload_dtd_requires_admin(auth_client: TestClient):
+    _seed_types_dtd()
+    login_as(auth_client, "regular-user")
+    dtd_path = FIXTURES / "main.dtd"
+    with dtd_path.open("rb") as f:
+        response = auth_client.post(
+            "/api/dtd/upload",
+            files=[("files", ("main.dtd", f, "application/xml-dtd"))],
+        )
+    assert response.status_code == 403
 
 
 def test_upload_dtd(client: TestClient):

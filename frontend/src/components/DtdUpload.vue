@@ -1,6 +1,7 @@
 <template>
   <div class="dtd-upload">
     <div
+      v-if="canUpdate"
       class="drop-zone"
       :class="{ dragging: isDragging, loaded: isLoaded }"
       @dragover.prevent="isDragging = true"
@@ -32,8 +33,21 @@
         <span class="drop-sub">до 3 .dtd или один .jar</span>
       </template>
     </div>
+    <div v-else class="drop-zone loaded dtd-readonly">
+      <template v-if="isLoaded">
+        <span class="drop-icon">✓</span>
+        <span class="drop-text">{{ fileName }}</span>
+        <span class="drop-sub">Загружено элементов: {{ elementCount }}</span>
+        <span v-if="importSourceLabel" class="drop-sub">{{ importSourceLabel }}</span>
+        <span v-if="updatedAtLabel" class="drop-sub">{{ updatedAtLabel }}</span>
+      </template>
+      <template v-else>
+        <span class="drop-text">Схема DTD не загружена</span>
+        <span class="drop-sub">Обновление схемы доступно только администратору</span>
+      </template>
+    </div>
     <button
-      v-if="nexusConfigured"
+      v-if="canUpdate && nexusConfigured"
       class="nexus-btn"
       :disabled="loading"
       type="button"
@@ -46,16 +60,18 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { getNexusConfig, pullDtdFromNexus, uploadDtd, uploadDtdJar } from '../api/dtd'
 import { formatDtdUpdatedAt, normalizeDtdUploadResult } from '../utils/dtdSchema'
 
 const props = defineProps({
+  canUpdate: { type: Boolean, default: true },
   isLoaded: { type: Boolean, default: false },
   fileName: { type: String, default: '' },
   elementCount: { type: Number, default: 0 },
   importSource: { type: String, default: '' },
   updatedAt: { type: String, default: '' },
+  sourceType: { type: String, default: '' },
 })
 
 const emit = defineEmits(['uploaded'])
@@ -72,6 +88,13 @@ const importSourceLabel = computed(() =>
 const updatedAtLabel = computed(() => {
   const formatted = formatDtdUpdatedAt(props.updatedAt)
   return formatted ? `Обновлено: ${formatted}` : ''
+})
+
+const isCustomSource = computed(() => {
+  const type = props.sourceType
+  if (type) return type !== 'nexus'
+  if (!props.importSource) return false
+  return !props.importSource.startsWith('Nexus ')
 })
 
 function isJarFile(file) {
@@ -100,34 +123,84 @@ function collectUploadFiles(fileList) {
   return { kind: 'dtd', files: dtdFiles }
 }
 
-async function processFiles(fileList) {
+function confirmCustomOverwrite() {
+  if (!props.isLoaded || !isCustomSource.value) return true
+  const source = props.importSource || 'ручная загрузка'
+  return window.confirm(
+    `Текущая схема DTD загружена не из Nexus (${source}).\n\n` +
+      'В ней могут быть локальные или новые фичи. ' +
+      'Уточните у коллеги, можно ли заменять схему.\n\n' +
+      'Продолжить обновление?',
+  )
+}
+
+function isCustomOverwriteError(err) {
+  const detail = err?.response?.data?.detail
+  if (detail && typeof detail === 'object') {
+    return detail.code === 'DTD_CUSTOM_OVERWRITE'
+  }
+  return false
+}
+
+function errorMessage(err) {
+  const detail = err?.response?.data?.detail
+  if (detail && typeof detail === 'object' && detail.message) {
+    return detail.message
+  }
+  return err.message
+}
+
+async function processFiles(fileList, { force = false } = {}) {
   if (!fileList?.length) return
+  let useForce = force
+  if (!useForce && props.isLoaded && isCustomSource.value) {
+    if (!confirmCustomOverwrite()) return
+    useForce = true
+  }
+
   loading.value = true
   error.value = ''
   try {
     const selection = collectUploadFiles(fileList)
     if (!selection) return
 
+    const options = { force: useForce }
     const result =
       selection.kind === 'jar'
-        ? await uploadDtdJar(selection.files[0])
-        : await uploadDtd(selection.files)
+        ? await uploadDtdJar(selection.files[0], options)
+        : await uploadDtd(selection.files, options)
     emit('uploaded', normalizeDtdUploadResult(result))
   } catch (e) {
-    error.value = e.message
+    if (!useForce && isCustomOverwriteError(e) && confirmCustomOverwrite()) {
+      loading.value = false
+      await processFiles(fileList, { force: true })
+      return
+    }
+    error.value = errorMessage(e)
   } finally {
     loading.value = false
   }
 }
 
-async function refreshFromNexus() {
+async function refreshFromNexus({ force = false } = {}) {
+  let useForce = force
+  if (!useForce && props.isLoaded && isCustomSource.value) {
+    if (!confirmCustomOverwrite()) return
+    useForce = true
+  }
+
   loading.value = true
   error.value = ''
   try {
-    const result = await pullDtdFromNexus()
+    const result = await pullDtdFromNexus({ force: useForce })
     emit('uploaded', normalizeDtdUploadResult(result))
   } catch (e) {
-    error.value = e.message
+    if (!useForce && isCustomOverwriteError(e) && confirmCustomOverwrite()) {
+      loading.value = false
+      await refreshFromNexus({ force: true })
+      return
+    }
+    error.value = errorMessage(e)
   } finally {
     loading.value = false
   }
@@ -143,14 +216,22 @@ function onFileSelect(e) {
   e.target.value = ''
 }
 
-onMounted(async () => {
-  try {
-    const cfg = await getNexusConfig()
-    nexusConfigured.value = !!cfg?.configured
-  } catch (_e) {
-    nexusConfigured.value = false
-  }
-})
+watch(
+  () => props.canUpdate,
+  async (canUpdate) => {
+    if (!canUpdate) {
+      nexusConfigured.value = false
+      return
+    }
+    try {
+      const cfg = await getNexusConfig()
+      nexusConfigured.value = !!cfg?.configured
+    } catch (_e) {
+      nexusConfigured.value = false
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>
@@ -176,6 +257,10 @@ onMounted(async () => {
 .drop-zone.loaded {
   border-color: var(--success);
   border-style: solid;
+}
+
+.dtd-readonly {
+  cursor: default;
 }
 
 .drop-icon {

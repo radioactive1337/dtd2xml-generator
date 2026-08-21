@@ -50,9 +50,18 @@ bootstrap_oracle_client()
 async def lifespan(_app: FastAPI):
     init_user_db()
     logger.info("User database initialized")
-    yield
-    await close_db_pools()
-    await close_llm_http_client()
+    from app.services.nexus_dtd_auto_update import (
+        start_nexus_dtd_auto_update,
+        stop_nexus_dtd_auto_update,
+    )
+
+    await start_nexus_dtd_auto_update()
+    try:
+        yield
+    finally:
+        await stop_nexus_dtd_auto_update()
+        await close_db_pools()
+        await close_llm_http_client()
 
 
 app = FastAPI(

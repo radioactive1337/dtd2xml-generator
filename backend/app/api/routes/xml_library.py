@@ -21,6 +21,8 @@ from app.config import (
     reference_xml_root,
     resolve_git_auth,
 )
+from app.api.routes.dtd import get_merged_schema
+from app.core.xml_tree import git_push_attribute_fill_error
 from app.services import reference_xml_service as ref_service
 from app.services.git_identity_service import ensure_git_commit_author
 from app.services.git_push_service import push_document
@@ -59,6 +61,7 @@ class PushToGitRequest(BaseModel):
     xml_text: str
     filename: str
     root_element: str
+    schema_id: str
     commit_message: str | None = None
 
 
@@ -215,6 +218,10 @@ async def push_to_git(
     user: UserContext = Depends(get_current_user),
 ) -> PushToGitResponse:
     settings = _require_push_settings()
+    schema = get_merged_schema(user, body.schema_id)
+    fill_error = git_push_attribute_fill_error(body.xml_text, schema)
+    if fill_error:
+        raise HTTPException(status_code=400, detail=fill_error)
     git_auth = _git_auth_for_user(user, settings)
     author_name, author_email = ensure_git_commit_author(user, settings)
     result = await push_document(
