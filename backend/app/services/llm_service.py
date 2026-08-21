@@ -83,7 +83,11 @@ async def _get_http_client() -> httpx.AsyncClient:
     async with _http_client_lock:
         if _http_client is not None and not _http_client.is_closed:
             return _http_client
+        # Bypass HTTP(S)_PROXY from the process env: corporate proxies often
+        # return 407 for internal/OpenAI-compatible LLM endpoints that are
+        # reachable directly from the app host.
         _http_client = httpx.AsyncClient(
+            trust_env=False,
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
         return _http_client
