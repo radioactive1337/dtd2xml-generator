@@ -1,5 +1,5 @@
 <template>
-  <div class="xml-editor card">
+  <div class="xml-editor">
     <div class="editor-header">
       <div class="editor-actions">
         <input
