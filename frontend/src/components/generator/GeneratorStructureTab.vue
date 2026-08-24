@@ -141,7 +141,8 @@ defineExpose({ dtdTreeRef })
 }
 
 .mode-segment {
-  display: inline-flex;
+  display: flex;
+  width: 100%;
   align-items: stretch;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -150,6 +151,7 @@ defineExpose({ dtdTreeRef })
 }
 
 .mode-seg-btn {
+  flex: 1;
   padding: 6px 12px;
   border: none;
   border-radius: 0;
