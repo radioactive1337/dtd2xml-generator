@@ -71,6 +71,10 @@
             <span>Разрешить самостоятельную регистрацию новых пользователей</span>
           </label>
           <p v-if="settingsError" class="error-msg">{{ settingsError }}</p>
+          <p class="hint section-hint server-config-note">
+            Глобальные параметры сервера (Oracle <code>oracle_client_lib_dir</code> и др.) —
+            в <code>config/app.json</code> на сервере.
+          </p>
         </section>
 
         <section class="admin-section">
@@ -308,6 +312,11 @@ onMounted(loadAll)
 }
 
 .section-hint {
+  margin-bottom: 0;
+}
+
+.server-config-note {
+  margin-top: 12px;
   margin-bottom: 0;
 }
 

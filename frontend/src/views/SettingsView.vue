@@ -110,8 +110,14 @@
             <h3>Git (эталонная библиотека)</h3>
           </div>
           <p class="hint section-hint">
-            Персональный токен для pull и push в репозиторий эталонов. Для привязки коммитов к вашему
-            аккаунту GitLab укажите email, совпадающий с профилем (или он подтянется автоматически при сохранении токена).
+            Токен для pull и push в репозиторий эталонов.
+            <button type="button" class="hint-more" @click="gitHintOpen = !gitHintOpen">
+              {{ gitHintOpen ? 'Скрыть' : 'Подробнее' }}
+            </button>
+          </p>
+          <p v-if="gitHintOpen" class="hint section-hint-detail">
+            Для привязки коммитов к аккаунту GitLab укажите email, совпадающий с профилем
+            (или он подтянется автоматически при сохранении токена).
           </p>
           <div v-if="gitSettings.configured" class="git-settings-card">
             <div class="git-settings-row">
@@ -153,14 +159,6 @@
             <p class="settings-empty-text">Токен не задан</p>
             <button type="button" class="btn-primary" @click="openGitForm">Добавить</button>
           </div>
-        </section>
-
-        <section class="setup-hint card inner">
-          <div class="panel-title">Серверные настройки</div>
-          <p class="hint inner-hint">
-            Глобальные параметры Oracle (<code>oracle_client_lib_dir</code> и др.) настраиваются администратором в
-            <code>config/app.json</code> на сервере.
-          </p>
         </section>
       </template>
 
@@ -228,6 +226,7 @@
           />
           <p class="hint inner-hint">
             GitLab привязывает коммит к аккаунту по email автора, а не по токену push.
+            Email должен совпадать с профилем; пустые имя/email подтянутся из GitLab при сохранении токена.
           </p>
           <p v-if="gitFormError" class="error-msg">{{ gitFormError }}</p>
           <div class="modal-actions">
@@ -292,6 +291,7 @@ const gitSettings = ref({ configured: false, user: 'oauth2' })
 const gitTestStatus = ref(null)
 const gitTesting = ref(false)
 const gitFormOpen = ref(false)
+const gitHintOpen = ref(false)
 const savingGitForm = ref(false)
 const gitFormError = ref('')
 const gitForm = ref({ token: '', user: 'oauth2', author_name: '', author_email: '' })
@@ -736,6 +736,29 @@ code {
   margin-bottom: 12px;
 }
 
+.section-hint-detail {
+  margin-top: -4px;
+  margin-bottom: 12px;
+}
+
+.hint-more {
+  display: inline;
+  margin-left: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hint-more:hover {
+  opacity: 0.85;
+}
+
 .git-settings-card {
   background: var(--surface2);
   border-radius: var(--radius);
@@ -765,10 +788,6 @@ code {
   margin: 0;
   font-size: 13px;
   color: var(--text-muted);
-}
-
-.setup-hint.inner {
-  background: var(--surface2);
 }
 
 .loading {
