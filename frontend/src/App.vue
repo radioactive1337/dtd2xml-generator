@@ -6,28 +6,65 @@
         <span class="logo-text">Генератор XML</span>
       </div>
       <nav class="nav">
-        <router-link to="/" class="header-btn">Генератор</router-link>
-        <router-link to="/settings" class="header-btn">Настройки</router-link>
-        <router-link v-if="isAdmin" to="/admin" class="header-btn">Админ</router-link>
-        <span v-if="user" class="user-badge" :title="user.display_name">{{ user.display_name }}</span>
-        <button
-          v-if="user"
-          type="button"
-          class="header-btn"
-          title="Сменить пользователя"
-          @click="handleLogout"
-        >
-          Выйти
-        </button>
-        <button
-          type="button"
-          class="header-btn header-btn--icon"
-          :title="isDark ? 'Светлая тема' : 'Тёмная тема'"
-          :aria-label="isDark ? 'Включить светлую тему' : 'Включить тёмную тему'"
-          @click="toggleTheme"
-        >
-          <span class="theme-icon" aria-hidden="true">{{ isDark ? '☀' : '☾' }}</span>
-        </button>
+        <div class="nav-links">
+          <router-link to="/" class="nav-link">Генератор</router-link>
+          <router-link to="/settings" class="nav-link">Настройки</router-link>
+          <router-link v-if="isAdmin" to="/admin" class="nav-link">Админ</router-link>
+        </div>
+        <div class="nav-meta">
+          <span v-if="user" class="nav-user" :title="user.display_name">{{ user.display_name }}</span>
+          <button
+            type="button"
+            class="nav-icon-btn"
+            :title="isDark ? 'Светлая тема' : 'Тёмная тема'"
+            :aria-label="isDark ? 'Включить светлую тему' : 'Включить тёмную тему'"
+            @click="toggleTheme"
+          >
+            <svg
+              v-if="isDark"
+              class="theme-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2.5v2.25" />
+              <path d="M12 19.25v2.25" />
+              <path d="M4.93 4.93l1.59 1.59" />
+              <path d="M17.48 17.48l1.59 1.59" />
+              <path d="M2.5 12h2.25" />
+              <path d="M19.25 12h2.25" />
+              <path d="M4.93 19.07l1.59-1.59" />
+              <path d="M17.48 6.52l1.59-1.59" />
+            </svg>
+            <svg
+              v-else
+              class="theme-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+            </svg>
+          </button>
+          <button
+            v-if="user"
+            type="button"
+            class="nav-logout"
+            title="Сменить пользователя"
+            @click="handleLogout"
+          >
+            Выйти
+          </button>
+        </div>
       </nav>
     </header>
     <main class="app-main">
@@ -102,56 +139,101 @@ async function handleLogout() {
 .nav {
   display: flex;
   align-items: center;
+  gap: 16px;
+}
+
+.nav-links,
+.nav-meta {
+  display: inline-flex;
+  align-items: center;
+}
+
+.nav-links {
+  gap: 4px;
+}
+
+.nav-meta {
   gap: 8px;
 }
 
-.header-btn {
+.nav-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 34px;
-  padding: 6px 14px;
+  padding: 6px 4px;
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
-  color: var(--text);
+  color: var(--text-muted);
   text-decoration: none;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  transition: background 0.15s, color 0.15s;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
 }
 
-.header-btn:hover,
-.header-btn.router-link-active {
-  background: var(--border);
+.nav-link:hover {
+  color: var(--text);
 }
 
-.header-btn--icon {
+.nav-link.router-link-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.nav-icon-btn,
+.nav-logout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  transition:
+    color 0.15s,
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.nav-icon-btn {
   width: 34px;
   min-width: 34px;
   padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+}
+
+.nav-icon-btn:hover {
+  color: var(--text);
+  background: var(--surface2);
 }
 
 .theme-icon {
-  font-size: 16px;
-  line-height: 1;
+  width: 18px;
+  height: 18px;
 }
 
-.user-badge {
+.nav-user {
   font-size: 13px;
   color: var(--text-muted);
-  padding: 6px 12px;
-  min-height: 34px;
   display: inline-flex;
   align-items: center;
-  background: transparent;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
   max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.nav-logout {
+  padding: 6px 10px;
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+}
+
+.nav-logout:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 26%, var(--border));
 }
 
 .app-main {
