@@ -72,14 +72,12 @@ defineEmits(['update:activeTab', 'tab-keydown'])
   padding: 8px 12px;
   white-space: nowrap;
   border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
   background: none;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.15s;
 }
 
 .left-tab-btn:hover {
@@ -88,7 +86,6 @@ defineEmits(['update:activeTab', 'tab-keydown'])
 
 .left-tab-btn.active {
   color: var(--accent);
-  border-bottom-color: var(--accent);
 }
 
 .left-tab-btn:focus-visible {
