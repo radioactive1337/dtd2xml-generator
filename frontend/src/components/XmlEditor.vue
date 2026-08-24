@@ -12,7 +12,8 @@
 
         <div class="action-group">
           <button
-            class="btn-secondary btn-tint btn-tint-import"
+            class="btn-secondary"
+            :class="{ 'btn-tint btn-tint-import': !modelValue }"
             title="Загрузить XML из файла"
             @click="triggerImport"
           >
@@ -22,28 +23,12 @@
 
         <div class="action-group">
           <button
-            class="btn-secondary btn-tint btn-tint-format"
+            class="btn-secondary"
             :disabled="!modelValue"
             title="Форматировать документ (Alt+Shift+F)"
             @click="formatDocument"
           >
             <span class="format-icon" aria-hidden="true">{ }</span>Форматировать
-          </button>
-          <button
-            class="btn-secondary btn-tint btn-tint-escape"
-            :disabled="!hasSelection"
-            title="Экранировать спецсимволы в выделении (&, &lt;, &gt;, &quot;, &apos;)"
-            @click="escapeSelection"
-          >
-            Экранировать
-          </button>
-          <button
-            class="btn-secondary btn-tint btn-tint-escape"
-            :disabled="!hasSelection"
-            title="Деэкранировать сущности в выделении (&amp;, &lt;, &gt;, &quot;, &apos;)"
-            @click="unescapeSelection"
-          >
-            Деэкранировать
           </button>
           <button
             class="btn-secondary btn-tint btn-tint-danger"
@@ -55,50 +40,89 @@
           </button>
         </div>
 
-        <div v-if="showCompareButton" class="action-group">
-          <button
-            class="btn-secondary btn-tint btn-tint-compare"
-            :disabled="!modelValue || comparing"
-            title="Сравнить структуру XML со всеми эталонами того же корневого элемента"
-            @click="$emit('run-compare')"
-          >
-            {{ comparing ? 'Проверяем…' : 'Проверить уникальность' }}
-          </button>
-        </div>
-
         <div class="action-group">
           <button
-            class="btn-secondary btn-tint btn-tint-export"
+            class="btn-secondary"
             :disabled="!modelValue"
             @click="downloadXml"
           >
             Экспорт .xml
           </button>
           <button
-            v-if="gitPushEnabled"
-            class="btn-secondary btn-tint btn-tint-git"
-            :disabled="!modelValue"
-            title="Отправить в Git-репозиторий эталонной библиотеки"
-            @click="onGitPushClick"
-          >
-            Отправить в Git
-          </button>
-          <button
-            class="btn-secondary btn-tint btn-tint-share"
-            :disabled="!modelValue"
-            title="Поделиться с другим пользователем"
-            @click="onShareClick"
-          >
-            Поделиться
-          </button>
-          <button
-            class="btn-secondary btn-tint btn-tint-save"
+            class="btn-secondary"
             :disabled="!canSave"
             title="Сохранить в «Мои документы»"
             @click="onSaveClick"
           >
             Сохранить в документы
           </button>
+          <div ref="moreRef" class="more-dropdown">
+            <button
+              type="button"
+              class="btn-secondary more-dropdown-trigger"
+              :class="{ open: moreOpen }"
+              aria-haspopup="menu"
+              :aria-expanded="moreOpen"
+              @click="toggleMoreMenu"
+            >
+              Ещё
+              <span class="more-dropdown-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div v-if="moreOpen" class="more-dropdown-menu" role="menu" @click.stop>
+              <button
+                type="button"
+                class="more-dropdown-item"
+                role="menuitem"
+                :disabled="!hasSelection"
+                title="Экранировать спецсимволы в выделении (&, &lt;, &gt;, &quot;, &apos;)"
+                @click="onMoreEscape"
+              >
+                Экранировать
+              </button>
+              <button
+                type="button"
+                class="more-dropdown-item"
+                role="menuitem"
+                :disabled="!hasSelection"
+                title="Деэкранировать сущности в выделении (&amp;, &lt;, &gt;, &quot;, &apos;)"
+                @click="onMoreUnescape"
+              >
+                Деэкранировать
+              </button>
+              <button
+                v-if="showCompareButton"
+                type="button"
+                class="more-dropdown-item"
+                role="menuitem"
+                :disabled="!modelValue || comparing"
+                title="Сравнить структуру XML со всеми эталонами того же корневого элемента"
+                @click="onMoreCompare"
+              >
+                {{ comparing ? 'Проверяем…' : 'Проверить уникальность' }}
+              </button>
+              <button
+                v-if="gitPushEnabled"
+                type="button"
+                class="more-dropdown-item"
+                role="menuitem"
+                :disabled="!modelValue"
+                title="Отправить в Git-репозиторий эталонной библиотеки"
+                @click="onMoreGitPush"
+              >
+                Отправить в Git
+              </button>
+              <button
+                type="button"
+                class="more-dropdown-item"
+                role="menuitem"
+                :disabled="!modelValue"
+                title="Поделиться с другим пользователем"
+                @click="onMoreShare"
+              >
+                Поделиться
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -182,6 +206,7 @@
 
 <script setup>
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
+import { onClickOutside } from '@vueuse/core'
 import loader from '@monaco-editor/loader'
 import { registerXmlFormatter } from '../utils/formatXml'
 import { escapeXmlText, unescapeXmlText } from '../utils/escapeXml'
@@ -227,6 +252,8 @@ const saveDescription = ref('')
 const pushFilename = ref('')
 const pushCommitMessage = ref('')
 const hasSelection = ref(false)
+const moreOpen = ref(false)
+const moreRef = ref(null)
 
 const pushTargetPath = computed(() => {
   const folder = props.rootElement || 'root'
@@ -488,6 +515,41 @@ function unescapeSelection() {
   replaceSelection(unescapeXmlText)
 }
 
+function closeMoreMenu() {
+  moreOpen.value = false
+}
+
+function toggleMoreMenu() {
+  moreOpen.value = !moreOpen.value
+}
+
+function onMoreEscape() {
+  escapeSelection()
+  closeMoreMenu()
+}
+
+function onMoreUnescape() {
+  unescapeSelection()
+  closeMoreMenu()
+}
+
+function onMoreCompare() {
+  emit('run-compare')
+  closeMoreMenu()
+}
+
+function onMoreGitPush() {
+  onGitPushClick()
+  closeMoreMenu()
+}
+
+function onMoreShare() {
+  onShareClick()
+  closeMoreMenu()
+}
+
+onClickOutside(moreRef, closeMoreMenu)
+
 function clearEditor() {
   if (!props.modelValue) return
   emit('clear')
@@ -606,24 +668,6 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
 }
 
-.editor-actions .btn-tint-format {
-  background: color-mix(in srgb, var(--llm-accent) 14%, var(--surface2));
-  border-color: color-mix(in srgb, var(--llm-accent) 36%, var(--border));
-}
-.editor-actions .btn-tint-format:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--llm-accent) 22%, var(--surface2));
-  border-color: color-mix(in srgb, var(--llm-accent) 46%, var(--border));
-}
-
-.editor-actions .btn-tint-escape {
-  background: color-mix(in srgb, #8b5cf6 13%, var(--surface2));
-  border-color: color-mix(in srgb, #8b5cf6 35%, var(--border));
-}
-.editor-actions .btn-tint-escape:hover:not(:disabled) {
-  background: color-mix(in srgb, #8b5cf6 21%, var(--surface2));
-  border-color: color-mix(in srgb, #8b5cf6 45%, var(--border));
-}
-
 .editor-actions .btn-tint-danger {
   background: color-mix(in srgb, var(--danger) 12%, var(--surface2));
   border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
@@ -633,49 +677,62 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   border-color: color-mix(in srgb, var(--danger) 44%, var(--border));
 }
 
-.editor-actions .btn-tint-export {
-  background: color-mix(in srgb, var(--success) 13%, var(--surface2));
-  border-color: color-mix(in srgb, var(--success) 36%, var(--border));
-}
-.editor-actions .btn-tint-export:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--success) 21%, var(--surface2));
-  border-color: color-mix(in srgb, var(--success) 46%, var(--border));
+.more-dropdown {
+  position: relative;
 }
 
-.editor-actions .btn-tint-git {
-  background: color-mix(in srgb, var(--warning) 14%, var(--surface2));
-  border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
-}
-.editor-actions .btn-tint-git:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--warning) 22%, var(--surface2));
-  border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
+.more-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.editor-actions .btn-tint-share {
-  background: color-mix(in srgb, #06b6d4 13%, var(--surface2));
-  border-color: color-mix(in srgb, #06b6d4 35%, var(--border));
-}
-.editor-actions .btn-tint-share:hover:not(:disabled) {
-  background: color-mix(in srgb, #06b6d4 21%, var(--surface2));
-  border-color: color-mix(in srgb, #06b6d4 45%, var(--border));
+.more-dropdown-chevron {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.15s;
 }
 
-.editor-actions .btn-tint-save {
-  background: color-mix(in srgb, var(--accent) 18%, var(--surface2));
-  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
-}
-.editor-actions .btn-tint-save:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 26%, var(--surface2));
-  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+.more-dropdown-trigger.open .more-dropdown-chevron {
+  transform: rotate(180deg);
 }
 
-.editor-actions .btn-tint-compare {
-  background: color-mix(in srgb, var(--warning) 14%, var(--surface2));
-  border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
+.more-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
 }
-.editor-actions .btn-tint-compare:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--warning) 22%, var(--surface2));
-  border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
+
+.more-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.more-dropdown-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--border) 30%, transparent);
+}
+
+.more-dropdown-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .format-icon {
