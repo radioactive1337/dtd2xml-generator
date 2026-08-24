@@ -1,19 +1,21 @@
 <template>
   <div class="left-sticky-footer">
-    <div class="action-row">
-      <button class="btn-primary" :disabled="!canGenerate || generating" @click="$emit('generate')">
+    <div class="action-stack">
+      <button class="btn-primary action-primary" :disabled="!canGenerate || generating" @click="$emit('generate')">
         {{ generating ? 'Генерация…' : 'Сгенерировать XML' }}
       </button>
-      <button
-        class="btn-secondary"
-        :disabled="!xmlText || filling || hasMappingBlockers"
-        @click="$emit('fill')"
-      >
-        {{ filling ? 'Заполнение…' : 'Заполнить данными' }}
-      </button>
-      <button class="btn-secondary" :disabled="!canValidate || validating" @click="$emit('validate')">
-        {{ validating ? 'Проверка…' : 'Проверить по DTD' }}
-      </button>
+      <div class="action-secondary">
+        <button
+          class="btn-secondary"
+          :disabled="!xmlText || filling || hasMappingBlockers"
+          @click="$emit('fill')"
+        >
+          {{ filling ? 'Заполнение…' : 'Заполнить данными' }}
+        </button>
+        <button class="btn-secondary" :disabled="!canValidate || validating" @click="$emit('validate')">
+          {{ validating ? 'Проверка…' : 'Проверить по DTD' }}
+        </button>
+      </div>
     </div>
 
     <div v-if="filling" class="fill-progress" role="status" aria-live="polite">
@@ -68,9 +70,24 @@ defineEmits(['generate', 'fill', 'validate', 'cancel-fill'])
   border-top: 1px solid var(--border);
 }
 
-.action-row {
+.action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-primary {
+  width: 100%;
+}
+
+.action-secondary {
   display: flex;
   gap: 8px;
+}
+
+.action-secondary > button {
+  flex: 1;
+  min-width: 0;
 }
 
 .fill-progress {
