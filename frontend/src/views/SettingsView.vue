@@ -12,7 +12,13 @@
         <section class="alias-section">
           <div class="section-header">
             <h3>Алиасы БД</h3>
-            <button class="btn-secondary btn-small" @click="openDbForm()">+ Добавить</button>
+            <button
+              v-if="connections.databases?.length"
+              class="btn-secondary btn-small"
+              @click="openDbForm()"
+            >
+              + Добавить
+            </button>
           </div>
           <ul v-if="connections.databases?.length" class="alias-list">
             <li v-for="db in connections.databases" :key="db.alias" class="alias-item">
@@ -34,13 +40,23 @@
               </p>
             </li>
           </ul>
-          <p v-else class="empty">Алиасы БД не настроены.</p>
+          <div v-else class="settings-empty">
+            <span class="alias-icon">DB</span>
+            <p class="settings-empty-text">Алиасы БД не настроены</p>
+            <button type="button" class="btn-primary" @click="openDbForm()">Добавить</button>
+          </div>
         </section>
 
         <section class="alias-section">
           <div class="section-header">
             <h3>Алиасы LLM</h3>
-            <button class="btn-secondary btn-small" @click="openLlmForm()">+ Добавить</button>
+            <button
+              v-if="connections.llm?.length"
+              class="btn-secondary btn-small"
+              @click="openLlmForm()"
+            >
+              + Добавить
+            </button>
           </div>
           <div v-if="connections.llm?.length > 1" class="default-llm-field">
             <label for="default-llm-select">LLM по умолчанию</label>
@@ -68,7 +84,11 @@
               </p>
             </li>
           </ul>
-          <p v-else class="empty">Алиасы LLM не настроены.</p>
+          <div v-else class="settings-empty">
+            <span class="alias-icon llm">LLM</span>
+            <p class="settings-empty-text">Алиасы LLM не настроены</p>
+            <button type="button" class="btn-primary" @click="openLlmForm()">Добавить</button>
+          </div>
         </section>
 
         <section class="alias-section">
@@ -79,35 +99,26 @@
             Персональный токен для pull и push в репозиторий эталонов. Для привязки коммитов к вашему
             аккаунту GitLab укажите email, совпадающий с профилем (или он подтянется автоматически при сохранении токена).
           </p>
-          <div class="git-settings-card">
+          <div v-if="gitSettings.configured" class="git-settings-card">
             <div class="git-settings-row">
               <span class="alias-icon git">GIT</span>
               <div class="alias-info">
                 <span class="alias-name">Доступ к репозиторию</span>
                 <span class="alias-meta">
-                  {{ gitSettings.configured ? 'Токен сохранён' : 'Токен не задан' }}
-                  · пользователь: {{ gitSettings.user || 'oauth2' }}
+                  Токен сохранён · пользователь: {{ gitSettings.user || 'oauth2' }}
                 </span>
                 <span v-if="gitSettings.author_configured" class="alias-meta">
                   Автор коммитов: {{ gitSettings.author_name }} &lt;{{ gitSettings.author_email }}&gt;
                 </span>
-                <span v-else-if="gitSettings.configured" class="alias-meta">
+                <span v-else class="alias-meta">
                   Автор коммитов не задан — будет подтянут из GitLab при первом push
                 </span>
               </div>
               <button class="btn-secondary btn-test" :disabled="gitTesting" @click="testGit">
                 {{ gitTesting ? 'Проверка…' : 'Проверить' }}
               </button>
-              <button class="btn-secondary btn-test" @click="openGitForm">
-                {{ gitSettings.configured ? 'Изменить' : 'Добавить токен' }}
-              </button>
-              <button
-                v-if="gitSettings.configured"
-                class="btn-secondary btn-test danger"
-                @click="removeGitSettings"
-              >
-                Удалить
-              </button>
+              <button class="btn-secondary btn-test" @click="openGitForm">Изменить</button>
+              <button class="btn-secondary btn-test danger" @click="removeGitSettings">Удалить</button>
               <span v-if="gitTestStatus" class="status-badge" :class="gitTestStatus.ok ? 'ok' : 'error'">
                 {{ gitTestStatus.ok ? 'OK' : 'Ошибка' }}
               </span>
@@ -119,6 +130,11 @@
                 {{ gitTestStatus.message }}
               </p>
             </div>
+          </div>
+          <div v-else class="settings-empty">
+            <span class="alias-icon git">GIT</span>
+            <p class="settings-empty-text">Токен не задан</p>
+            <button type="button" class="btn-primary" @click="openGitForm">Добавить</button>
           </div>
         </section>
 
@@ -718,7 +734,20 @@ code {
   gap: 8px;
 }
 
-.empty {
+.settings-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 12px;
+  background: var(--surface2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.settings-empty-text {
+  margin: 0;
   font-size: 13px;
   color: var(--text-muted);
 }
