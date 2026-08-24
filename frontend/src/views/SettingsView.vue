@@ -560,7 +560,9 @@ onMounted(async () => {
 
 <style scoped>
 .settings {
-  max-width: 760px;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto;
 }
 
 .hint {
