@@ -13,15 +13,19 @@
 
     <div class="field">
       <label>Режим сборки</label>
-      <div class="mode-group">
-        <label v-for="m in modes" :key="m.value" class="mode-label">
-          <input
-            type="radio"
-            :checked="mode === m.value"
-            @change="$emit('update:mode', m.value)"
-          />
+      <div class="mode-segment" role="radiogroup" aria-label="Режим сборки">
+        <button
+          v-for="m in modes"
+          :key="m.value"
+          type="button"
+          role="radio"
+          class="mode-seg-btn"
+          :class="{ 'mode-seg-btn--active': mode === m.value }"
+          :aria-checked="mode === m.value"
+          @click="$emit('update:mode', m.value)"
+        >
           {{ m.label }}
-        </label>
+        </button>
       </div>
     </div>
 
@@ -136,18 +140,47 @@ defineExpose({ dtdTreeRef })
   gap: 4px;
 }
 
-.mode-group {
-  display: flex;
-  gap: 12px;
+.mode-segment {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface2);
+  overflow: hidden;
 }
 
-.mode-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 14px;
-  color: var(--text);
+.mode-seg-btn {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
   cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.mode-seg-btn:last-child {
+  border-right: none;
+}
+
+.mode-seg-btn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.mode-seg-btn--active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.mode-seg-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 1;
 }
 
 .tree-search-field {
