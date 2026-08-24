@@ -351,7 +351,7 @@ const statusMessage = computed(() => {
 }
 
 .history-root {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
 }
 
 .history-actions {

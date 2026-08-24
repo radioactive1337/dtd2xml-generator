@@ -449,7 +449,7 @@ onMounted(loadAll)
 }
 
 .mono {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-muted);
 }
@@ -485,7 +485,7 @@ onMounted(loadAll)
 }
 
 code {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   background: var(--surface2);
   padding: 1px 5px;

@@ -355,7 +355,7 @@ function plural(n, one, few, many) {
 }
 
 .path-text {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text);
   word-break: break-all;

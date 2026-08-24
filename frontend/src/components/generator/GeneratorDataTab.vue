@@ -667,7 +667,7 @@ onBeforeUnmount(() => {
 }
 
 .mapping-summary-query {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   white-space: pre-wrap;
 }

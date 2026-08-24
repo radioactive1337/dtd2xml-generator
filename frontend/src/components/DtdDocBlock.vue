@@ -76,7 +76,7 @@ watch(
 }
 
 .dtd-doc-content :deep(code) {
-  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-size: 0.92em;
 }
 

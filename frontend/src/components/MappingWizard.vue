@@ -637,7 +637,7 @@ function finish() {
 }
 
 .review-query {
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   white-space: pre-wrap;
   word-break: break-all;

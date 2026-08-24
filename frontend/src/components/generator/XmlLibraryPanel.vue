@@ -459,7 +459,7 @@ function onSync() {
 }
 
 .sync-sha {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   margin-left: 4px;
 }
 
@@ -511,14 +511,14 @@ function onSync() {
 }
 
 .category-name {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-weight: 500;
 }
 
 .category-root {
   font-size: 11px;
   color: var(--accent);
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
 }
 
 .category-count {

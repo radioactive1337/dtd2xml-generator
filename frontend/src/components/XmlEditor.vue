@@ -425,6 +425,7 @@ onMounted(async () => {
     minimap: { enabled: false },
     wordWrap: 'on',
     fontSize: 13,
+    fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
     tabSize: 2,
     glyphMargin: true,
     scrollBeyondLastLine: false,
@@ -770,7 +771,7 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
 }
 
 .format-icon {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   margin-right: 4px;
 }
@@ -930,7 +931,7 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
 }
 
 .push-path-hint code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 

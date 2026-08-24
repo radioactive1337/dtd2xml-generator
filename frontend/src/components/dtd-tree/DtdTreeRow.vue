@@ -163,7 +163,7 @@ const nodeDoc = computed(() => {
 .node-name.required { font-weight: 600; }
 
 .node-name.group-expr {
-  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-muted);
 }
@@ -171,7 +171,7 @@ const nodeDoc = computed(() => {
 .quantifier {
   color: var(--accent);
   font-size: 12px;
-  font-family: monospace;
+  font-family: var(--font-mono);
   flex-shrink: 0;
   margin-right: 12px;
 }
