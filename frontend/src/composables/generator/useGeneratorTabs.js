@@ -76,6 +76,13 @@ export function useGeneratorTabs({
     return false
   })
 
+  const dataTabBadgeLabel = computed(() => {
+    if (hasMappingBlockers.value) return 'Ошибки в SQL-маппингах'
+    if (hasLlmBlocker.value) return 'Не выбран LLM-алиас'
+    if (isHybridStrategy.value && !sqlMappings.value.length) return 'Нет SQL-маппингов для гибридной стратегии'
+    return ''
+  })
+
   const resultsTabBadge = computed(() => {
     if (validationResult.value?.valid === false && validationResult.value?.errors?.length) return 'error'
     if (validationResult.value?.valid === true) return 'ok'
@@ -124,6 +131,7 @@ export function useGeneratorTabs({
     activeTab,
     autoValidateAfterFill,
     showDataBadge,
+    dataTabBadgeLabel,
     resultsTabBadge,
     resultsTabBadgeLabel,
     onTabKeydown,

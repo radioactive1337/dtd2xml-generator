@@ -20,6 +20,7 @@
         :tabs="leftTabs"
         :active-tab="activeTab"
         :show-data-badge="showDataBadge"
+        :data-tab-badge-label="dataTabBadgeLabel"
         :results-tab-badge="resultsTabBadge"
         :results-tab-badge-label="resultsTabBadgeLabel"
         @update:active-tab="activeTab = $event"
@@ -279,6 +280,7 @@ const {
   activeTab,
   autoValidateAfterFill,
   showDataBadge,
+  dataTabBadgeLabel,
   resultsTabBadge,
   resultsTabBadgeLabel,
   onTabKeydown,
