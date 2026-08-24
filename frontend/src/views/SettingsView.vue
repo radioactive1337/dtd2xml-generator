@@ -32,10 +32,17 @@
               </button>
               <button class="btn-secondary btn-test" @click="openDbForm(db)">Изменить</button>
               <button class="btn-secondary btn-test danger" @click="removeDb(db.alias)">Удалить</button>
-              <span v-if="dbStatus(db.alias)" class="status-badge" :class="dbStatus(db.alias).ok ? 'ok' : 'error'">
+              <span
+                v-if="dbStatus(db.alias) && !isDbTesting(db.alias)"
+                class="status-badge"
+                :class="dbStatus(db.alias).ok ? 'ok' : 'error'"
+              >
                 {{ dbStatus(db.alias).ok ? 'OK' : 'Ошибка' }}
               </span>
-              <p v-if="dbStatus(db.alias)?.message" class="status-detail" :class="dbStatus(db.alias).ok ? 'ok-msg' : 'error-msg'">
+              <p
+                v-if="dbStatus(db.alias) && !dbStatus(db.alias).ok && dbStatus(db.alias).message"
+                class="status-detail error-msg"
+              >
                 {{ dbStatus(db.alias).message }}
               </p>
             </li>
@@ -76,10 +83,17 @@
               </button>
               <button class="btn-secondary btn-test" @click="openLlmForm(llm)">Изменить</button>
               <button class="btn-secondary btn-test danger" @click="removeLlm(llm.alias)">Удалить</button>
-              <span v-if="llmStatus(llm.alias)" class="status-badge" :class="llmStatus(llm.alias).ok ? 'ok' : 'error'">
+              <span
+                v-if="llmStatus(llm.alias) && !isLlmTesting(llm.alias)"
+                class="status-badge"
+                :class="llmStatus(llm.alias).ok ? 'ok' : 'error'"
+              >
                 {{ llmStatus(llm.alias).ok ? 'OK' : 'Ошибка' }}
               </span>
-              <p v-if="llmStatus(llm.alias)?.message" class="status-detail" :class="llmStatus(llm.alias).ok ? 'ok-msg' : 'error-msg'">
+              <p
+                v-if="llmStatus(llm.alias) && !llmStatus(llm.alias).ok && llmStatus(llm.alias).message"
+                class="status-detail error-msg"
+              >
                 {{ llmStatus(llm.alias).message }}
               </p>
             </li>
@@ -119,13 +133,16 @@
               </button>
               <button class="btn-secondary btn-test" @click="openGitForm">Изменить</button>
               <button class="btn-secondary btn-test danger" @click="removeGitSettings">Удалить</button>
-              <span v-if="gitTestStatus" class="status-badge" :class="gitTestStatus.ok ? 'ok' : 'error'">
+              <span
+                v-if="gitTestStatus && !gitTesting"
+                class="status-badge"
+                :class="gitTestStatus.ok ? 'ok' : 'error'"
+              >
                 {{ gitTestStatus.ok ? 'OK' : 'Ошибка' }}
               </span>
               <p
-                v-if="gitTestStatus?.message"
-                class="status-detail"
-                :class="gitTestStatus.ok ? 'ok-msg' : 'error-msg'"
+                v-if="gitTestStatus && !gitTestStatus.ok && gitTestStatus.message"
+                class="status-detail error-msg"
               >
                 {{ gitTestStatus.message }}
               </p>
@@ -696,8 +713,6 @@ code {
   margin: 0;
   font-size: 12px;
 }
-
-.ok-msg { color: var(--success); }
 
 .alias-icon {
   background: var(--accent);
