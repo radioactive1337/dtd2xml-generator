@@ -127,7 +127,30 @@
       </div>
     </div>
     <p v-if="importError" class="import-error">{{ importError }}</p>
-    <div ref="editorContainer" class="editor-container" />
+    <div class="editor-stage">
+      <div ref="editorContainer" class="editor-container" />
+      <div v-if="!modelValue" class="editor-empty" aria-live="polite">
+        <div class="editor-empty-panel">
+          <h3 class="editor-empty-title">Как получить XML</h3>
+          <ol class="editor-empty-steps">
+            <li :class="{ done: !!schemaId }">Загрузить DTD слева</li>
+            <li :class="{ done: !!rootElement }">Выбрать корневой элемент</li>
+            <li>Нажать «Сгенерировать»</li>
+          </ol>
+          <div class="editor-empty-actions">
+            <button
+              class="btn-primary"
+              :disabled="!canGenerate || generating"
+              @click="emit('generate')"
+            >
+              {{ generating ? 'Генерация…' : 'Сгенерировать XML' }}
+            </button>
+            <button class="btn-secondary" @click="triggerImport">Импорт .xml</button>
+          </div>
+          <p v-if="generateDisabledReason" class="editor-empty-reason">{{ generateDisabledReason }}</p>
+        </div>
+      </div>
+    </div>
 
     <div v-if="showPushDialog" class="save-dialog-backdrop" @click.self="closePushDialog">
       <form class="save-dialog" @submit.prevent="submitPush">
@@ -221,6 +244,9 @@ const props = defineProps({
   uniqueRanges: { type: Array, default: () => [] },
   gitPushEnabled: { type: Boolean, default: false },
   rootElement: { type: String, default: '' },
+  schemaId: { type: String, default: '' },
+  canGenerate: { type: Boolean, default: false },
+  generating: { type: Boolean, default: false },
   gitPushSubmitting: { type: Boolean, default: false },
   gitPushMessage: { type: String, default: '' },
   gitPushError: { type: String, default: '' },
@@ -238,6 +264,7 @@ const emit = defineEmits([
   'push-dialog-open',
   'push-dialog-close',
   'run-compare',
+  'generate',
 ])
 
 const { isDark } = useTheme()
@@ -254,6 +281,13 @@ const pushCommitMessage = ref('')
 const hasSelection = ref(false)
 const moreOpen = ref(false)
 const moreRef = ref(null)
+
+const generateDisabledReason = computed(() => {
+  if (props.canGenerate) return ''
+  if (!props.schemaId) return 'Сначала загрузите DTD слева'
+  if (!props.rootElement) return 'Выберите корневой элемент слева'
+  return ''
+})
 
 const pushTargetPath = computed(() => {
   const folder = props.rootElement || 'root'
@@ -747,12 +781,91 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   color: var(--danger, #ef4444);
 }
 
+.editor-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
 .editor-container {
   flex: 1;
+  height: 100%;
   min-height: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+}
+
+.editor-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, transparent), color-mix(in srgb, var(--surface2) 94%, transparent));
+}
+
+.editor-empty-panel {
+  width: min(420px, 100%);
+  padding: 24px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: calc(var(--radius) + 2px);
+  background: color-mix(in srgb, var(--surface) 96%, var(--surface2));
+  box-shadow: 0 16px 36px color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.editor-empty-title {
+  margin: 0 0 14px;
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.editor-empty-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text-muted);
+}
+
+.editor-empty-steps li.done {
+  color: var(--text);
+}
+
+.editor-empty-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.editor-empty-reason {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
+  .editor-empty {
+    align-items: flex-start;
+    padding: 14px;
+  }
+
+  .editor-empty-panel {
+    padding: 18px;
+  }
+
+  .editor-empty-title {
+    font-size: 19px;
+  }
+
+  .editor-empty-actions {
+    flex-direction: column;
+  }
 }
 
 .btn-sm {

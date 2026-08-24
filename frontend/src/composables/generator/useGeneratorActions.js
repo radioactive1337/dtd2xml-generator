@@ -40,8 +40,8 @@ export function useGeneratorActions({
   let fillAbortController = null
   let inlineValidationTimer = null
 
-  const canGenerate = computed(() => schemaId.value && rootElement.value)
-  const canValidate = computed(() => schemaId.value && xmlText.value)
+  const canGenerate = computed(() => Boolean(schemaId.value && rootElement.value))
+  const canValidate = computed(() => Boolean(schemaId.value && xmlText.value))
 
   const fillElapsedLabel = computed(() => {
     const seconds = fillElapsedSeconds.value
