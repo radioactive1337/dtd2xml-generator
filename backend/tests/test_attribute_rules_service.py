@@ -274,6 +274,38 @@ def test_format_push_rule_error():
     assert rules_svc.format_push_rule_error(rules_svc.DocumentValidationReport()) is None
 
 
+def test_serialize_push_warnings_and_ack_detail():
+    ruleset = _ruleset(
+        {
+            "rules": [
+                {
+                    "id": "status-warn",
+                    "attr": "status",
+                    "severity": "warning",
+                    "applies_to": ["git_push"],
+                    "checks": [{"type": "enum", "values": ["NEW"]}],
+                    "message": "unexpected status",
+                }
+            ]
+        }
+    )
+    report = rules_svc.validate_document(
+        '<PayDoc status="WRONG"/>',
+        context="git_push",
+        ruleset=ruleset,
+    )
+    items = rules_svc.serialize_push_warnings(report)
+    assert len(items) == 1
+    assert items[0]["attr"] == "status"
+    assert items[0]["location"] == "PayDoc@status"
+    assert items[0]["message"] == "unexpected status"
+
+    detail = rules_svc.push_warnings_ack_detail(report)
+    assert detail["code"] == rules_svc.PUSH_WARNINGS_REQUIRE_ACK
+    assert detail["warning_count"] == 1
+    assert detail["warnings"] == items
+
+
 def test_validate_with_schema_attr_def_for_placeholder():
     schema = DTDSchema(
         elements={

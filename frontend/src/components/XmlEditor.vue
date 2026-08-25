@@ -168,7 +168,7 @@
     </div>
 
     <div v-if="showPushDialog" class="save-dialog-backdrop" @click.self="closePushDialog">
-      <form class="save-dialog" @submit.prevent="submitPush">
+      <form class="save-dialog push-dialog" @submit.prevent="submitPush">
         <h4 class="save-dialog-title">Отправить в Git</h4>
         <p v-if="pushFolderName" class="push-path-hint">
           Путь: <code>{{ pushTargetPath }}</code>
@@ -199,6 +199,25 @@
             :disabled="gitPushSubmitting"
           />
         </label>
+        <div v-if="gitPushWarnings.length" class="push-warnings">
+          <p class="push-warnings-heading">{{ pushWarningsHeading }}</p>
+          <ul class="push-warnings-list">
+            <li v-for="(warning, index) in gitPushWarnings" :key="index">
+              {{ formatPushWarningLabel(warning) }}
+            </li>
+          </ul>
+          <p v-if="pushWarningsTruncated" class="push-warnings-more">
+            … и ещё {{ gitPushWarningCount - gitPushWarnings.length }}
+          </p>
+          <label class="push-warnings-ack">
+            <input
+              v-model="warningsAcknowledged"
+              type="checkbox"
+              :disabled="gitPushSubmitting"
+            />
+            Я ознакомился с предупреждениями и всё равно хочу отправить
+          </label>
+        </div>
         <p v-if="gitPushError" class="push-feedback push-feedback-error">{{ gitPushError }}</p>
         <p v-else-if="gitPushMessage" class="push-feedback push-feedback-success">{{ gitPushMessage }}</p>
         <div class="save-dialog-actions">
@@ -214,9 +233,9 @@
             v-if="!gitPushMessage"
             type="submit"
             class="btn-primary btn-sm"
-            :disabled="!pushFilename.trim() || gitPushSubmitting"
+            :disabled="pushSubmitDisabled"
           >
-            {{ gitPushSubmitting ? 'Отправка…' : 'Отправить' }}
+            {{ pushSubmitLabel }}
           </button>
         </div>
       </form>
@@ -250,6 +269,8 @@ import { registerXmlFormatter } from '../utils/formatXml'
 import { escapeXmlText, unescapeXmlText } from '../utils/escapeXml'
 import { readXmlFileAsText } from '../utils/readXmlFile'
 import { peekXmlRootElement } from '../utils/xmlPaths'
+import { formatPushWarningLabel } from '../utils/gitPushWarnings'
+import { formatWarnings } from '../utils/ruPlural'
 import { useTheme } from '../composables/useTheme'
 
 const props = defineProps({
@@ -266,6 +287,8 @@ const props = defineProps({
   gitPushSubmitting: { type: Boolean, default: false },
   gitPushMessage: { type: String, default: '' },
   gitPushError: { type: String, default: '' },
+  gitPushWarnings: { type: Array, default: () => [] },
+  gitPushWarningCount: { type: Number, default: 0 },
   showCompareButton: { type: Boolean, default: false },
   comparing: { type: Boolean, default: false },
 })
@@ -314,6 +337,31 @@ const pushTargetPath = computed(() => {
   const folder = pushFolderName.value || 'root'
   const file = pushFilename.value.trim() || 'document.xml'
   return `${folder}/${file}`
+})
+
+const warningsAcknowledged = ref(false)
+
+const pushWarningsTruncated = computed(
+  () => props.gitPushWarningCount > props.gitPushWarnings.length,
+)
+
+const pushWarningsHeading = computed(() => {
+  const count = props.gitPushWarningCount || props.gitPushWarnings.length
+  return `Перед отправкой в Git: ${formatWarnings(count)}`
+})
+
+const pushSubmitDisabled = computed(() => {
+  if (!pushFilename.value.trim() || props.gitPushSubmitting) return true
+  if (props.gitPushWarnings.length && !warningsAcknowledged.value) return true
+  return false
+})
+
+const pushSubmitLabel = computed(() => {
+  if (props.gitPushSubmitting) {
+    return props.gitPushWarnings.length ? 'Отправка…' : 'Проверка…'
+  }
+  if (props.gitPushWarnings.length) return 'Отправить всё равно'
+  return 'Отправить'
 })
 
 function defaultPushFilename() {
@@ -662,6 +710,7 @@ function clearEditor() {
 function onGitPushClick() {
   pushFilename.value = defaultPushFilename()
   pushCommitMessage.value = ''
+  warningsAcknowledged.value = false
   showPushDialog.value = true
   emit('push-dialog-open')
 }
@@ -675,9 +724,11 @@ function closePushDialog() {
 function submitPush() {
   const filename = pushFilename.value.trim()
   if (!filename || props.gitPushSubmitting) return
+  if (props.gitPushWarnings.length && !warningsAcknowledged.value) return
   emit('push-to-git', {
     filename,
     commitMessage: pushCommitMessage.value.trim(),
+    acknowledgeWarnings: props.gitPushWarnings.length > 0 && warningsAcknowledged.value,
   })
 }
 
@@ -685,6 +736,13 @@ watch(
   () => props.gitPushMessage,
   (message) => {
     if (message) showPushDialog.value = true
+  },
+)
+
+watch(
+  () => props.gitPushWarnings,
+  () => {
+    warningsAcknowledged.value = false
   },
 )
 
@@ -977,6 +1035,10 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   gap: 10px;
 }
 
+.push-dialog {
+  width: min(460px, 92vw);
+}
+
 .save-dialog-title {
   margin: 0;
   font-size: 14px;
@@ -1031,10 +1093,64 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
 
 .push-feedback-error {
   color: var(--danger, #ef4444);
+  white-space: pre-wrap;
 }
 
 .push-feedback-success {
   color: var(--success, #22c55e);
+}
+
+.push-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.push-warnings-heading {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+.push-warnings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.push-warnings-list li {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--warning);
+}
+
+.push-warnings-more {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.push-warnings-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.push-warnings-ack input {
+  margin-top: 2px;
 }
 </style>
 

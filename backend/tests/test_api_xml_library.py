@@ -304,3 +304,80 @@ def test_push_rejects_unparseable_xml_root(
     assert response.status_code == 400
     assert "корневой элемент" in response.json()["detail"]
     push_mock.assert_not_called()
+
+
+def test_push_requires_ack_when_warning_rules_fail(
+    client: TestClient,
+    reference_xml_push_enabled: ReferenceXmlSettings,
+):
+    schema_id = _register_test_schema()
+    xml_text = (
+        '<PayDoc id="real-id" kladr="7700000000000" active="true" status="FOO">'
+        "<Body/></PayDoc>"
+    )
+
+    with patch("app.api.routes.xml_library.push_document", new=AsyncMock()) as push_mock:
+        response = client.post(
+            "/api/xml-library/shared/push",
+            json={
+                "schema_id": schema_id,
+                "root_element": "PayDoc",
+                "filename": "paydoc.xml",
+                "xml_text": xml_text,
+            },
+        )
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "warnings_require_ack"
+    assert detail["warning_count"] >= 1
+    assert any("status" in item["location"] for item in detail["warnings"])
+    push_mock.assert_not_called()
+
+
+def test_push_proceeds_when_warnings_acknowledged(
+    client: TestClient,
+    reference_xml_push_enabled: ReferenceXmlSettings,
+):
+    schema_id = _register_test_schema()
+    xml_text = (
+        '<PayDoc id="real-id" kladr="7700000000000" active="true" status="FOO">'
+        "<Body/></PayDoc>"
+    )
+    mock_result = PushResult(
+        status="ok",
+        commit_sha="abc1234",
+        path="xml-library/PayDoc/paydoc.xml",
+        message="added",
+        overwritten=False,
+    )
+
+    with (
+        patch(
+            "app.api.routes.xml_library.ensure_git_commit_author",
+            return_value=("Dev", "dev@example.com"),
+        ),
+        patch(
+            "app.api.routes.xml_library.push_document",
+            new=AsyncMock(return_value=mock_result),
+        ) as push_mock,
+        patch(
+            "app.api.routes.xml_library.sync_reference_repository",
+            new=AsyncMock(),
+        ),
+    ):
+        response = client.post(
+            "/api/xml-library/shared/push",
+            json={
+                "schema_id": schema_id,
+                "root_element": "PayDoc",
+                "filename": "paydoc.xml",
+                "xml_text": xml_text,
+                "acknowledge_warnings": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.json()["warnings"]
+    push_mock.assert_called_once()

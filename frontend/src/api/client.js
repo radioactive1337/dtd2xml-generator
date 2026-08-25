@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { translateApiError } from '../utils/apiErrors'
+import { PUSH_WARNINGS_REQUIRE_ACK } from '../utils/gitPushWarnings'
 
 const client = axios.create({
   baseURL: '/api',
@@ -37,15 +38,21 @@ client.interceptors.response.use(
       window.location.assign(`/login?redirect=${redirect}`)
     }
 
-    console.error(
-      `[API] ${method || 'REQUEST'} ${url || ''} failed` +
-        (status ? ` (${status})` : '') +
-        `: ${text}`,
-      detail && typeof detail !== 'string' ? { detail } : undefined,
-    )
-
     const err = new Error(text)
     err.response = error.response
+    const isWarningAck =
+      status === 409 &&
+      detail &&
+      typeof detail === 'object' &&
+      detail.code === PUSH_WARNINGS_REQUIRE_ACK
+    if (!isWarningAck) {
+      console.error(
+        `[API] ${method || 'REQUEST'} ${url || ''} failed` +
+          (status ? ` (${status})` : '') +
+          `: ${text}`,
+        detail && typeof detail !== 'string' ? { detail } : undefined,
+      )
+    }
     return Promise.reject(err)
   },
 )

@@ -7,6 +7,7 @@ import { clearAllDatalistState } from '../../utils/datalistInput'
 import { formatElements } from '../../utils/ruPlural'
 import { peekXmlRootElement } from '../../utils/xmlPaths'
 import { translateApiError } from '../../utils/apiErrors'
+import { extractPushWarnings } from '../../utils/gitPushWarnings'
 import { useGenerationHistory } from '../useGenerationHistory'
 import { useXmlLibrary } from '../useXmlLibrary'
 import { useGeneratorLayout } from './useGeneratorLayout'
@@ -98,13 +99,22 @@ export function useGenerator() {
 
   const gitPushMessage = ref('')
   const gitPushError = ref('')
+  const gitPushWarnings = ref([])
+  const gitPushWarningCount = ref(0)
 
   function resetGitPushFeedback() {
     gitPushMessage.value = ''
     gitPushError.value = ''
+    gitPushWarnings.value = []
+    gitPushWarningCount.value = 0
   }
 
-  async function handleGitPush({ filename, commitMessage }) {
+  function clearGitPushWarnings() {
+    gitPushWarnings.value = []
+    gitPushWarningCount.value = 0
+  }
+
+  async function handleGitPush({ filename, commitMessage, acknowledgeWarnings = false }) {
     const xmlText = xml.getEditorXmlText() || xml.xmlText.value || ''
     const peekedRoot = peekXmlRootElement(xmlText)
     const rootElement = peekedRoot || schema.rootElement.value
@@ -117,7 +127,9 @@ export function useGenerator() {
       gitPushError.value = 'Выберите DTD-схему перед отправкой в Git'
       return
     }
-    resetGitPushFeedback()
+    gitPushMessage.value = ''
+    gitPushError.value = ''
+    if (!acknowledgeWarnings) clearGitPushWarnings()
     try {
       const result = await xmlLibrary.pushToGit({
         rootElement,
@@ -125,21 +137,27 @@ export function useGenerator() {
         xmlText,
         schemaId,
         commitMessage,
+        acknowledgeWarnings,
       })
+      clearGitPushWarnings()
       if (result?.status === 'ok') {
         gitPushMessage.value = result.overwritten
           ? `Файл обновлён: ${result.path}`
           : `Файл добавлен: ${result.path}`
-        if (result.warnings?.length) {
-          gitPushMessage.value += ` (${result.warnings.length} предупр.)`
-        }
         categoryDocuments.value = {}
       } else if (result?.status === 'unchanged') {
         gitPushMessage.value = result.message || 'Изменений нет'
       }
     } catch (err) {
+      const pending = extractPushWarnings(err)
+      if (pending) {
+        gitPushWarnings.value = pending.warnings
+        gitPushWarningCount.value = pending.warningCount
+        gitPushError.value = ''
+        return
+      }
       gitPushError.value = translateApiError(
-        err?.response?.data?.detail || err?.message || String(err),
+        err?.message || err?.response?.data?.detail || String(err),
       )
     }
   }
@@ -430,6 +448,8 @@ export function useGenerator() {
     gitPushEnabled,
     gitPushMessage,
     gitPushError,
+    gitPushWarnings,
+    gitPushWarningCount,
     resetGitPushFeedback,
     handleGitPush,
     categoryDocuments,

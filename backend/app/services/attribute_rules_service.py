@@ -60,6 +60,10 @@ class DocumentValidationReport:
     def has_errors(self) -> bool:
         return bool(self.errors)
 
+    @property
+    def has_warnings(self) -> bool:
+        return bool(self.warnings)
+
     def messages(self, *, include_warnings: bool = True) -> list[str]:
         items = list(self.errors)
         if include_warnings:
@@ -335,14 +339,52 @@ def validate_document(
     return report
 
 
+PUSH_WARNINGS_REQUIRE_ACK = "warnings_require_ack"
+PUSH_WARNING_ITEM_LIMIT = 20
+
+
+def _violation_location(violation: RuleViolation) -> str:
+    if violation.attr:
+        return f"{violation.path}@{violation.attr}"
+    return violation.path or violation.element
+
+
 def format_push_rule_error(report: DocumentValidationReport) -> str | None:
     """User-facing Russian error when push-time rules fail with severity=error."""
     if not report.has_errors:
         return None
     lines = ["Документ не прошёл проверку правил атрибутов для отправки в Git:"]
     for violation in report.errors[:8]:
-        loc = f"{violation.path}@{violation.attr}" if violation.attr else violation.path
-        lines.append(f"- {loc}: {violation.message}")
+        lines.append(f"- {_violation_location(violation)}: {violation.message}")
     if len(report.errors) > 8:
         lines.append(f"… и ещё {len(report.errors) - 8}")
     return "\n".join(lines)
+
+
+def serialize_push_warnings(
+    report: DocumentValidationReport,
+    *,
+    limit: int = PUSH_WARNING_ITEM_LIMIT,
+) -> list[dict[str, str]]:
+    """Structured warning items for the Git-push confirmation step."""
+    items: list[dict[str, str]] = []
+    for violation in report.warnings[:limit]:
+        items.append(
+            {
+                "path": violation.path,
+                "attr": violation.attr,
+                "location": _violation_location(violation),
+                "message": violation.message,
+            }
+        )
+    return items
+
+
+def push_warnings_ack_detail(report: DocumentValidationReport) -> dict:
+    """HTTP 409 payload when warning-level rules need explicit acknowledgement."""
+    return {
+        "code": PUSH_WARNINGS_REQUIRE_ACK,
+        "message": "Документ содержит предупреждения правил атрибутов. Подтвердите отправку в Git.",
+        "warnings": serialize_push_warnings(report),
+        "warning_count": len(report.warnings),
+    }

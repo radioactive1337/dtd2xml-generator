@@ -180,6 +180,8 @@
         :git-push-submitting="gitPushSubmitting"
         :git-push-message="gitPushMessage"
         :git-push-error="gitPushError"
+        :git-push-warnings="gitPushWarnings"
+        :git-push-warning-count="gitPushWarningCount"
         :show-compare-button="!!schemaId"
         :comparing="comparing"
         @content-change="onEditorContentChange"
@@ -324,6 +326,8 @@ const {
   gitPushSubmitting,
   gitPushMessage,
   gitPushError,
+  gitPushWarnings,
+  gitPushWarningCount,
   resetGitPushFeedback,
   handleGitPush,
   categoryDocuments,

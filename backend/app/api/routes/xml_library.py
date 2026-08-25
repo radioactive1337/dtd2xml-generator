@@ -24,7 +24,11 @@ from app.config import (
 from app.api.routes.dtd import get_merged_schema
 from app.core.xml_tree import git_push_attribute_fill_error
 from app.services import reference_xml_service as ref_service
-from app.services.attribute_rules_service import format_push_rule_error, validate_document
+from app.services.attribute_rules_service import (
+    format_push_rule_error,
+    push_warnings_ack_detail,
+    validate_document,
+)
 from app.services.git_identity_service import ensure_git_commit_author
 from app.services.git_push_service import push_document
 from app.services.reference_xml_sync import GitAuth, load_sync_state, sync_reference_repository
@@ -65,6 +69,7 @@ class PushToGitRequest(BaseModel):
     root_element: str = ""
     schema_id: str
     commit_message: str | None = None
+    acknowledge_warnings: bool = False
 
 
 class PushToGitResponse(BaseModel):
@@ -244,6 +249,8 @@ async def push_to_git(
     rule_error = format_push_rule_error(rule_report)
     if rule_error:
         raise HTTPException(status_code=400, detail=rule_error)
+    if rule_report.has_warnings and not body.acknowledge_warnings:
+        raise HTTPException(status_code=409, detail=push_warnings_ack_detail(rule_report))
     push_warnings = [v.message for v in rule_report.warnings]
 
     root_element = _root_element_from_xml(body.xml_text)
