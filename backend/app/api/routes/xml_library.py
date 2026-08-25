@@ -28,6 +28,7 @@ from app.services.attribute_rules_service import format_push_rule_error, validat
 from app.services.git_identity_service import ensure_git_commit_author
 from app.services.git_push_service import push_document
 from app.services.reference_xml_sync import GitAuth, load_sync_state, sync_reference_repository
+from app.services.xml_structure_service import XmlParseError, peek_root_element
 from app.services.xml_share_service import (
     ShareDocumentRequest,
     ShareDocumentResponse,
@@ -61,7 +62,7 @@ class SyncResponse(BaseModel):
 class PushToGitRequest(BaseModel):
     xml_text: str
     filename: str
-    root_element: str
+    root_element: str = ""
     schema_id: str
     commit_message: str | None = None
 
@@ -214,6 +215,20 @@ async def shared_sync(
     )
 
 
+def _root_element_from_xml(xml_text: str) -> str:
+    """Folder name for Git push: always the document element, never the UI selection."""
+    try:
+        name = peek_root_element(xml_text)
+    except XmlParseError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Не удалось определить корневой элемент документа: {exc}",
+        ) from exc
+    if ":" in name:
+        name = name.rsplit(":", 1)[-1]
+    return name
+
+
 @router.post("/shared/push", response_model=PushToGitResponse)
 async def push_to_git(
     body: PushToGitRequest,
@@ -231,12 +246,13 @@ async def push_to_git(
         raise HTTPException(status_code=400, detail=rule_error)
     push_warnings = [v.message for v in rule_report.warnings]
 
+    root_element = _root_element_from_xml(body.xml_text)
     git_auth = _git_auth_for_user(user, settings)
     author_name, author_email = ensure_git_commit_author(user, settings)
     result = await push_document(
         settings,
         git_auth=git_auth,
-        root_element=body.root_element,
+        root_element=root_element,
         filename=body.filename,
         xml_text=body.xml_text,
         author_name=author_name,

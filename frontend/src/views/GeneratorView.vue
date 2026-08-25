@@ -185,6 +185,7 @@
         @content-change="onEditorContentChange"
         @clear="onEditorClear"
         @import="onXmlFileImported"
+        @document-paste="onDocumentPaste"
         @save="handleLibrarySave"
         @share="openShareInlineDialog"
         @push-to-git="handleGitPush"
@@ -307,6 +308,7 @@ const {
   onEditorContentChange,
   onEditorClear,
   onXmlFileImported,
+  onDocumentPaste,
   restoreFromHistory,
   removeHistoryEntry,
   clearGenerationHistory,

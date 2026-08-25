@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.api.routes import dtd as dtd_routes
 from app.config import ReferenceXmlSettings
 from app.core.dtd_models import AttributeDef, ContentNode, DTDSchema, ElementDef
+from app.services.git_push_service import PushResult
 from app.services.reference_xml_sync import SyncResult
 from app.user_context import dev_user_context
 
@@ -217,4 +218,89 @@ def test_push_rejects_insufficient_attribute_fill(
     assert response.status_code == 400
     assert "15%" in response.json()["detail"]
     assert "заполнено" in response.json()["detail"]
+    push_mock.assert_not_called()
+
+
+def test_push_uses_xml_root_not_claimed_root(
+    client: TestClient,
+    reference_xml_push_enabled: ReferenceXmlSettings,
+):
+    schema_id = _register_test_schema()
+    xml_text = (
+        '<PayDoc id="real-id" kladr="7700000000000" active="true">'
+        "<Body/></PayDoc>"
+    )
+    mock_result = PushResult(
+        status="ok",
+        commit_sha="abc1234",
+        path="xml-library/PayDoc/paydoc.xml",
+        message="added",
+        overwritten=False,
+    )
+
+    with (
+        patch(
+            "app.api.routes.xml_library.git_push_attribute_fill_error",
+            return_value=None,
+        ),
+        patch(
+            "app.api.routes.xml_library.format_push_rule_error",
+            return_value=None,
+        ),
+        patch(
+            "app.api.routes.xml_library.ensure_git_commit_author",
+            return_value=("Dev", "dev@example.com"),
+        ),
+        patch(
+            "app.api.routes.xml_library.push_document",
+            new=AsyncMock(return_value=mock_result),
+        ) as push_mock,
+        patch(
+            "app.api.routes.xml_library.sync_reference_repository",
+            new=AsyncMock(),
+        ),
+    ):
+        response = client.post(
+            "/api/xml-library/shared/push",
+            json={
+                "schema_id": schema_id,
+                "root_element": "abs-client",
+                "filename": "paydoc.xml",
+                "xml_text": xml_text,
+            },
+        )
+
+    assert response.status_code == 200
+    assert push_mock.call_args.kwargs["root_element"] == "PayDoc"
+
+
+def test_push_rejects_unparseable_xml_root(
+    client: TestClient,
+    reference_xml_push_enabled: ReferenceXmlSettings,
+):
+    schema_id = _register_test_schema()
+
+    with (
+        patch(
+            "app.api.routes.xml_library.git_push_attribute_fill_error",
+            return_value=None,
+        ),
+        patch(
+            "app.api.routes.xml_library.format_push_rule_error",
+            return_value=None,
+        ),
+        patch("app.api.routes.xml_library.push_document", new=AsyncMock()) as push_mock,
+    ):
+        response = client.post(
+            "/api/xml-library/shared/push",
+            json={
+                "schema_id": schema_id,
+                "root_element": "abs-client",
+                "filename": "broken.xml",
+                "xml_text": "<not-closed",
+            },
+        )
+
+    assert response.status_code == 400
+    assert "корневой элемент" in response.json()["detail"]
     push_mock.assert_not_called()

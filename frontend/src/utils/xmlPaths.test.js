@@ -3,7 +3,29 @@ import {
   canonicalizeXmlElementName,
   canonicalizeXmlElementPaths,
   normalizeElementPathsForTreeSync,
+  peekXmlRootElement,
 } from './xmlPaths'
+
+describe('peekXmlRootElement', () => {
+  it('returns the local name of the document element', () => {
+    expect(peekXmlRootElement('<abt-accounts><bank/></abt-accounts>')).toBe('abt-accounts')
+  })
+
+  it('strips a namespace prefix', () => {
+    expect(peekXmlRootElement('<ns:PayDoc xmlns:ns="urn:x"/>')).toBe('PayDoc')
+  })
+
+  it('skips XML declaration and comments', () => {
+    const xml = `<?xml version="1.0"?>\n<!-- sample -->\n<abs-client id="1"/>`
+    expect(peekXmlRootElement(xml)).toBe('abs-client')
+  })
+
+  it('returns empty string when there is no element', () => {
+    expect(peekXmlRootElement('')).toBe('')
+    expect(peekXmlRootElement('   ')).toBe('')
+    expect(peekXmlRootElement('not xml')).toBe('')
+  })
+})
 
 describe('normalizeElementPathsForTreeSync', () => {
   it('collapses sibling indices to one structural path', () => {

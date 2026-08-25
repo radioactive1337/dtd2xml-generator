@@ -5,6 +5,7 @@ import { stageFillXml } from '../../api/fill'
 import { pickPrimarySchema, normalizeDtdUploadResult, normalizeDtdListResult } from '../../utils/dtdSchema'
 import { clearAllDatalistState } from '../../utils/datalistInput'
 import { formatElements } from '../../utils/ruPlural'
+import { peekXmlRootElement } from '../../utils/xmlPaths'
 import { translateApiError } from '../../utils/apiErrors'
 import { useGenerationHistory } from '../useGenerationHistory'
 import { useXmlLibrary } from '../useXmlLibrary'
@@ -72,11 +73,12 @@ export function useGenerator() {
   })
 
   async function onLoadLibraryDocument(xmlText) {
+    xml.clearGenerationState()
     await xml.setProgrammaticXml(xmlText, { dirty: true })
     if (schema.schemaId.value) {
       await stageFillXml(schema.schemaId.value, xmlText)
+      await xml.syncFromPastedXml(xmlText)
     }
-    xml.clearGenerationState()
   }
 
   const xmlLibrary = useXmlLibrary({ onLoadDocument: onLoadLibraryDocument })
@@ -104,10 +106,11 @@ export function useGenerator() {
 
   async function handleGitPush({ filename, commitMessage }) {
     const xmlText = xml.getEditorXmlText() || xml.xmlText.value || ''
-    const rootElement = schema.rootElement.value
+    const peekedRoot = peekXmlRootElement(xmlText)
+    const rootElement = peekedRoot || schema.rootElement.value
     const schemaId = schema.schemaId.value
     if (!rootElement) {
-      gitPushError.value = 'Выберите корневой элемент перед отправкой в Git'
+      gitPushError.value = 'Не удалось определить корневой элемент документа'
       return
     }
     if (!schemaId) {
@@ -414,6 +417,7 @@ export function useGenerator() {
     goToValidationError: xml.goToValidationError,
     onEditorContentChange: xml.onEditorContentChange,
     onXmlFileImported: xml.onXmlFileImported,
+    onDocumentPaste: xml.onDocumentPaste,
     libraryActiveScope: xmlLibrary.activeScope,
     sharedCategories: xmlLibrary.sharedCategories,
     personalDocuments: xmlLibrary.personalDocuments,

@@ -129,7 +129,14 @@
     <p v-if="importError" class="import-error">{{ importError }}</p>
     <div class="editor-stage">
       <div ref="editorContainer" class="editor-container" />
-      <div v-if="!modelValue" class="editor-empty" aria-live="polite">
+      <div
+        v-if="!modelValue"
+        class="editor-empty"
+        tabindex="0"
+        aria-live="polite"
+        @click.self="focusEmptyPanel"
+        @paste.prevent="onEmptyPanelPaste"
+      >
         <div class="editor-empty-panel">
           <h3 class="editor-empty-title">Как получить XML</h3>
           <ol class="editor-empty-steps">
@@ -146,7 +153,15 @@
               {{ generating ? 'Генерация…' : 'Сгенерировать XML' }}
             </button>
             <button class="btn-secondary" @click="triggerImport">Импорт .xml</button>
+            <button
+              class="btn-secondary"
+              title="Вставить XML из буфера обмена (Ctrl+V)"
+              @click="pasteFromClipboard"
+            >
+              Вставить из буфера
+            </button>
           </div>
+          <p class="editor-empty-hint">Или вставьте XML сюда с клавиатуры (Ctrl+V)</p>
           <p v-if="generateDisabledReason" class="editor-empty-reason">{{ generateDisabledReason }}</p>
         </div>
       </div>
@@ -155,7 +170,7 @@
     <div v-if="showPushDialog" class="save-dialog-backdrop" @click.self="closePushDialog">
       <form class="save-dialog" @submit.prevent="submitPush">
         <h4 class="save-dialog-title">Отправить в Git</h4>
-        <p v-if="rootElement" class="push-path-hint">
+        <p v-if="pushFolderName" class="push-path-hint">
           Путь: <code>{{ pushTargetPath }}</code>
         </p>
         <p class="push-overwrite-hint">
@@ -234,6 +249,7 @@ import loader from '@monaco-editor/loader'
 import { registerXmlFormatter } from '../utils/formatXml'
 import { escapeXmlText, unescapeXmlText } from '../utils/escapeXml'
 import { readXmlFileAsText } from '../utils/readXmlFile'
+import { peekXmlRootElement } from '../utils/xmlPaths'
 import { useTheme } from '../composables/useTheme'
 
 const props = defineProps({
@@ -257,6 +273,7 @@ const props = defineProps({
 const emit = defineEmits([
   'content-change',
   'import',
+  'document-paste',
   'clear',
   'save',
   'share',
@@ -289,13 +306,19 @@ const generateDisabledReason = computed(() => {
   return ''
 })
 
+const pushFolderName = computed(
+  () => peekXmlRootElement(props.modelValue) || props.rootElement || '',
+)
+
 const pushTargetPath = computed(() => {
-  const folder = props.rootElement || 'root'
+  const folder = pushFolderName.value || 'root'
   const file = pushFilename.value.trim() || 'document.xml'
   return `${folder}/${file}`
 })
 
 function defaultPushFilename() {
+  const peeked = peekXmlRootElement(editor?.getValue() ?? props.modelValue)
+  if (peeked) return `${peeked}.xml`
   const base = (props.filename || 'generated.xml').replace(/\.xml$/i, '')
   return `${base || 'document'}.xml`
 }
@@ -414,6 +437,25 @@ function schedulePasteFlush() {
   pasteFlushTimer = setTimeout(notifyContentChange, 0)
 }
 
+function isFullDocumentPaste(range) {
+  const model = editor?.getModel()
+  if (!model || !range) return false
+  const full = model.getFullModelRange()
+  return (
+    range.startLineNumber === 1 &&
+    range.startColumn === 1 &&
+    range.endLineNumber === full.endLineNumber &&
+    range.endColumn === full.endColumn
+  )
+}
+
+function onEditorPaste(e) {
+  schedulePasteFlush()
+  if (!isFullDocumentPaste(e?.range)) return
+  const text = editor.getValue()
+  if (text?.trim()) emit('document-paste', text)
+}
+
 onMounted(async () => {
   monaco = await loader.init()
   registerXmlFormatter(monaco)
@@ -433,7 +475,7 @@ onMounted(async () => {
   })
 
   editor.onDidChangeModelContent(onModelContentChanged)
-  editor.onDidPaste(schedulePasteFlush)
+  editor.onDidPaste(onEditorPaste)
   editor.onDidChangeCursorSelection(() => {
     hasSelection.value = !editor.getSelection()?.isEmpty()
   })
@@ -519,6 +561,33 @@ async function onFileSelect(e) {
     emit('import', { text, fileName: file.name })
   } catch (err) {
     importError.value = err.message || 'Не удалось импортировать XML'
+  }
+}
+
+function applyPastedXml(text) {
+  importError.value = ''
+  if (!text?.trim()) {
+    importError.value = 'Буфер обмена пуст'
+    return
+  }
+  emit('import', { text, fileName: 'clipboard.xml' })
+}
+
+function onEmptyPanelPaste(e) {
+  applyPastedXml(e.clipboardData?.getData('text/plain') || '')
+}
+
+function focusEmptyPanel(e) {
+  e.currentTarget?.focus()
+}
+
+async function pasteFromClipboard() {
+  importError.value = ''
+  try {
+    const text = await navigator.clipboard.readText()
+    applyPastedXml(text)
+  } catch {
+    importError.value = 'Не удалось прочитать буфер. Нажмите Ctrl+V на этой панели.'
   }
 }
 
@@ -805,13 +874,20 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   justify-content: center;
   padding: 24px;
   border-radius: var(--radius);
+  outline: none;
+  cursor: text;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, transparent), color-mix(in srgb, var(--surface2) 94%, transparent));
+}
+
+.editor-empty:focus-visible {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .editor-empty-panel {
   width: min(420px, 100%);
   padding: 24px;
+  cursor: default;
   border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
   border-radius: calc(var(--radius) + 2px);
   background: color-mix(in srgb, var(--surface) 96%, var(--surface2));
@@ -845,6 +921,12 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
 }
 
 .editor-empty-reason {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.editor-empty-hint {
   margin: 12px 0 0;
   font-size: 13px;
   color: var(--text-muted);

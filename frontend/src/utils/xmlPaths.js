@@ -10,6 +10,22 @@ function normalizeXmlInput(xmlText) {
   return xmlText?.trim()?.replace(/^\uFEFF/, '') ?? ''
 }
 
+// Strip XML declaration, comments and DOCTYPE so the first tag is the document element.
+const XML_PROLOGUE_RE =
+  /^(?:\s|<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE\b[^>[]*(?:\[[\s\S]*?\])?[^>]*>)*/i
+const XML_ROOT_TAG_RE = /^<\s*(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)(?=[\s/>])/
+
+/**
+ * Local name of the document element, without walking the tree.
+ * Used for Git paths and the push dialog — backend peeks the same way.
+ */
+export function peekXmlRootElement(xmlText) {
+  const text = normalizeXmlInput(xmlText)
+  if (!text) return ''
+  const stripped = text.replace(XML_PROLOGUE_RE, '')
+  return XML_ROOT_TAG_RE.exec(stripped)?.[1] || ''
+}
+
 function parseXmlDocument(xmlText) {
   const trimmed = normalizeXmlInput(xmlText)
   if (!trimmed) return null
