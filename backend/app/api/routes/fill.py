@@ -1,4 +1,4 @@
-"""XML data fill endpoints — two-stage hybrid pipeline."""
+"""XML data fill endpoints — hybrid pipeline (DB / Git reference / Faker / AI)."""
 
 from __future__ import annotations
 
@@ -17,13 +17,16 @@ from pydantic import BaseModel, Field
 from app.api.routes.dtd import get_schema_registry
 from app.api.routes.generate import get_last_generated, set_last_generated
 from app.auth.sessions import get_current_user
-from app.config import resolve_llm_alias
+from app.config import reference_xml_root, resolve_llm_alias
 from app.core.xml_tree import ProtectedAttrs
+from app.services.attribute_rules_service import validate_document
 from app.services.db_service import SqlMapping, apply_db_overrides
 from app.services.field_override_service import FieldOverride, apply_field_overrides
 from app.services.field_mapping_service import suggest_field_mappings as suggest_field_mappings_service
 from app.services.faker_service import populate_with_faker
-from app.services.llm_service import populate_with_llm
+from app.services.git_reference_fill_service import populate_from_git
+from app.services.llm_service import LLMService, populate_with_llm
+from app.services.xml_structure_service import peek_root_element
 from app.user_context import UserContext
 
 router = APIRouter(prefix="/fill", tags=["fill"])
@@ -41,11 +44,16 @@ Strategy = Literal[
     "ai",
     "hybrid_db_faker",
     "hybrid_db_ai",
+    "hybrid_git_faker",
+    "hybrid_git_ai",
 ]
 # fmt: on
 
-_HYBRID = frozenset({"hybrid_db_faker", "hybrid_db_ai"})
-_AI_STRATEGIES = frozenset({"ai", "hybrid_db_ai"})
+_HYBRID_DB = frozenset({"hybrid_db_faker", "hybrid_db_ai"})
+_HYBRID_GIT = frozenset({"hybrid_git_faker", "hybrid_git_ai"})
+_HYBRID = _HYBRID_DB | _HYBRID_GIT
+_AI_STRATEGIES = frozenset({"ai", "hybrid_db_ai", "hybrid_git_ai"})
+_FAKER_STRATEGIES = frozenset({"faker", "hybrid_db_faker", "hybrid_git_faker"})
 
 ProgressCallback = Callable[[str, str, int], Awaitable[None]]
 
@@ -64,6 +72,7 @@ class FillResponse(BaseModel):
     xml_text: str
     strategy: str
     warnings: list[str] = Field(default_factory=list)
+    provenance: dict[str, str] = Field(default_factory=dict)
 
 
 class XmlCacheRequest(BaseModel):
@@ -117,12 +126,72 @@ def _validate_hybrid_mappings(request: FillRequest) -> list[SqlMapping]:
     return active_mappings
 
 
+async def _run_git_reference_stage(
+    user: UserContext,
+    request: FillRequest,
+    xml: str,
+    protected_attrs: ProtectedAttrs,
+    resolved_llm: str | None,
+    on_progress: ProgressCallback,
+) -> tuple[str, ProtectedAttrs, list[str], dict[str, str]]:
+    """Best-effort Git reference fill stage; returns updated xml/protected/warnings/provenance."""
+    await on_progress("git_reference", "Filling from Git reference library...", 40)
+
+    ref_root = reference_xml_root()
+    if ref_root is None:
+        return xml, protected_attrs, ["Git reference library is not configured; skipped git fill stage"], {}
+
+    try:
+        root_element = peek_root_element(xml)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot detect root element for Git fill: {exc}",
+        ) from exc
+
+    llm_client = None
+    if request.strategy == "hybrid_git_ai" and resolved_llm:
+        llm_client = LLMService(user, alias=resolved_llm)
+
+    registry = get_schema_registry(user)
+    schema = registry[request.schema_id]
+
+    try:
+        new_xml, git_protected, git_warnings, provenance = await populate_from_git(
+            xml,
+            schema,
+            root=ref_root,
+            root_element=root_element,
+            fill_empty_only=True,
+            protected_attrs=protected_attrs,
+            llm=llm_client,
+            allow_ai=request.strategy == "hybrid_git_ai",
+        )
+    except Exception as exc:
+        logger.error(
+            "Fill Git stage failed [schema_id=%s strategy=%s root=%s]: %s",
+            request.schema_id,
+            request.strategy,
+            root_element,
+            exc,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=f"Git reference stage failed: {exc}",
+        ) from exc
+
+    for warning in git_warnings:
+        await on_progress("git_warning", warning, 42)
+
+    return new_xml, protected_attrs | git_protected, git_warnings, provenance
+
+
 async def execute_fill(
     user: UserContext,
     request: FillRequest,
     on_progress: ProgressCallback = _noop_progress,
     cancel_event: asyncio.Event | None = None,
-) -> tuple[str, list[str]]:
+) -> tuple[str, list[str], dict[str, str]]:
     resolved_llm: str | None = None
     if request.strategy in _AI_STRATEGIES:
         try:
@@ -148,8 +217,9 @@ async def execute_fill(
         )
     protected_attrs: ProtectedAttrs = frozenset()
     fill_warnings: list[str] = []
+    provenance: dict[str, str] = {}
 
-    if request.strategy in _HYBRID:
+    if request.strategy in _HYBRID_DB:
         active_mappings = _validate_hybrid_mappings(request)
         await on_progress("db_query", "Querying database...", 10)
         try:
@@ -193,9 +263,15 @@ async def execute_fill(
         for warning in manual_warnings:
             await on_progress("manual_warning", warning, 38)
 
+    if request.strategy in _HYBRID_GIT:
+        xml, protected_attrs, git_warnings, provenance = await _run_git_reference_stage(
+            user, request, xml, protected_attrs, resolved_llm, on_progress
+        )
+        fill_warnings.extend(git_warnings)
+
     fill_empty_only = request.strategy in _HYBRID
     try:
-        if request.strategy in ("faker", "hybrid_db_faker"):
+        if request.strategy in _FAKER_STRATEGIES:
             percent = 45 if request.strategy in _HYBRID else 15
             await on_progress(
                 "faker",
@@ -211,7 +287,7 @@ async def execute_fill(
                 protected_attrs=protected_attrs,
             )
         elif request.strategy in _AI_STRATEGIES:
-            llm_percent = 40 if request.strategy in _HYBRID else 15
+            llm_percent = 45 if request.strategy in _HYBRID else 15
             await on_progress(
                 "llm_request",
                 "Waiting for LLM response...",
@@ -232,10 +308,10 @@ async def execute_fill(
                     protected_attrs=protected_attrs,
                     on_progress=llm_progress,
                     progress_base=llm_percent,
-                    progress_span=50 if request.strategy == "hybrid_db_ai" else 75,
+                    progress_span=50 if request.strategy in _HYBRID else 75,
                     cancel_event=cancel_event,
                 )
-            if request.strategy == "hybrid_db_ai":
+            if request.strategy in {"hybrid_db_ai", "hybrid_git_ai"}:
                 await on_progress(
                     "faker_fallback",
                     "Filling remaining fields with Smart Faker...",
@@ -271,8 +347,16 @@ async def execute_fill(
             detail=f"{stage} stage failed: {exc}",
         ) from exc
 
+    try:
+        post_report = await asyncio.to_thread(validate_document, result, schema, context="post_fill")
+        for violation in post_report.warnings + post_report.errors:
+            loc = f"{violation.path}@{violation.attr}" if violation.attr else violation.path
+            fill_warnings.append(f"[post_fill/{violation.severity}] {loc}: {violation.message}")
+    except Exception as exc:
+        logger.warning("Post-fill attribute rule validation failed: %s", exc)
+
     set_last_generated(user, request.schema_id, result)
-    return result, fill_warnings
+    return result, fill_warnings, provenance
 
 
 @router.post("/suggest-field-mappings", response_model=SuggestFieldMappingsResponse)
@@ -335,7 +419,7 @@ async def fill_xml(
     user: UserContext = Depends(get_current_user),
 ) -> FillResponse:
     try:
-        result, warnings = await execute_fill(user, request)
+        result, warnings, provenance = await execute_fill(user, request)
     except HTTPException:
         raise
     except Exception as exc:
@@ -347,7 +431,12 @@ async def fill_xml(
         )
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    return FillResponse(xml_text=result, strategy=request.strategy, warnings=warnings)
+    return FillResponse(
+        xml_text=result,
+        strategy=request.strategy,
+        warnings=warnings,
+        provenance=provenance,
+    )
 
 
 @router.put("/xml-cache")
@@ -399,12 +488,15 @@ async def fill_xml_stream(
 
     async def run_fill() -> None:
         try:
-            result, warnings = await execute_fill(user, request, on_progress, cancel_event)
+            result, warnings, provenance = await execute_fill(
+                user, request, on_progress, cancel_event
+            )
             await queue.put({
                 "step": "complete",
                 "xml_text": result,
                 "percent": 100,
                 "warnings": warnings,
+                "provenance": provenance,
             })
         except asyncio.CancelledError:
             await queue.put({"step": "cancelled", "message": "Fill cancelled"})

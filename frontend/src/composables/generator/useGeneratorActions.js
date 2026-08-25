@@ -34,6 +34,8 @@ export function useGeneratorActions({
   const fillStatusMessage = ref('')
   const fillPercent = ref(0)
   const fillElapsedSeconds = ref(0)
+  const fillProvenance = ref({})
+  const fillWarnings = ref([])
 
   let generateRequestSeq = 0
   let fillElapsedTimer = null
@@ -68,6 +70,8 @@ export function useGeneratorActions({
     fillStatusMessage.value = ''
     fillPercent.value = 0
     fillElapsedSeconds.value = 0
+    fillProvenance.value = {}
+    fillWarnings.value = []
   }
 
   async function generate() {
@@ -212,6 +216,8 @@ export function useGeneratorActions({
       )
       await setProgrammaticXml(result.xml_text)
       xmlDirty.value = false
+      fillProvenance.value = result.provenance || {}
+      fillWarnings.value = result.warnings || []
       filled = true
     } catch (e) {
       if (e.name === 'AbortError') {
@@ -261,6 +267,8 @@ export function useGeneratorActions({
     fillStatusMessage,
     fillPercent,
     fillElapsedLabel,
+    fillProvenance,
+    fillWarnings,
     generate,
     fill,
     cancelFill,

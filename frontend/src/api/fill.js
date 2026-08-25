@@ -101,6 +101,8 @@ export async function fillXmlStream(request, onProgress, { signal } = {}) {
         result = {
           xml_text: event.xml_text,
           strategy: request.strategy,
+          warnings: event.warnings || [],
+          provenance: event.provenance || {},
         }
         onProgress?.({
           step: 'complete',

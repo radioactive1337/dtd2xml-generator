@@ -359,6 +359,22 @@ class LLMService:
             raise ValueError("LLM response JSON must contain a mappings array")
         return mappings
 
+    async def complete_text(
+        self,
+        *,
+        system_prompt: str,
+        user_message: str,
+        temperature: float = 0.7,
+    ) -> str:
+        """Public single-shot chat completion for callers outside this module."""
+        if not self.base_url:
+            raise ValueError("LLM base URL is not configured in connections.json")
+        return await self._chat_completion(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            temperature=temperature,
+        )
+
     async def _chat_completion(
         self,
         *,

@@ -5,6 +5,7 @@ const FILL_STEP_MESSAGES = {
   db_query: 'Запрос к БД…',
   db_done: 'Данные из БД применены',
   manual_overrides: 'Применение фиксированных значений…',
+  git_reference: 'Заполнение из Git-эталонов…',
   faker: 'Генерация через Faker…',
   llm_request: 'Ожидание ответа LLM…',
   llm_prepare: 'Подготовка запросов к LLM…',

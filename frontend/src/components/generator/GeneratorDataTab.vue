@@ -6,6 +6,8 @@
         <option value="ai">AI / LLM (контекстная генерация)</option>
         <option value="hybrid_db_faker">Гибрид: БД + Faker</option>
         <option value="hybrid_db_ai">Гибрид: БД + AI</option>
+        <option value="hybrid_git_faker">Гибрид: Git-эталоны + Faker</option>
+        <option value="hybrid_git_ai">Гибрид: Git-эталоны + AI</option>
       </select>
     </div>
 
@@ -35,6 +37,28 @@
       />
       Проверять DTD после заполнения
     </label>
+
+    <div v-if="provenanceEntries.length" class="provenance-panel">
+      <div class="overrides-header">
+        <span class="overrides-title">Источник значений (Git)</span>
+        <span class="provenance-count">{{ provenanceEntries.length }}</span>
+      </div>
+      <ul class="provenance-list">
+        <li v-for="[path, source] in provenanceEntries" :key="path" class="provenance-item">
+          <code class="provenance-path">{{ path }}</code>
+          <span class="provenance-badge" :title="source">{{ formatProvenanceBadge(source) }}</span>
+        </li>
+      </ul>
+    </div>
+
+    <div v-if="fillWarnings.length" class="fill-warnings-panel">
+      <div class="overrides-header">
+        <span class="overrides-title">Предупреждения заполнения</span>
+      </div>
+      <ul class="fill-warnings-list">
+        <li v-for="(warning, index) in fillWarnings" :key="index">{{ warning }}</li>
+      </ul>
+    </div>
 
     <FieldOverridesPanel
       :rows="fieldOverrides"
@@ -220,11 +244,25 @@ const props = defineProps({
   xmlText: { type: String, default: '' },
   mappingPreview: { type: Object, default: () => ({}) },
   mappingValidation: { type: Array, default: () => [] },
+  fillProvenance: { type: Object, default: () => ({}) },
+  fillWarnings: { type: Array, default: () => [] },
 })
 
 const usesLlmStrategy = computed(
-  () => props.fillStrategy === 'ai' || props.fillStrategy === 'hybrid_db_ai',
+  () =>
+    props.fillStrategy === 'ai' ||
+    props.fillStrategy === 'hybrid_db_ai' ||
+    props.fillStrategy === 'hybrid_git_ai',
 )
+
+const provenanceEntries = computed(() => Object.entries(props.fillProvenance || {}))
+
+function formatProvenanceBadge(source) {
+  if (!source) return 'git'
+  if (source.startsWith('git-ai:')) return 'git-ai'
+  if (source.startsWith('git:')) return 'git'
+  return source
+}
 
 const emit = defineEmits([
   'update:fillStrategy',
@@ -356,6 +394,66 @@ onBeforeUnmount(() => {
   margin: 0;
   flex-shrink: 0;
   accent-color: var(--accent);
+}
+
+.provenance-panel,
+.fill-warnings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--border) 15%, transparent);
+}
+
+.provenance-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.provenance-list,
+.fill-warnings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.provenance-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.provenance-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.provenance-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.fill-warnings-list li {
+  font-size: 12px;
+  color: var(--warning);
 }
 
 .db-overrides-panel {

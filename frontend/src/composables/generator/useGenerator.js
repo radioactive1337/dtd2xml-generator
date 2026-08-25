@@ -127,6 +127,9 @@ export function useGenerator() {
         gitPushMessage.value = result.overwritten
           ? `Файл обновлён: ${result.path}`
           : `Файл добавлен: ${result.path}`
+        if (result.warnings?.length) {
+          gitPushMessage.value += ` (${result.warnings.length} предупр.)`
+        }
         categoryDocuments.value = {}
       } else if (result?.status === 'unchanged') {
         gitPushMessage.value = result.message || 'Изменений нет'

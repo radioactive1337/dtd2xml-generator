@@ -64,6 +64,8 @@
             :xml-text="liveXmlText || xmlText"
             :mapping-preview="mappingPreview"
             :mapping-validation="mappingValidation"
+            :fill-provenance="fillProvenance"
+            :fill-warnings="fillWarnings"
             @save-mapping-preset="saveMappingPreset"
             @open-mapping-wizard="openMappingWizard"
             @add-field-override="addFieldOverride"
@@ -273,6 +275,8 @@ const {
   fillStatusMessage,
   fillPercent,
   fillElapsedLabel,
+  fillProvenance,
+  fillWarnings,
   validating,
   validationResult,
   generationHistory,

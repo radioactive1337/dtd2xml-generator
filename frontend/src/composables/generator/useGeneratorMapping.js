@@ -26,7 +26,10 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
   let columnsFetchTimer = null
 
   const usesLlmStrategy = computed(
-    () => fillStrategy.value === 'ai' || fillStrategy.value === 'hybrid_db_ai',
+    () =>
+      fillStrategy.value === 'ai' ||
+      fillStrategy.value === 'hybrid_db_ai' ||
+      fillStrategy.value === 'hybrid_git_ai',
   )
 
   const hasLlmBlocker = computed(

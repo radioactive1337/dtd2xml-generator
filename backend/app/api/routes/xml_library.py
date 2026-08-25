@@ -24,6 +24,7 @@ from app.config import (
 from app.api.routes.dtd import get_merged_schema
 from app.core.xml_tree import git_push_attribute_fill_error
 from app.services import reference_xml_service as ref_service
+from app.services.attribute_rules_service import format_push_rule_error, validate_document
 from app.services.git_identity_service import ensure_git_commit_author
 from app.services.git_push_service import push_document
 from app.services.reference_xml_sync import GitAuth, load_sync_state, sync_reference_repository
@@ -71,6 +72,7 @@ class PushToGitResponse(BaseModel):
     path: str
     message: str
     overwritten: bool = False
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CategoryResponse(BaseModel):
@@ -222,6 +224,13 @@ async def push_to_git(
     fill_error = git_push_attribute_fill_error(body.xml_text, schema)
     if fill_error:
         raise HTTPException(status_code=400, detail=fill_error)
+
+    rule_report = validate_document(body.xml_text, schema, context="git_push")
+    rule_error = format_push_rule_error(rule_report)
+    if rule_error:
+        raise HTTPException(status_code=400, detail=rule_error)
+    push_warnings = [v.message for v in rule_report.warnings]
+
     git_auth = _git_auth_for_user(user, settings)
     author_name, author_email = ensure_git_commit_author(user, settings)
     result = await push_document(
@@ -242,6 +251,7 @@ async def push_to_git(
         path=result.path,
         message=result.message,
         overwritten=result.overwritten,
+        warnings=push_warnings,
     )
 
 
