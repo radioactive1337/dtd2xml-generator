@@ -215,7 +215,7 @@
               type="checkbox"
               :disabled="gitPushSubmitting"
             />
-            Я ознакомился с предупреждениями и всё равно хочу отправить
+            <span>Я ознакомился с предупреждениями и всё равно хочу отправить</span>
           </label>
         </div>
         <p v-if="gitPushError" class="push-feedback push-feedback-error">{{ gitPushError }}</p>
@@ -1144,13 +1144,29 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  margin-bottom: 0;
   font-size: 12px;
+  line-height: 1.4;
   color: var(--text);
   cursor: pointer;
 }
 
-.push-warnings-ack input {
-  margin-top: 2px;
+.push-warnings-ack input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  max-width: 14px;
+  margin: 1px 0 0;
+  padding: 0;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  accent-color: var(--accent);
+}
+
+.push-warnings-ack span {
+  flex: 1;
+  min-width: 0;
 }
 </style>
 
