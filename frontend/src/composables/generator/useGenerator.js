@@ -283,8 +283,6 @@ export function useGenerator() {
     llmAlias: mapping.llmAlias,
     isHybridStrategy,
     sqlMappings: mapping.sqlMappings,
-    fieldOverrides: mapping.fieldOverrides,
-    applyFieldOverrides: mapping.applyFieldOverrides,
     xmlText: xml.xmlText,
     xmlDirty: xml.xmlDirty,
     buildInfo: xml.buildInfo,

@@ -122,41 +122,6 @@ def test_faker_fill_overwrites_existing_values_when_preserve_disabled(
     assert filled.attrib.get("id") != "keep-me"
 
 
-def test_field_overrides_win_when_preserve_filled(
-    client: TestClient,
-    monkeypatch: MonkeyPatch,
-):
-    from lxml import etree
-
-    _use_empty_user_connections(monkeypatch)
-    schema_id = _upload_fixture(client)
-    xml_text = _skeleton_xml(schema_id)
-    root = etree.fromstring(xml_text.encode("utf-8"))
-    root.set("id", "keep-me")
-    xml_text = etree.tostring(root, encoding="unicode")
-
-    response = client.post(
-        "/api/fill",
-        json={
-            "schema_id": schema_id,
-            "xml_text": xml_text,
-            "strategy": "faker",
-            "preserve_filled": True,
-            "field_overrides": [
-                {
-                    "target_path": "PayDoc",
-                    "xml_attr": "id",
-                    "value": "forced-id",
-                }
-            ],
-        },
-    )
-
-    assert response.status_code == 200, response.text
-    filled = etree.fromstring(response.json()["xml_text"].encode("utf-8"))
-    assert filled.attrib.get("id") == "forced-id"
-
-
 def test_ai_fill_requires_llm_aliases(client: TestClient, monkeypatch: MonkeyPatch):
     _use_empty_user_connections(monkeypatch)
     schema_id = _upload_fixture(client)

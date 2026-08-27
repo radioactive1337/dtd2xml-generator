@@ -8,18 +8,6 @@ import {
 } from '../../api/mappingPresets'
 import { getMappingValidationIssues } from '../../utils/mappingUtils'
 
-const APPLY_FIELD_OVERRIDES_KEY = 'xml-gen-apply-field-overrides'
-
-function readApplyFieldOverridesPreference() {
-  try {
-    const stored = localStorage.getItem(APPLY_FIELD_OVERRIDES_KEY)
-    if (stored === null) return true
-    return stored === 'true'
-  } catch {
-    return true
-  }
-}
-
 export function useGeneratorMapping({ schemaId, elements, error, isHybridStrategy, fillStrategy }) {
   const dbAliases = ref([])
   const llmAliases = ref([])
@@ -33,8 +21,6 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
   const mappingPreview = ref({})
   const suppressPresetMappingSync = ref(false)
   const sqlMappings = ref([])
-  const fieldOverrides = ref([])
-  const applyFieldOverrides = ref(readApplyFieldOverridesPreference())
 
   let columnsFetchTimer = null
 
@@ -106,36 +92,6 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
     })
   }
 
-  function emptyFieldOverride() {
-    return { target_path: '', xml_attr: '', value: '', target_element: '' }
-  }
-
-  function addFieldOverride() {
-    fieldOverrides.value.push(emptyFieldOverride())
-  }
-
-  function removeFieldOverride(index) {
-    if (index < 0 || index >= fieldOverrides.value.length) return
-    fieldOverrides.value.splice(index, 1)
-  }
-
-  function updateFieldOverride(index, key, value) {
-    const row = fieldOverrides.value[index]
-    if (!row) return
-    fieldOverrides.value[index] = { ...row, [key]: value }
-  }
-
-  function normalizeFieldOverrides(overrides, presetSource = null) {
-    if (!overrides?.length) return []
-    return overrides.map((o) => ({
-      target_path: o.target_path || '',
-      xml_attr: o.xml_attr || '',
-      value: o.value || '',
-      target_element: o.target_element || '',
-      _presetSource: presetSource,
-    }))
-  }
-
   function normalizeMappings(mappings, presetSource = null) {
     if (!mappings?.length) return []
     return mappings.map((m) => ({
@@ -161,12 +117,10 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
   async function saveMappingPreset() {
     if (!mappingPresetName.value) return
     const mappings = sqlMappings.value.map(({ _presetSource, ...m }) => m)
-    const overrides = fieldOverrides.value.map(({ _presetSource, ...o }) => o)
     await apiSaveMappingPreset({
       name: mappingPresetName.value,
       schema_id: schemaId.value,
       mappings,
-      field_overrides: overrides,
     })
     await refreshMappingPresets()
     mappingPresetName.value = ''
@@ -180,9 +134,6 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
     for (let mi = startIdx; mi < sqlMappings.value.length; mi += 1) {
       await refreshMappingPreview(mi)
     }
-    if (preset.field_overrides?.length) {
-      fieldOverrides.value.push(...normalizeFieldOverrides(preset.field_overrides, name))
-    }
   }
 
   function removeSelectedPreset(name) {
@@ -193,7 +144,6 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
     await apiDeleteMappingPreset(name)
     selectedMappingPresetNames.value = selectedMappingPresetNames.value.filter((n) => n !== name)
     sqlMappings.value = sqlMappings.value.filter((m) => m._presetSource !== name)
-    fieldOverrides.value = fieldOverrides.value.filter((o) => o._presetSource !== name)
     await refreshMappingPresets()
   }
 
@@ -251,7 +201,6 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
   function resetMappings() {
     selectedMappingPresetNames.value = []
     sqlMappings.value = []
-    fieldOverrides.value = []
   }
 
   watch(
@@ -271,14 +220,6 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
     if (enabled) refreshMappingPresets()
   })
 
-  watch(applyFieldOverrides, (val) => {
-    try {
-      localStorage.setItem(APPLY_FIELD_OVERRIDES_KEY, String(val))
-    } catch {
-      // ignore storage errors
-    }
-  })
-
   watch(selectedMappingPresetNames, async (newNames, oldNames) => {
     if (suppressPresetMappingSync.value) return
 
@@ -288,13 +229,11 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
 
     if (!newNames.length && removed.length) {
       sqlMappings.value = []
-      fieldOverrides.value = []
       return
     }
 
     if (removed.length) {
       sqlMappings.value = sqlMappings.value.filter((m) => !removed.includes(m._presetSource))
-      fieldOverrides.value = fieldOverrides.value.filter((o) => !removed.includes(o._presetSource))
     }
 
     for (const name of added) {
@@ -318,8 +257,6 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
     wizardInitialMapping,
     mappingPreview,
     sqlMappings,
-    fieldOverrides,
-    applyFieldOverrides,
     presetDropdownLabel,
     mappingValidation,
     hasMappingBlockers,
@@ -328,9 +265,6 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
     openMappingWizard,
     onWizardClose,
     removeMapping,
-    addFieldOverride,
-    removeFieldOverride,
-    updateFieldOverride,
     saveMappingPreset,
     removeSelectedPreset,
     deleteMappingPreset,

@@ -4,7 +4,6 @@ const FILL_STEP_MESSAGES = {
   xml_upload: 'Загрузка XML…',
   db_query: 'Запрос к БД…',
   db_done: 'Данные из БД применены',
-  manual_overrides: 'Применение фиксированных значений…',
   git_reference: 'Заполнение из Git-эталонов…',
   git_ai: 'Вариация значений из Git через LLM…',
   faker: 'Генерация через Faker…',

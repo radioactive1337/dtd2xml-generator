@@ -39,7 +39,7 @@
         Не перезаписывать уже заполненные поля
       </label>
       <p class="fill-options-hint">
-        Пустые и заглушки заполняются. Что уже стоит в XML — не трогается. Фиксированные значения всё равно ставятся.
+        Пустые и заглушки заполняются. Что уже стоит в XML — не трогается.
       </p>
       <label class="auto-validate-label">
         <input
@@ -72,16 +72,6 @@
         <li v-for="(warning, index) in fillWarnings" :key="index">{{ warning }}</li>
       </ul>
     </div>
-
-    <FieldOverridesPanel
-      :rows="fieldOverrides"
-      :xml-text="xmlText"
-      :apply-on-fill="applyFieldOverrides"
-      @update:apply-on-fill="$emit('update:applyFieldOverrides', $event)"
-      @add-row="$emit('add-field-override')"
-      @remove-row="$emit('remove-field-override', $event)"
-      @update-row="(index, key, value) => $emit('update-field-override', index, key, value)"
-    />
 
     <div v-if="isHybridStrategy" class="db-overrides-panel">
       <div class="overrides-header">
@@ -167,7 +157,7 @@
             </button>
           </span>
         </div>
-        <span class="overrides-hint">Этап 1 — сначала БД, затем фиксированные поля, затем Faker/AI</span>
+        <span class="overrides-hint">Этап 1 — сначала БД, затем Faker/AI</span>
       </div>
 
       <div v-for="(mapping, mi) in sqlMappings" :key="mi" class="mapping-card">
@@ -240,7 +230,6 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { formatMappings } from '../../utils/ruPlural'
 import { shareMappingPreset } from '../../api/mappingPresets'
 import { translateApiError } from '../../utils/apiErrors'
-import FieldOverridesPanel from './FieldOverridesPanel.vue'
 import ShareDocumentDialog from './ShareDocumentDialog.vue'
 
 const props = defineProps({
@@ -250,15 +239,12 @@ const props = defineProps({
   defaultLlmAlias: { type: String, default: '' },
   autoValidateAfterFill: { type: Boolean, default: true },
   preserveFilled: { type: Boolean, default: true },
-  applyFieldOverrides: { type: Boolean, default: true },
   isHybridStrategy: { type: Boolean, default: false },
   mappingPresetName: { type: String, default: '' },
   selectedMappingPresetNames: { type: Array, default: () => [] },
   mappingPresets: { type: Array, default: () => [] },
   presetDropdownLabel: { type: String, default: '' },
   sqlMappings: { type: Array, default: () => [] },
-  fieldOverrides: { type: Array, default: () => [] },
-  xmlText: { type: String, default: '' },
   mappingPreview: { type: Object, default: () => ({}) },
   mappingValidation: { type: Array, default: () => [] },
   fillProvenance: { type: Object, default: () => ({}) },
@@ -286,12 +272,8 @@ const emit = defineEmits([
   'update:llmAlias',
   'update:autoValidateAfterFill',
   'update:preserveFilled',
-  'update:applyFieldOverrides',
   'update:mappingPresetName',
   'update:selectedMappingPresetNames',
-  'add-field-override',
-  'remove-field-override',
-  'update-field-override',
   'save-mapping-preset',
   'open-mapping-wizard',
   'remove-mapping',
