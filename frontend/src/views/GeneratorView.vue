@@ -174,9 +174,6 @@
         :unique-ranges="uniqueRanges"
         :git-push-enabled="gitPushEnabled"
         :root-element="rootElement"
-        :schema-id="schemaId"
-        :can-generate="canGenerate"
-        :generating="generating"
         :git-push-submitting="gitPushSubmitting"
         :git-push-message="gitPushMessage"
         :git-push-error="gitPushError"
@@ -194,7 +191,6 @@
         @push-dialog-open="resetGitPushFeedback"
         @push-dialog-close="resetGitPushFeedback"
         @run-compare="runCompareAndFocusTab"
-        @generate="generate"
       />
     </div>
 

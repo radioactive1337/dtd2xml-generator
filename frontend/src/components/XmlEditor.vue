@@ -129,42 +129,6 @@
     <p v-if="importError" class="import-error">{{ importError }}</p>
     <div class="editor-stage">
       <div ref="editorContainer" class="editor-container" />
-      <div
-        v-if="!modelValue"
-        class="editor-empty"
-        tabindex="0"
-        aria-live="polite"
-        @click.self="focusEmptyPanel"
-        @paste.prevent="onEmptyPanelPaste"
-      >
-        <div class="editor-empty-panel">
-          <h3 class="editor-empty-title">Как получить XML</h3>
-          <ol class="editor-empty-steps">
-            <li :class="{ done: !!schemaId }">Загрузить DTD слева</li>
-            <li :class="{ done: !!rootElement }">Выбрать корневой элемент</li>
-            <li>Нажать «Сгенерировать»</li>
-          </ol>
-          <div class="editor-empty-actions">
-            <button
-              class="btn-primary"
-              :disabled="!canGenerate || generating"
-              @click="emit('generate')"
-            >
-              {{ generating ? 'Генерация…' : 'Сгенерировать XML' }}
-            </button>
-            <button class="btn-secondary" @click="triggerImport">Импорт .xml</button>
-            <button
-              class="btn-secondary"
-              title="Вставить XML из буфера обмена (Ctrl+V)"
-              @click="pasteFromClipboard"
-            >
-              Вставить из буфера
-            </button>
-          </div>
-          <p class="editor-empty-hint">Или вставьте XML сюда с клавиатуры (Ctrl+V)</p>
-          <p v-if="generateDisabledReason" class="editor-empty-reason">{{ generateDisabledReason }}</p>
-        </div>
-      </div>
     </div>
 
     <div v-if="showPushDialog" class="save-dialog-backdrop" @click.self="closePushDialog">
@@ -281,9 +245,6 @@ const props = defineProps({
   uniqueRanges: { type: Array, default: () => [] },
   gitPushEnabled: { type: Boolean, default: false },
   rootElement: { type: String, default: '' },
-  schemaId: { type: String, default: '' },
-  canGenerate: { type: Boolean, default: false },
-  generating: { type: Boolean, default: false },
   gitPushSubmitting: { type: Boolean, default: false },
   gitPushMessage: { type: String, default: '' },
   gitPushError: { type: String, default: '' },
@@ -304,7 +265,6 @@ const emit = defineEmits([
   'push-dialog-open',
   'push-dialog-close',
   'run-compare',
-  'generate',
 ])
 
 const { isDark } = useTheme()
@@ -321,13 +281,6 @@ const pushCommitMessage = ref('')
 const hasSelection = ref(false)
 const moreOpen = ref(false)
 const moreRef = ref(null)
-
-const generateDisabledReason = computed(() => {
-  if (props.canGenerate) return ''
-  if (!props.schemaId) return 'Сначала загрузите DTD слева'
-  if (!props.rootElement) return 'Выберите корневой элемент слева'
-  return ''
-})
 
 const pushFolderName = computed(
   () => peekXmlRootElement(props.modelValue) || props.rootElement || '',
@@ -609,33 +562,6 @@ async function onFileSelect(e) {
     emit('import', { text, fileName: file.name })
   } catch (err) {
     importError.value = err.message || 'Не удалось импортировать XML'
-  }
-}
-
-function applyPastedXml(text) {
-  importError.value = ''
-  if (!text?.trim()) {
-    importError.value = 'Буфер обмена пуст'
-    return
-  }
-  emit('import', { text, fileName: 'clipboard.xml' })
-}
-
-function onEmptyPanelPaste(e) {
-  applyPastedXml(e.clipboardData?.getData('text/plain') || '')
-}
-
-function focusEmptyPanel(e) {
-  e.currentTarget?.focus()
-}
-
-async function pasteFromClipboard() {
-  importError.value = ''
-  try {
-    const text = await navigator.clipboard.readText()
-    applyPastedXml(text)
-  } catch {
-    importError.value = 'Не удалось прочитать буфер. Нажмите Ctrl+V на этой панели.'
   }
 }
 
@@ -922,91 +848,6 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
-}
-
-.editor-empty {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  border-radius: var(--radius);
-  outline: none;
-  cursor: text;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, transparent), color-mix(in srgb, var(--surface2) 94%, transparent));
-}
-
-.editor-empty:focus-visible {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
-}
-
-.editor-empty-panel {
-  width: min(420px, 100%);
-  padding: 24px;
-  cursor: default;
-  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
-  border-radius: calc(var(--radius) + 2px);
-  background: color-mix(in srgb, var(--surface) 96%, var(--surface2));
-  box-shadow: 0 16px 36px color-mix(in srgb, var(--text) 10%, transparent);
-}
-
-.editor-empty-title {
-  margin: 0 0 14px;
-  font-size: 22px;
-  line-height: 1.15;
-}
-
-.editor-empty-steps {
-  margin: 0;
-  padding-left: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  color: var(--text-muted);
-}
-
-.editor-empty-steps li.done {
-  color: var(--text);
-}
-
-.editor-empty-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 18px;
-}
-
-.editor-empty-reason {
-  margin: 12px 0 0;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.editor-empty-hint {
-  margin: 12px 0 0;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-@media (max-width: 720px) {
-  .editor-empty {
-    align-items: flex-start;
-    padding: 14px;
-  }
-
-  .editor-empty-panel {
-    padding: 18px;
-  }
-
-  .editor-empty-title {
-    font-size: 19px;
-  }
-
-  .editor-empty-actions {
-    flex-direction: column;
-  }
 }
 
 .btn-sm {
