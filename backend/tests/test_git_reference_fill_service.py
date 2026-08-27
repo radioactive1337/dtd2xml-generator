@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -256,7 +258,10 @@ async def test_populate_from_git_ai_retries_after_transient_exception(tmp_path: 
             self.attempts += 1
             if self.attempts == 1:
                 raise RuntimeError("network blip")
-            return "12345678901"
+            indexes = [int(match) for match in re.findall(r"\[(\d+)\] Path:", user_message)]
+            if not indexes:
+                indexes = [0]
+            return json.dumps({"values": [{"i": i, "v": "12345678901"} for i in indexes]})
 
     xml = '<PayDoc id="" kladr=""/>'
     result, protected, warnings, provenance = await git_fill.populate_from_git(
@@ -286,6 +291,7 @@ async def test_populate_from_git_empty_corpus_returns_warning(tmp_path: Path):
 
 class _CountingLlm:
     def __init__(self, value: str = "44444444444") -> None:
+        self.value = value
         self.calls = 0
         self.in_flight = 0
         self.max_in_flight = 0
@@ -303,7 +309,10 @@ class _CountingLlm:
         self.max_in_flight = max(self.max_in_flight, self.in_flight)
         await asyncio.sleep(0)
         self.in_flight -= 1
-        return "44444444444"
+        indexes = [int(match) for match in re.findall(r"\[(\d+)\] Path:", user_message)]
+        if not indexes:
+            indexes = [0]
+        return json.dumps({"values": [{"i": i, "v": self.value} for i in indexes]})
 
 
 @pytest.mark.asyncio
@@ -355,11 +364,48 @@ async def test_three_reference_docs_use_ai_and_emit_progress(tmp_path: Path):
     assert 'kladr="44444444444"' in result
     assert progress
     assert progress[0][0] == "git_ai"
-    assert any(step == "git_ai" and "1/" in message for step, message, _percent in progress)
+    assert any("batch" in message.lower() or "1/" in message for _step, message, _percent in progress)
 
 
 @pytest.mark.asyncio
-async def test_git_ai_jobs_run_concurrently(tmp_path: Path):
+async def test_git_ai_batches_multiple_fields_in_one_call(tmp_path: Path):
+    schema = DTDSchema(
+        elements={
+            "PayDoc": ElementDef(
+                name="PayDoc",
+                content_raw="EMPTY",
+                content_model=ContentNode(kind="EMPTY"),
+                attributes={
+                    "kladr": AttributeDef(name="kladr", attr_type="CDATA", default_decl="#REQUIRED"),
+                    "purpose": AttributeDef(
+                        name="purpose", attr_type="CDATA", default_decl="#IMPLIED"
+                    ),
+                },
+            )
+        }
+    )
+    _write_ref(tmp_path, "PayDoc", "a.xml", '<PayDoc kladr="11111111111" purpose="alpha"/>')
+    _write_ref(tmp_path, "PayDoc", "b.xml", '<PayDoc kladr="22222222222" purpose="bravo"/>')
+    _write_ref(tmp_path, "PayDoc", "c.xml", '<PayDoc kladr="33333333333" purpose="charlie"/>')
+
+    llm = _CountingLlm()
+    result, _protected, _warnings, provenance = await git_fill.populate_from_git(
+        '<PayDoc kladr="" purpose=""/>',
+        schema,
+        root=tmp_path,
+        root_element="PayDoc",
+        allow_ai=True,
+        llm=llm,
+    )
+    assert llm.calls == 1
+    assert any(v.startswith("git-ai:") for v in provenance.values())
+    assert 'kladr="44444444444"' in result
+    assert 'purpose="44444444444"' in result
+
+
+@pytest.mark.asyncio
+async def test_git_ai_batches_run_concurrently(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(git_fill, "_AI_BATCH_SIZE", 1)
     schema = DTDSchema(
         elements={
             "PayDoc": ElementDef(
@@ -386,7 +432,10 @@ async def test_git_ai_jobs_run_concurrently(tmp_path: Path):
             self.max_in_flight = max(self.max_in_flight, self.in_flight)
             await asyncio.sleep(0.05)
             self.in_flight -= 1
-            return "44444444444"
+            indexes = [int(match) for match in re.findall(r"\[(\d+)\] Path:", user_message)]
+            if not indexes:
+                indexes = [0]
+            return json.dumps({"values": [{"i": i, "v": self.value} for i in indexes]})
 
     llm = SlowLlm()
     await git_fill.populate_from_git(
@@ -399,3 +448,8 @@ async def test_git_ai_jobs_run_concurrently(tmp_path: Path):
     )
     assert llm.calls == 2
     assert llm.max_in_flight == 2
+
+
+def test_parse_batch_ai_values_accepts_fenced_json():
+    payload = '```json\n{"values": [{"i": 1, "v": "EUR"}, {"i": 0, "v": "USD"}]}\n```'
+    assert git_fill._parse_batch_ai_values(payload) == {0: "USD", 1: "EUR"}

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import random
 import re
@@ -55,6 +56,7 @@ _HIGH_DIVERSITY_RATIO = 0.6
 _AI_FEW_SHOT_MAX = 10
 _AI_MAX_ATTEMPTS = 2
 _AI_MAX_CONCURRENT = 4
+_AI_BATCH_SIZE = 12
 
 ProgressCallback = Callable[[str, str, int], Awaitable[None]]
 
@@ -253,6 +255,28 @@ _GIT_AI_SYSTEM_PROMPT = (
     "Return only the bare value, no quotes, no explanation, no XML."
 )
 
+_GIT_AI_BATCH_SYSTEM_PROMPT = (
+    "You generate realistic alternative attribute values for QA test XML. "
+    "Match the style and format of the provided examples for each field. "
+    "Keep fields that share the same Path consistent with each other "
+    "(for example currency with currency-code, or address parts). "
+    'Return only JSON: {"values": [{"i": 0, "v": "..."}, ...]}. '
+    "No markdown, no explanation, no XML."
+)
+
+
+def _few_shot_examples(values: list[str]) -> list[str]:
+    unique_examples: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique_examples.append(value)
+        if len(unique_examples) >= _AI_FEW_SHOT_MAX:
+            break
+    return unique_examples
+
 
 def _clean_ai_value(content: str) -> str:
     value = (content or "").strip()
@@ -264,9 +288,88 @@ def _clean_ai_value(content: str) -> str:
     return value.splitlines()[0].strip() if value else ""
 
 
+def _parse_batch_ai_values(content: str) -> dict[int, str]:
+    """Parse ``{"values": [{"i": 0, "v": "..."}]}`` from an LLM batch response."""
+    text = (content or "").strip()
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        data = json.loads(text[start : end + 1])
+    if not isinstance(data, dict):
+        raise ValueError("Git AI batch response JSON must be an object")
+    rows = data.get("values")
+    if not isinstance(rows, list):
+        raise ValueError("Git AI batch response JSON must contain a values array")
+    parsed: dict[int, str] = {}
+    for row in rows:
+        if not isinstance(row, dict) or "i" not in row:
+            continue
+        try:
+            index = int(row["i"])
+        except (TypeError, ValueError):
+            continue
+        raw = row.get("v")
+        if raw is None:
+            continue
+        value = _clean_ai_value(str(raw))
+        if value:
+            parsed[index] = value
+    if not parsed:
+        raise ValueError("Git AI batch response did not contain any values")
+    return parsed
+
+
+def _is_valid_ai_candidate(
+    *,
+    element: str,
+    attr: str,
+    candidate: str,
+    attr_def,
+    dot_path: str,
+    ruleset,
+) -> bool:
+    if not candidate:
+        return False
+    violations = rules_svc.validate_attribute(
+        element,
+        attr,
+        candidate,
+        context="git_ai_fill",
+        path=dot_path,
+        attr_def=attr_def,
+        ruleset=ruleset,
+    )
+    return not any(v.severity == "error" for v in violations)
+
+
 def _raise_if_cancelled(cancel_event: asyncio.Event | None) -> None:
     if cancel_event is not None and cancel_event.is_set():
         raise asyncio.CancelledError("Git AI fill cancelled")
+
+
+def _build_batch_user_message(jobs: list[_AiFillJob]) -> str:
+    blocks: list[str] = []
+    for index, job in enumerate(jobs):
+        examples = _few_shot_examples(job.stats.values)
+        examples_block = "\n".join(f"  - {ex}" for ex in examples) or "  - (none)"
+        blocks.append(
+            f"[{index}] Path: {job.dot} Attribute: {job.attr_name}\n"
+            f"Examples:\n{examples_block}"
+        )
+    return (
+        "Generate one alternative value per field index. "
+        "Keep fields that share a Path consistent with each other. "
+        "Do not copy examples verbatim when a close variant is possible.\n\n"
+        + "\n\n".join(blocks)
+        + '\n\nReturn JSON: {"values": [{"i": 0, "v": "..."}, ...]}'
+    )
 
 
 async def _generate_ai_value(
@@ -277,16 +380,7 @@ async def _generate_ai_value(
     examples: list[str],
     cancel_event: asyncio.Event | None = None,
 ) -> str:
-    unique_examples: list[str] = []
-    seen: set[str] = set()
-    for value in examples:
-        if value in seen:
-            continue
-        seen.add(value)
-        unique_examples.append(value)
-        if len(unique_examples) >= _AI_FEW_SHOT_MAX:
-            break
-
+    unique_examples = _few_shot_examples(examples)
     examples_block = "\n".join(f"- {ex}" for ex in unique_examples) or "(none)"
     user_message = (
         f"Element: {element}\n"
@@ -303,6 +397,27 @@ async def _generate_ai_value(
         cancel_event=cancel_event,
     )
     return _clean_ai_value(content)
+
+
+async def _generate_ai_values_batch(
+    llm: ChatCompleter,
+    jobs: list[_AiFillJob],
+    *,
+    cancel_event: asyncio.Event | None = None,
+    extra_instruction: str = "",
+) -> dict[int, str]:
+    user_message = _build_batch_user_message(jobs)
+    if extra_instruction:
+        user_message = f"{user_message}\n\n{extra_instruction}"
+    _raise_if_cancelled(cancel_event)
+    content = await llm.complete_text(
+        system_prompt=_GIT_AI_BATCH_SYSTEM_PROMPT,
+        user_message=user_message,
+        temperature=0.5,
+        cancel_event=cancel_event,
+    )
+    parsed = _parse_batch_ai_values(content)
+    return {index: value for index, value in parsed.items() if 0 <= index < len(jobs)}
 
 
 async def _generate_validated_ai_value(
@@ -339,18 +454,14 @@ async def _generate_validated_ai_value(
                 exc,
             )
             continue
-        if not candidate:
-            continue
-        violations = rules_svc.validate_attribute(
-            element,
-            attr,
-            candidate,
-            context="git_ai_fill",
-            path=dot_path,
+        if _is_valid_ai_candidate(
+            element=element,
+            attr=attr,
+            candidate=candidate,
             attr_def=attr_def,
+            dot_path=dot_path,
             ruleset=ruleset,
-        )
-        if not any(v.severity == "error" for v in violations):
+        ):
             return candidate
     return None
 
@@ -375,6 +486,61 @@ def _apply_ai_or_copy(
     provenance[f"{job.dot}@{job.attr_name}"] = applied_source
 
 
+def _accept_batch_values(
+    batch: list[_AiFillJob],
+    generated: dict[int, str],
+    ruleset,
+) -> tuple[list[tuple[_AiFillJob, str]], list[_AiFillJob]]:
+    accepted: list[tuple[_AiFillJob, str]] = []
+    missing: list[_AiFillJob] = []
+    for index, job in enumerate(batch):
+        candidate = generated.get(index)
+        if candidate and _is_valid_ai_candidate(
+            element=job.element.tag,
+            attr=job.attr_name,
+            candidate=candidate,
+            attr_def=job.attr_def,
+            dot_path=job.dot,
+            ruleset=ruleset,
+        ):
+            accepted.append((job, candidate))
+        else:
+            missing.append(job)
+    return accepted, missing
+
+
+async def _generate_batch_with_retry(
+    llm: ChatCompleter,
+    batch: list[_AiFillJob],
+    *,
+    cancel_event: asyncio.Event | None,
+) -> dict[int, str]:
+    extra = ""
+    for attempt in range(_AI_MAX_ATTEMPTS):
+        try:
+            return await _generate_ai_values_batch(
+                llm,
+                batch,
+                cancel_event=cancel_event,
+                extra_instruction=extra,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Git AI batch failed (attempt %d/%d, fields=%d): %s",
+                attempt + 1,
+                _AI_MAX_ATTEMPTS,
+                len(batch),
+                exc,
+            )
+            extra = (
+                'IMPORTANT: Return only JSON {"values": [{"i": 0, "v": "..."}]}, '
+                "no markdown."
+            )
+    return {}
+
+
 async def _run_ai_fill_jobs(
     jobs: list[_AiFillJob],
     llm: ChatCompleter,
@@ -387,66 +553,85 @@ async def _run_ai_fill_jobs(
     on_progress: ProgressCallback | None,
     cancel_event: asyncio.Event | None,
 ) -> None:
-    """Generate Git-AI values concurrently and emit stream progress as they finish."""
+    """Generate Git-AI values in concurrent batches and emit stream progress."""
     total = len(jobs)
+    batches = [jobs[index : index + _AI_BATCH_SIZE] for index in range(0, total, _AI_BATCH_SIZE)]
     if on_progress:
         await on_progress(
             "git_ai",
-            f"Generating {total} Git-based values via LLM...",
+            f"Generating {total} Git-based values in {len(batches)} batches...",
             41,
         )
 
     semaphore = asyncio.Semaphore(_AI_MAX_CONCURRENT)
     completed = 0
+    finished_batches = 0
     progress_lock = asyncio.Lock()
 
-    async def run_one(job: _AiFillJob) -> tuple[_AiFillJob, str | None]:
-        nonlocal completed
+    async def run_batch(batch: list[_AiFillJob]) -> list[tuple[_AiFillJob, str | None]]:
+        nonlocal completed, finished_batches
         _raise_if_cancelled(cancel_event)
         async with semaphore:
             _raise_if_cancelled(cancel_event)
-            try:
-                validated = await _generate_validated_ai_value(
-                    llm,
-                    element=job.element.tag,
-                    attr=job.attr_name,
-                    examples=job.stats.values,
-                    attr_def=job.attr_def,
-                    dot_path=job.dot,
-                    ruleset=ruleset,
-                    cancel_event=cancel_event,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning(
-                    "Git AI fill job failed for %s@%s: %s",
-                    job.element.tag,
-                    job.attr_name,
-                    exc,
-                )
-                validated = None
+            generated = await _generate_batch_with_retry(
+                llm, batch, cancel_event=cancel_event
+            )
+            accepted, missing = _accept_batch_values(batch, generated, ruleset)
+            results: list[tuple[_AiFillJob, str | None]] = [
+                (job, value) for job, value in accepted
+            ]
+            # Partial misses: one more single-field attempt. A total batch
+            # failure falls back to copy instead of N extra round-trips.
+            if missing and generated:
+                for job in missing:
+                    try:
+                        validated = await _generate_validated_ai_value(
+                            llm,
+                            element=job.element.tag,
+                            attr=job.attr_name,
+                            examples=job.stats.values,
+                            attr_def=job.attr_def,
+                            dot_path=job.dot,
+                            ruleset=ruleset,
+                            cancel_event=cancel_event,
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        logger.warning(
+                            "Git AI fill job failed for %s@%s: %s",
+                            job.element.tag,
+                            job.attr_name,
+                            exc,
+                        )
+                        validated = None
+                    results.append((job, validated))
+            else:
+                results.extend((job, None) for job in missing)
+
         async with progress_lock:
-            completed += 1
+            completed += len(batch)
+            finished_batches += 1
             if on_progress:
                 percent = 41 + int((completed / total) * 3)
                 await on_progress(
                     "git_ai",
-                    f"Git AI fill {completed}/{total}",
+                    f"Git AI batch {finished_batches}/{len(batches)} ({completed}/{total} values)",
                     min(percent, 44),
                 )
-        return job, validated
+        return results
 
-    results = await asyncio.gather(*(run_one(job) for job in jobs))
-    for job, validated in results:
-        _apply_ai_or_copy(
-            job,
-            validated,
-            seed=seed,
-            newly_protected=newly_protected,
-            provenance=provenance,
-            warnings=warnings,
-        )
+    batch_results = await asyncio.gather(*(run_batch(batch) for batch in batches))
+    for batch_result in batch_results:
+        for job, validated in batch_result:
+            _apply_ai_or_copy(
+                job,
+                validated,
+                seed=seed,
+                newly_protected=newly_protected,
+                provenance=provenance,
+                warnings=warnings,
+            )
 
 
 async def populate_from_git(
