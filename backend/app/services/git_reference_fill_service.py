@@ -230,22 +230,35 @@ def choose_fill_mode(
     return "copy"
 
 
+def _unique_copy_choices(stats: AttributeCorpusStats) -> list[tuple[str, str]]:
+    """Distinct corpus values in first-seen order, each with its first source file."""
+    seen: set[str] = set()
+    choices: list[tuple[str, str]] = []
+    for i, value in enumerate(stats.values):
+        if value in seen:
+            continue
+        seen.add(value)
+        source = stats.sources[i] if i < len(stats.sources) else "git"
+        choices.append((value, source))
+    return choices
+
+
 def _pick_copy_value(stats: AttributeCorpusStats, *, seed: str | None = None) -> tuple[str, str]:
     """Return (value, source_label).
 
-    Without a seed, picks randomly (default -- keeps generated documents
-    varied across repeated fills). Pass an explicit seed only when
-    reproducibility is required (e.g. debugging a specific bug report).
+    Picks uniformly among distinct values (frequency in the corpus does not
+    weight the draw). Without a seed this varies across repeated fills.
+    Pass an explicit seed only when reproducibility is required.
     """
-    if not stats.values:
+    choices = _unique_copy_choices(stats)
+    if not choices:
         raise ValueError("empty corpus stats")
     if seed:
         digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
-        index = int(digest[:8], 16) % len(stats.values)
+        index = int(digest[:8], 16) % len(choices)
     else:
-        index = random.randrange(len(stats.values))
-    value = stats.values[index]
-    source = stats.sources[index] if index < len(stats.sources) else "git"
+        index = random.randrange(len(choices))
+    value, source = choices[index]
     return value, f"git:{source}"
 
 

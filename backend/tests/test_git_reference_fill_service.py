@@ -111,6 +111,25 @@ def test_choose_fill_mode_uses_diversity_ratio_not_absolute_count():
     assert git_fill.choose_fill_mode(None, high_ratio) == "ai"
 
 
+def test_pick_copy_value_is_uniform_over_unique_values(monkeypatch):
+    """A value that appears 9 times must not be 9× more likely than one that appears once."""
+    stats = git_fill.AttributeCorpusStats(
+        values=["NEW"] * 9 + ["ACTIVE"],
+        sources=["PayDoc/a.xml"] * 9 + ["PayDoc/b.xml"],
+    )
+    captured: dict[str, int] = {}
+
+    def fake_randrange(n: int) -> int:
+        captured["n"] = n
+        return 1
+
+    monkeypatch.setattr(git_fill.random, "randrange", fake_randrange)
+    value, source = git_fill._pick_copy_value(stats)
+    assert captured["n"] == 2
+    assert value == "ACTIVE"
+    assert source == "git:PayDoc/b.xml"
+
+
 # --- populate_from_git: copy mode ------------------------------------------
 
 
