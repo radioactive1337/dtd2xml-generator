@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -162,7 +163,7 @@ async def test_populate_from_git_never_copies_or_ai_fills_deny_listed_attrs(tmp_
         def __init__(self) -> None:
             self.calls: list[str] = []
 
-        async def complete_text(self, *, system_prompt: str, user_message: str, temperature: float = 0.7) -> str:
+        async def complete_text(self, *, system_prompt: str, user_message: str, temperature: float = 0.7, **_kwargs) -> str:
             self.calls.append(user_message)
             return "generated-value"
 
@@ -200,7 +201,7 @@ async def test_populate_from_git_ai_fallback_on_validation_failure(tmp_path: Pat
     monkeypatch.setattr(git_fill, "choose_fill_mode", force_ai)
 
     class AlwaysInvalidLlm:
-        async def complete_text(self, *, system_prompt: str, user_message: str, temperature: float = 0.7) -> str:
+        async def complete_text(self, *, system_prompt: str, user_message: str, temperature: float = 0.7, **_kwargs) -> str:
             return "not-digits"
 
     ruleset = AttributeRuleSet.model_validate(
@@ -251,7 +252,7 @@ async def test_populate_from_git_ai_retries_after_transient_exception(tmp_path: 
         def __init__(self) -> None:
             self.attempts = 0
 
-        async def complete_text(self, *, system_prompt: str, user_message: str, temperature: float = 0.7) -> str:
+        async def complete_text(self, *, system_prompt: str, user_message: str, temperature: float = 0.7, **_kwargs) -> str:
             self.attempts += 1
             if self.attempts == 1:
                 raise RuntimeError("network blip")
@@ -281,3 +282,120 @@ async def test_populate_from_git_empty_corpus_returns_warning(tmp_path: Path):
     assert not protected
     assert not provenance
     assert warnings
+
+
+class _CountingLlm:
+    def __init__(self, value: str = "44444444444") -> None:
+        self.calls = 0
+        self.in_flight = 0
+        self.max_in_flight = 0
+
+    async def complete_text(
+        self,
+        *,
+        system_prompt: str,
+        user_message: str,
+        temperature: float = 0.7,
+        **_kwargs,
+    ) -> str:
+        self.calls += 1
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        await asyncio.sleep(0)
+        self.in_flight -= 1
+        return "44444444444"
+
+
+@pytest.mark.asyncio
+async def test_two_reference_docs_copy_without_calling_llm(tmp_path: Path):
+    """Fewer than _MIN_DOCS_FOR_AI_POLICY docs must copy, not wait on LLM."""
+    _write_ref(tmp_path, "PayDoc", "a.xml", '<PayDoc kladr="11111111111"/>')
+    _write_ref(tmp_path, "PayDoc", "b.xml", '<PayDoc kladr="22222222222"/>')
+
+    llm = _CountingLlm()
+    result, _protected, _warnings, provenance = await git_fill.populate_from_git(
+        '<PayDoc kladr=""/>',
+        _schema(),
+        root=tmp_path,
+        root_element="PayDoc",
+        allow_ai=True,
+        llm=llm,
+    )
+
+    assert llm.calls == 0
+    assert 'kladr="' in result
+    assert all(v.startswith("git:") for v in provenance.values())
+
+
+@pytest.mark.asyncio
+async def test_three_reference_docs_use_ai_and_emit_progress(tmp_path: Path):
+    """3+ diverse docs trigger Git AI; progress events must fire before LLM returns."""
+    _write_ref(tmp_path, "PayDoc", "a.xml", '<PayDoc kladr="11111111111"/>')
+    _write_ref(tmp_path, "PayDoc", "b.xml", '<PayDoc kladr="22222222222"/>')
+    _write_ref(tmp_path, "PayDoc", "c.xml", '<PayDoc kladr="33333333333"/>')
+
+    progress: list[tuple[str, str, int]] = []
+
+    async def on_progress(step: str, message: str, percent: int) -> None:
+        progress.append((step, message, percent))
+
+    llm = _CountingLlm()
+    result, _protected, _warnings, provenance = await git_fill.populate_from_git(
+        '<PayDoc kladr=""/>',
+        _schema(),
+        root=tmp_path,
+        root_element="PayDoc",
+        allow_ai=True,
+        llm=llm,
+        on_progress=on_progress,
+    )
+
+    assert llm.calls >= 1
+    assert any(v.startswith("git-ai:") for v in provenance.values())
+    assert 'kladr="44444444444"' in result
+    assert progress
+    assert progress[0][0] == "git_ai"
+    assert any(step == "git_ai" and "1/" in message for step, message, _percent in progress)
+
+
+@pytest.mark.asyncio
+async def test_git_ai_jobs_run_concurrently(tmp_path: Path):
+    schema = DTDSchema(
+        elements={
+            "PayDoc": ElementDef(
+                name="PayDoc",
+                content_raw="EMPTY",
+                content_model=ContentNode(kind="EMPTY"),
+                attributes={
+                    "kladr": AttributeDef(name="kladr", attr_type="CDATA", default_decl="#REQUIRED"),
+                    "purpose": AttributeDef(
+                        name="purpose", attr_type="CDATA", default_decl="#IMPLIED"
+                    ),
+                },
+            )
+        }
+    )
+    _write_ref(tmp_path, "PayDoc", "a.xml", '<PayDoc kladr="11111111111" purpose="alpha"/>')
+    _write_ref(tmp_path, "PayDoc", "b.xml", '<PayDoc kladr="22222222222" purpose="bravo"/>')
+    _write_ref(tmp_path, "PayDoc", "c.xml", '<PayDoc kladr="33333333333" purpose="charlie"/>')
+
+    class SlowLlm(_CountingLlm):
+        async def complete_text(self, *, system_prompt: str, user_message: str, temperature: float = 0.7, **_kwargs) -> str:
+            self.calls += 1
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+            await asyncio.sleep(0.05)
+            self.in_flight -= 1
+            return "44444444444"
+
+    llm = SlowLlm()
+    await git_fill.populate_from_git(
+        '<PayDoc kladr="" purpose=""/>',
+        schema,
+        root=tmp_path,
+        root_element="PayDoc",
+        allow_ai=True,
+        llm=llm,
+    )
+    assert llm.calls == 2
+    assert llm.max_in_flight == 2

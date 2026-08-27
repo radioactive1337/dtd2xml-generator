@@ -133,6 +133,7 @@ async def _run_git_reference_stage(
     protected_attrs: ProtectedAttrs,
     resolved_llm: str | None,
     on_progress: ProgressCallback,
+    cancel_event: asyncio.Event | None = None,
 ) -> tuple[str, ProtectedAttrs, list[str], dict[str, str]]:
     """Best-effort Git reference fill stage; returns updated xml/protected/warnings/provenance."""
     await on_progress("git_reference", "Filling from Git reference library...", 40)
@@ -166,6 +167,8 @@ async def _run_git_reference_stage(
             protected_attrs=protected_attrs,
             llm=llm_client,
             allow_ai=request.strategy == "hybrid_git_ai",
+            on_progress=on_progress,
+            cancel_event=cancel_event,
         )
     except Exception as exc:
         logger.error(
@@ -265,7 +268,7 @@ async def execute_fill(
 
     if request.strategy in _HYBRID_GIT:
         xml, protected_attrs, git_warnings, provenance = await _run_git_reference_stage(
-            user, request, xml, protected_attrs, resolved_llm, on_progress
+            user, request, xml, protected_attrs, resolved_llm, on_progress, cancel_event
         )
         fill_warnings.extend(git_warnings)
 
@@ -524,7 +527,10 @@ async def fill_xml_stream(
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=_SSE_KEEPALIVE_SEC)
                 except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
+                    # Send a data: ping rather than an SSE comment. Comments are
+                    # ignored by the frontend parser and often buffered by proxies,
+                    # which makes hybrid_git_ai look stuck after a single keepalive.
+                    yield _sse_event({"step": "ping"})
                     await asyncio.sleep(0)
                     continue
                 if event is None:

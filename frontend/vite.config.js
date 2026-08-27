@@ -12,8 +12,9 @@ export default defineConfig({
         configure: (proxy) => {
           proxy.on('proxyRes', (proxyRes, req) => {
             if (req.url?.includes('/fill/stream')) {
-              proxyRes.headers['cache-control'] = 'no-cache'
+              proxyRes.headers['cache-control'] = 'no-cache, no-transform'
               proxyRes.headers['x-accel-buffering'] = 'no'
+              proxyRes.headers['connection'] = 'keep-alive'
             }
           })
         },

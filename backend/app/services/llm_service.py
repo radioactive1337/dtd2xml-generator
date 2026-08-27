@@ -365,6 +365,7 @@ class LLMService:
         system_prompt: str,
         user_message: str,
         temperature: float = 0.7,
+        cancel_event: asyncio.Event | None = None,
     ) -> str:
         """Public single-shot chat completion for callers outside this module."""
         if not self.base_url:
@@ -373,6 +374,7 @@ class LLMService:
             system_prompt=system_prompt,
             user_message=user_message,
             temperature=temperature,
+            cancel_event=cancel_event,
         )
 
     async def _chat_completion(

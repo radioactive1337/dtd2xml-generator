@@ -24,6 +24,7 @@ import logging
 import random
 import re
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
@@ -32,6 +33,7 @@ from lxml import etree
 
 from app.core.dtd_models import AttributeDef, DTDSchema
 from app.core.xml_tree import (
+    ElementPath,
     ProtectedAttrs,
     element_dot_path,
     element_path,
@@ -52,10 +54,20 @@ _MIN_DOCS_FOR_AI_POLICY = 3
 _HIGH_DIVERSITY_RATIO = 0.6
 _AI_FEW_SHOT_MAX = 10
 _AI_MAX_ATTEMPTS = 2
+_AI_MAX_CONCURRENT = 4
+
+ProgressCallback = Callable[[str, str, int], Awaitable[None]]
 
 
 class ChatCompleter(Protocol):
-    async def complete_text(self, *, system_prompt: str, user_message: str, temperature: float = 0.7) -> str: ...
+    async def complete_text(
+        self,
+        *,
+        system_prompt: str,
+        user_message: str,
+        temperature: float = 0.7,
+        cancel_event: asyncio.Event | None = None,
+    ) -> str: ...
 
 
 @dataclass
@@ -66,6 +78,16 @@ class AttributeCorpusStats:
     diversity: int = 0
     doc_count: int = 0
     filled_count: int = 0
+
+
+@dataclass
+class _AiFillJob:
+    element: etree._Element
+    attr_name: str
+    attr_def: AttributeDef | None
+    stats: AttributeCorpusStats
+    dot: str
+    tree_path: ElementPath
 
 
 def _local_name(tag: str) -> str:
@@ -242,12 +264,18 @@ def _clean_ai_value(content: str) -> str:
     return value.splitlines()[0].strip() if value else ""
 
 
+def _raise_if_cancelled(cancel_event: asyncio.Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise asyncio.CancelledError("Git AI fill cancelled")
+
+
 async def _generate_ai_value(
     llm: ChatCompleter,
     *,
     element: str,
     attr: str,
     examples: list[str],
+    cancel_event: asyncio.Event | None = None,
 ) -> str:
     unique_examples: list[str] = []
     seen: set[str] = set()
@@ -267,10 +295,12 @@ async def _generate_ai_value(
         "Generate one alternative value that fits the same pattern but is not an "
         "exact copy of the examples when possible."
     )
+    _raise_if_cancelled(cancel_event)
     content = await llm.complete_text(
         system_prompt=_GIT_AI_SYSTEM_PROMPT,
         user_message=user_message,
         temperature=0.6,
+        cancel_event=cancel_event,
     )
     return _clean_ai_value(content)
 
@@ -284,11 +314,21 @@ async def _generate_validated_ai_value(
     attr_def,
     dot_path: str,
     ruleset,
+    cancel_event: asyncio.Event | None = None,
 ) -> str | None:
     """Ask the LLM for a value and validate it, retrying on failure or error."""
     for attempt in range(_AI_MAX_ATTEMPTS):
+        _raise_if_cancelled(cancel_event)
         try:
-            candidate = await _generate_ai_value(llm, element=element, attr=attr, examples=examples)
+            candidate = await _generate_ai_value(
+                llm,
+                element=element,
+                attr=attr,
+                examples=examples,
+                cancel_event=cancel_event,
+            )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             logger.warning(
                 "Git AI fill request failed for %s@%s (attempt %d/%d): %s",
@@ -315,6 +355,100 @@ async def _generate_validated_ai_value(
     return None
 
 
+def _apply_ai_or_copy(
+    job: _AiFillJob,
+    validated: str | None,
+    *,
+    seed: str | None,
+    newly_protected: set[tuple[tuple[tuple[str, int], ...], str]],
+    provenance: dict[str, str],
+    warnings: list[str],
+) -> None:
+    if validated is not None:
+        applied_value = validated
+        applied_source = f"git-ai:corpus(n={len(set(job.stats.values))})"
+    else:
+        applied_value, applied_source = _pick_copy_value(job.stats, seed=seed)
+        warnings.append(f"Git AI fill fell back to copy for {job.dot}@{job.attr_name}")
+    job.element.set(job.attr_name, applied_value)
+    newly_protected.add((job.tree_path, job.attr_name))
+    provenance[f"{job.dot}@{job.attr_name}"] = applied_source
+
+
+async def _run_ai_fill_jobs(
+    jobs: list[_AiFillJob],
+    llm: ChatCompleter,
+    *,
+    seed: str | None,
+    ruleset,
+    newly_protected: set[tuple[tuple[tuple[str, int], ...], str]],
+    provenance: dict[str, str],
+    warnings: list[str],
+    on_progress: ProgressCallback | None,
+    cancel_event: asyncio.Event | None,
+) -> None:
+    """Generate Git-AI values concurrently and emit stream progress as they finish."""
+    total = len(jobs)
+    if on_progress:
+        await on_progress(
+            "git_ai",
+            f"Generating {total} Git-based values via LLM...",
+            41,
+        )
+
+    semaphore = asyncio.Semaphore(_AI_MAX_CONCURRENT)
+    completed = 0
+    progress_lock = asyncio.Lock()
+
+    async def run_one(job: _AiFillJob) -> tuple[_AiFillJob, str | None]:
+        nonlocal completed
+        _raise_if_cancelled(cancel_event)
+        async with semaphore:
+            _raise_if_cancelled(cancel_event)
+            try:
+                validated = await _generate_validated_ai_value(
+                    llm,
+                    element=job.element.tag,
+                    attr=job.attr_name,
+                    examples=job.stats.values,
+                    attr_def=job.attr_def,
+                    dot_path=job.dot,
+                    ruleset=ruleset,
+                    cancel_event=cancel_event,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "Git AI fill job failed for %s@%s: %s",
+                    job.element.tag,
+                    job.attr_name,
+                    exc,
+                )
+                validated = None
+        async with progress_lock:
+            completed += 1
+            if on_progress:
+                percent = 41 + int((completed / total) * 3)
+                await on_progress(
+                    "git_ai",
+                    f"Git AI fill {completed}/{total}",
+                    min(percent, 44),
+                )
+        return job, validated
+
+    results = await asyncio.gather(*(run_one(job) for job in jobs))
+    for job, validated in results:
+        _apply_ai_or_copy(
+            job,
+            validated,
+            seed=seed,
+            newly_protected=newly_protected,
+            provenance=provenance,
+            warnings=warnings,
+        )
+
+
 async def populate_from_git(
     xml_text: str,
     schema: DTDSchema,
@@ -327,6 +461,8 @@ async def populate_from_git(
     seed: str | None = None,
     allow_ai: bool = True,
     category: str | None = None,
+    on_progress: ProgressCallback | None = None,
+    cancel_event: asyncio.Event | None = None,
 ) -> tuple[str, ProtectedAttrs, list[str], dict[str, str]]:
     """Fill attributes from the Git reference corpus.
 
@@ -356,6 +492,7 @@ async def populate_from_git(
     newly_protected: set[tuple[tuple[tuple[str, int], ...], str]] = set()
     ruleset = rules_svc.load_attribute_rules()
     skipped_denied: set[str] = set()
+    ai_jobs: list[_AiFillJob] = []
 
     for el in tree.iter():
         if not isinstance(el.tag, str):
@@ -383,36 +520,36 @@ async def populate_from_git(
                     skipped_denied.add(attr_name)
                 continue
 
-            applied_value: str | None = None
-            applied_source: str | None = None
-
+            assert stats is not None
             if mode == "copy" or not allow_ai or llm is None:
-                assert stats is not None
                 applied_value, applied_source = _pick_copy_value(stats, seed=seed)
+                el.set(attr_name, applied_value)
+                newly_protected.add((tree_path, attr_name))
+                provenance[f"{dot}@{attr_name}"] = applied_source
             else:
-                assert stats is not None
-                validated = await _generate_validated_ai_value(
-                    llm,
-                    element=el.tag,
-                    attr=attr_name,
-                    examples=stats.values,
-                    attr_def=attr_def,
-                    dot_path=dot,
-                    ruleset=ruleset,
+                ai_jobs.append(
+                    _AiFillJob(
+                        element=el,
+                        attr_name=attr_name,
+                        attr_def=attr_def,
+                        stats=stats,
+                        dot=dot,
+                        tree_path=tree_path,
+                    )
                 )
-                if validated is not None:
-                    applied_value = validated
-                    applied_source = f"git-ai:corpus(n={len(set(stats.values))})"
-                else:
-                    applied_value, applied_source = _pick_copy_value(stats, seed=seed)
-                    warnings.append(f"Git AI fill fell back to copy for {dot}@{attr_name}")
 
-            if applied_value is None or applied_source is None:
-                continue
-
-            el.set(attr_name, applied_value)
-            newly_protected.add((tree_path, attr_name))
-            provenance[f"{dot}@{attr_name}"] = applied_source
+    if ai_jobs and llm is not None:
+        await _run_ai_fill_jobs(
+            ai_jobs,
+            llm,
+            seed=seed,
+            ruleset=ruleset,
+            newly_protected=newly_protected,
+            provenance=provenance,
+            warnings=warnings,
+            on_progress=on_progress,
+            cancel_event=cancel_event,
+        )
 
     if skipped_denied:
         warnings.append(
