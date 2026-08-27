@@ -8,6 +8,18 @@ import {
 } from '../../api/mappingPresets'
 import { getMappingValidationIssues } from '../../utils/mappingUtils'
 
+const APPLY_FIELD_OVERRIDES_KEY = 'xml-gen-apply-field-overrides'
+
+function readApplyFieldOverridesPreference() {
+  try {
+    const stored = localStorage.getItem(APPLY_FIELD_OVERRIDES_KEY)
+    if (stored === null) return true
+    return stored === 'true'
+  } catch {
+    return true
+  }
+}
+
 export function useGeneratorMapping({ schemaId, elements, error, isHybridStrategy, fillStrategy }) {
   const dbAliases = ref([])
   const llmAliases = ref([])
@@ -22,6 +34,7 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
   const suppressPresetMappingSync = ref(false)
   const sqlMappings = ref([])
   const fieldOverrides = ref([])
+  const applyFieldOverrides = ref(readApplyFieldOverridesPreference())
 
   let columnsFetchTimer = null
 
@@ -258,6 +271,14 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
     if (enabled) refreshMappingPresets()
   })
 
+  watch(applyFieldOverrides, (val) => {
+    try {
+      localStorage.setItem(APPLY_FIELD_OVERRIDES_KEY, String(val))
+    } catch {
+      // ignore storage errors
+    }
+  })
+
   watch(selectedMappingPresetNames, async (newNames, oldNames) => {
     if (suppressPresetMappingSync.value) return
 
@@ -298,6 +319,7 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
     mappingPreview,
     sqlMappings,
     fieldOverrides,
+    applyFieldOverrides,
     presetDropdownLabel,
     mappingValidation,
     hasMappingBlockers,

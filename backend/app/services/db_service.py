@@ -19,7 +19,12 @@ from app.services.sql_safety import validate_readonly_select
 from app.user_context import UserContext
 from lxml import etree
 
-from app.core.xml_tree import ProtectedAttrs, element_path, find_elements_by_dot_path
+from app.core.xml_tree import (
+    ProtectedAttrs,
+    element_path,
+    find_elements_by_dot_path,
+    is_fillable_attribute_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -445,6 +450,9 @@ class DBService:
         self,
         xml_text: str,
         sql_mappings: list[SqlMapping],
+        *,
+        fill_empty_only: bool = False,
+        schema: DTDSchema | None = None,
     ) -> tuple[str, ProtectedAttrs, list[str]]:
         """Stage-1 pipeline: inject DB values into specific elements by tag or path.
 
@@ -452,7 +460,9 @@ class DBService:
         columns are written to the declared XML attributes of every matching element
         in the tree.  When ``target_path`` is set, only the element at that dot-path
         is updated; otherwise all elements with ``target_element`` are matched.
-        Returns the updated XML, protected attribute slots, and non-fatal warnings.
+        When ``fill_empty_only`` is true, already-filled attributes are left in place
+        and still marked protected. Returns the updated XML, protected attribute
+        slots, and non-fatal warnings.
         """
         root = etree.fromstring(xml_text.encode("utf-8"))
         protected: set[tuple[tuple[str, int], ...], str] = set()
@@ -520,9 +530,22 @@ class DBService:
                         continue
                     # Accept both "inn" and "@inn" as XML attribute name notation.
                     attr_name = xml_attr.lstrip("@")
-                    if attr_name:
-                        el.set(attr_name, value)
-                        protected.add((element_path(el), attr_name))
+                    if not attr_name:
+                        continue
+                    if fill_empty_only:
+                        existing = el.get(attr_name)
+                        if existing is not None:
+                            attr_def = None
+                            if schema is not None:
+                                elem_def = schema.elements.get(el.tag)
+                                attr_def = (
+                                    elem_def.attributes.get(attr_name) if elem_def else None
+                                )
+                            if not is_fillable_attribute_value(existing, attr_def=attr_def):
+                                protected.add((element_path(el), attr_name))
+                                continue
+                    el.set(attr_name, value)
+                    protected.add((element_path(el), attr_name))
 
         xml_out = etree.tostring(
             root,
@@ -548,6 +571,14 @@ async def apply_db_overrides(
     user: UserContext,
     xml_text: str,
     sql_mappings: list[SqlMapping],
+    *,
+    fill_empty_only: bool = False,
+    schema: DTDSchema | None = None,
 ) -> tuple[str, ProtectedAttrs, list[str]]:
     """Stage-1 of the hybrid pipeline: targeted DB injections before faker/LLM fallback."""
-    return await DBService(user).apply_overrides(xml_text, sql_mappings)
+    return await DBService(user).apply_overrides(
+        xml_text,
+        sql_mappings,
+        fill_empty_only=fill_empty_only,
+        schema=schema,
+    )

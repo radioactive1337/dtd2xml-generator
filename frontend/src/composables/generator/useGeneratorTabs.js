@@ -2,6 +2,7 @@ import { ref, computed, watch } from 'vue'
 
 const ACTIVE_TAB_KEY = 'xml-gen-left-tab'
 const AUTO_VALIDATE_KEY = 'xml-gen-auto-validate'
+const PRESERVE_FILLED_KEY = 'xml-gen-preserve-filled'
 export const TAB_ORDER = ['structure', 'data', 'results', 'compare', 'library']
 
 export const leftTabs = [
@@ -12,6 +13,24 @@ export const leftTabs = [
   { id: 'library', label: 'Библиотека' },
 ]
 
+function readBoolPreference(key, defaultValue) {
+  try {
+    const stored = localStorage.getItem(key)
+    if (stored === null) return defaultValue
+    return stored === 'true'
+  } catch {
+    return defaultValue
+  }
+}
+
+function writeBoolPreference(key, value) {
+  try {
+    localStorage.setItem(key, String(value))
+  } catch {
+    // ignore storage errors
+  }
+}
+
 function readActiveTab() {
   try {
     const stored = localStorage.getItem(ACTIVE_TAB_KEY)
@@ -20,16 +39,6 @@ function readActiveTab() {
     // ignore storage errors
   }
   return 'structure'
-}
-
-function readAutoValidatePreference() {
-  try {
-    const stored = localStorage.getItem(AUTO_VALIDATE_KEY)
-    if (stored === null) return true
-    return stored === 'true'
-  } catch {
-    return true
-  }
 }
 
 export function useGeneratorTabs({
@@ -43,7 +52,8 @@ export function useGeneratorTabs({
   fillStrategy,
 }) {
   const activeTab = ref(readActiveTab())
-  const autoValidateAfterFill = ref(readAutoValidatePreference())
+  const autoValidateAfterFill = ref(readBoolPreference(AUTO_VALIDATE_KEY, true))
+  const preserveFilled = ref(readBoolPreference(PRESERVE_FILLED_KEY, true))
   let hybridTabSwitched = false
 
   watch(activeTab, (val) => {
@@ -55,11 +65,11 @@ export function useGeneratorTabs({
   })
 
   watch(autoValidateAfterFill, (val) => {
-    try {
-      localStorage.setItem(AUTO_VALIDATE_KEY, String(val))
-    } catch {
-      // ignore storage errors
-    }
+    writeBoolPreference(AUTO_VALIDATE_KEY, val)
+  })
+
+  watch(preserveFilled, (val) => {
+    writeBoolPreference(PRESERVE_FILLED_KEY, val)
   })
 
   watch(fillStrategy, (val) => {
@@ -130,6 +140,7 @@ export function useGeneratorTabs({
   return {
     activeTab,
     autoValidateAfterFill,
+    preserveFilled,
     showDataBadge,
     dataTabBadgeLabel,
     resultsTabBadge,

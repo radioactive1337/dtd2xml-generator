@@ -29,14 +29,27 @@
       Алиасы LLM не настроены — добавьте их в <code>config/connections.json</code> (см. Настройки).
     </p>
 
-    <label class="auto-validate-label">
-      <input
-        type="checkbox"
-        :checked="autoValidateAfterFill"
-        @change="$emit('update:autoValidateAfterFill', $event.target.checked)"
-      />
-      Проверять DTD после заполнения
-    </label>
+    <div class="fill-options">
+      <label class="auto-validate-label">
+        <input
+          type="checkbox"
+          :checked="preserveFilled"
+          @change="$emit('update:preserveFilled', $event.target.checked)"
+        />
+        Не перезаписывать уже заполненные поля
+      </label>
+      <p class="fill-options-hint">
+        Пустые и заглушки заполняются. Что уже стоит в XML — не трогается. Фиксированные значения всё равно ставятся.
+      </p>
+      <label class="auto-validate-label">
+        <input
+          type="checkbox"
+          :checked="autoValidateAfterFill"
+          @change="$emit('update:autoValidateAfterFill', $event.target.checked)"
+        />
+        Проверять DTD после заполнения
+      </label>
+    </div>
 
     <div v-if="provenanceEntries.length" class="provenance-panel">
       <div class="overrides-header">
@@ -63,6 +76,8 @@
     <FieldOverridesPanel
       :rows="fieldOverrides"
       :xml-text="xmlText"
+      :apply-on-fill="applyFieldOverrides"
+      @update:apply-on-fill="$emit('update:applyFieldOverrides', $event)"
       @add-row="$emit('add-field-override')"
       @remove-row="$emit('remove-field-override', $event)"
       @update-row="(index, key, value) => $emit('update-field-override', index, key, value)"
@@ -234,6 +249,8 @@ const props = defineProps({
   llmAliases: { type: Array, default: () => [] },
   defaultLlmAlias: { type: String, default: '' },
   autoValidateAfterFill: { type: Boolean, default: true },
+  preserveFilled: { type: Boolean, default: true },
+  applyFieldOverrides: { type: Boolean, default: true },
   isHybridStrategy: { type: Boolean, default: false },
   mappingPresetName: { type: String, default: '' },
   selectedMappingPresetNames: { type: Array, default: () => [] },
@@ -268,6 +285,8 @@ const emit = defineEmits([
   'update:fillStrategy',
   'update:llmAlias',
   'update:autoValidateAfterFill',
+  'update:preserveFilled',
+  'update:applyFieldOverrides',
   'update:mappingPresetName',
   'update:selectedMappingPresetNames',
   'add-field-override',
@@ -374,6 +393,18 @@ onBeforeUnmount(() => {
   color: var(--warning);
 }
 
+.fill-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fill-options-hint {
+  margin: -2px 0 4px 20px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .auto-validate-label {
   display: inline-flex;
   align-items: center;
@@ -383,7 +414,6 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: var(--text-muted);
   cursor: pointer;
-  white-space: nowrap;
 }
 
 .auto-validate-label input[type="checkbox"] {

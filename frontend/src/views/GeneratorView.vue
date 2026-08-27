@@ -54,6 +54,8 @@
             :llm-aliases="llmAliases"
             :default-llm-alias="defaultLlmAlias"
             v-model:auto-validate-after-fill="autoValidateAfterFill"
+            v-model:preserve-filled="preserveFilled"
+            v-model:apply-field-overrides="applyFieldOverrides"
             v-model:mapping-preset-name="mappingPresetName"
             v-model:selected-mapping-preset-names="selectedMappingPresetNames"
             :field-overrides="fieldOverrides"
@@ -282,6 +284,8 @@ const {
   historyMaxEntries,
   activeTab,
   autoValidateAfterFill,
+  preserveFilled,
+  applyFieldOverrides,
   showDataBadge,
   dataTabBadgeLabel,
   resultsTabBadge,

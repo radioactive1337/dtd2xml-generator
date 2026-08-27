@@ -66,6 +66,7 @@ class FillRequest(BaseModel):
     field_overrides: list[FieldOverride] = Field(default_factory=list)
     llm_alias: str = "default"
     faker_locale: str = "ru_RU"
+    preserve_filled: bool = True
 
 
 class FillResponse(BaseModel):
@@ -163,7 +164,7 @@ async def _run_git_reference_stage(
             schema,
             root=ref_root,
             root_element=root_element,
-            fill_empty_only=True,
+            fill_empty_only=request.preserve_filled,
             protected_attrs=protected_attrs,
             llm=llm_client,
             allow_ai=request.strategy == "hybrid_git_ai",
@@ -230,6 +231,8 @@ async def execute_fill(
                 user,
                 xml,
                 request.sql_mappings,
+                fill_empty_only=request.preserve_filled,
+                schema=schema,
             )
         except Exception as exc:
             aliases = sorted({m.db_alias for m in active_mappings if m.db_alias})
@@ -272,7 +275,7 @@ async def execute_fill(
         )
         fill_warnings.extend(git_warnings)
 
-    fill_empty_only = request.strategy in _HYBRID
+    fill_empty_only = request.preserve_filled
     try:
         if request.strategy in _FAKER_STRATEGIES:
             percent = 45 if request.strategy in _HYBRID else 15

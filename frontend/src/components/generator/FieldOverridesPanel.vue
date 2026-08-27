@@ -5,11 +5,24 @@
       <span v-if="filledCount" class="override-badge">
         {{ overrideBadge }}
       </span>
+      <span v-if="filledCount && !applyOnFill" class="override-badge override-badge--off">
+        не применяются
+      </span>
+      <label class="apply-label" @click.stop @mousedown.stop>
+        <input
+          type="checkbox"
+          :checked="applyOnFill"
+          @change="$emit('update:applyOnFill', $event.target.checked)"
+          @click.stop
+          @mousedown.stop
+        />
+        Применять
+      </label>
     </summary>
 
-    <div class="overrides-body">
+    <div class="overrides-body" :class="{ 'overrides-body--disabled': !applyOnFill }">
       <p class="overrides-hint">
-        Приоритет: ручные значения → БД → Faker/AI. Путь и атрибут — как в маппинге БД.
+        Эти значения всегда перезаписывают XML. Снимите «Применять», чтобы не использовать список в этом запуске.
       </p>
 
       <p v-if="!pathOptions.length && xmlText?.trim()" class="overrides-warn">
@@ -63,9 +76,10 @@ import { datalistListFor, openDatalist, scheduleCloseDatalist } from '../../util
 const props = defineProps({
   rows: { type: Array, required: true },
   xmlText: { type: String, default: '' },
+  applyOnFill: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['add-row', 'remove-row', 'update-row'])
+const emit = defineEmits(['add-row', 'remove-row', 'update-row', 'update:applyOnFill'])
 
 const expanded = ref(false)
 
@@ -108,6 +122,7 @@ function onAddRow() {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .overrides-summary::-webkit-details-marker {
@@ -123,11 +138,42 @@ function onAddRow() {
   padding: 1px 6px;
 }
 
+.override-badge--off {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
+.apply-label {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.apply-label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .overrides-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-top: 10px;
+}
+
+.overrides-body--disabled .override-list,
+.overrides-body--disabled .add-btn {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .overrides-hint {
