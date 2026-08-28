@@ -27,14 +27,26 @@ class AttributeDef(BaseModel):
     allowed_values: list[str] = Field(default_factory=list)
     doc: str = ""
 
-    def dtd_default_value(self) -> str | None:
-        """Return a single constrained value from the DTD, if any."""
+    def locked_value(self) -> str | None:
+        """Value that must not vary: ``#FIXED`` or a single-value enum."""
         if self.default_decl.startswith("#FIXED"):
             return self.default_decl.replace("#FIXED", "").strip().strip("\"'")
-        if self.default_decl and not self.default_decl.startswith("#"):
-            return self.default_decl.strip().strip("\"'")
         if self.attr_type == "ENUM" and len(self.allowed_values) == 1:
             return self.allowed_values[0]
+        return None
+
+    def dtd_default_value(self) -> str | None:
+        """Return a DTD-provided default, if any.
+
+        This includes ``#FIXED``, single-value enums, and quoted literal
+        defaults such as ``"email"``. A literal default on a multi-value
+        enum is a fallback, not a lock — use :meth:`locked_value` when the
+        value must not change.
+        """
+        if locked := self.locked_value():
+            return locked
+        if self.default_decl and not self.default_decl.startswith("#"):
+            return self.default_decl.strip().strip("\"'")
         return None
 
 

@@ -338,9 +338,9 @@ def test_validate_with_schema_attr_def_for_placeholder():
             ]
         }
     )
-    # First enum value is treated as a DTD-default placeholder by is_fillable_attribute_value.
-    report = rules_svc.validate_document('<PayDoc active="true"/>', schema, context="git_push", ruleset=ruleset)
+    # Empty enum is a placeholder; a value from the DTD pool is already filled.
+    report = rules_svc.validate_document('<PayDoc active=""/>', schema, context="git_push", ruleset=ruleset)
     assert report.has_errors
 
-    report_ok = rules_svc.validate_document('<PayDoc active="false"/>', schema, context="git_push", ruleset=ruleset)
+    report_ok = rules_svc.validate_document('<PayDoc active="true"/>', schema, context="git_push", ruleset=ruleset)
     assert not report_ok.has_errors

@@ -205,6 +205,22 @@ def customer_schema():
     return DTDParser().parse_string(CUSTOMER_DTD)
 
 
+def test_maximal_build_varies_enum_pool_across_repeats(customer_schema):
+    config = BuildConfig(root_element="customer", mode="maximal", repeat_count=3)
+    result = build_xml(customer_schema, config)
+    root = etree.fromstring(result.xml_text.encode("utf-8"))
+    contacts = root.findall("contact")
+    assert len(contacts) == 3
+
+    types = [c.attrib.get("type") for c in contacts]
+    assert set(types) <= {"email", "phone"}
+    assert set(types) == {"email", "phone"}
+
+    flags = [c.attrib.get("is-corp") for c in contacts]
+    assert set(flags) <= {"true", "false"}
+    assert set(flags) == {"true", "false"}
+
+
 def test_maximal_choice_picks_single_branch(customer_schema):
     config = BuildConfig(root_element="customer", mode="maximal")
     result = build_xml(customer_schema, config)

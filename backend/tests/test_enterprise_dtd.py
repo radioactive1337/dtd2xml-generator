@@ -76,3 +76,16 @@ def test_single_value_enum_default():
     assert attr.attr_type == "ENUM"
     assert attr.allowed_values == ["payment-order"]
     assert attr.dtd_default_value() == "payment-order"
+    assert attr.locked_value() == "payment-order"
+
+
+def test_multi_value_enum_literal_default_is_not_locked():
+    parser = DTDParser()
+    dtd = """
+    <!ELEMENT contact EMPTY>
+    <!ATTLIST contact type (email|phone) "email">
+    """
+    schema = parser.parse_string(dtd)
+    attr = schema.elements["contact"].attributes["type"]
+    assert attr.dtd_default_value() == "email"
+    assert attr.locked_value() is None

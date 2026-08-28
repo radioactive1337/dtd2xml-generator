@@ -45,7 +45,10 @@ _FILL_SYSTEM_PROMPT = (
     "Do not default every bank to ВТБ or every person to the same name — "
     "rotate through a wide set of real Russian companies and individuals, "
     "using n to pick a distinct entity. "
-    "Enums, flags, currency codes, and country codes may be reused. "
+    "Enumerated attributes (@enum) must use a value from the allowed list "
+    "and SHOULD differ across sibling instances when the list has more than "
+    "one option — do not set every contact@type to email. "
+    "#FIXED and single-value enums stay unchanged. "
     "Keep values internally consistent within one element "
     "(bank name matches its BIC and city). "
     "Return only valid XML without markdown fences or explanations."
@@ -679,7 +682,8 @@ def build_diversity_note(batch: list[dict[str, Any]]) -> str:
         "Repeated elements in this batch: identifying values MUST differ "
         "across instances of the same tag (different organizations, people, "
         "IDs, account numbers, emails, addresses). "
-        "Boolean flags, enums, currency and country codes may repeat. "
+        "Enumerated attributes must be taken from the @enum list and should "
+        "vary across sibling instances when the list has more than one value. "
         "Keep values consistent inside one element. "
         "n on each <f> is instance k of m of that element type in the document.",
     ]

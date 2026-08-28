@@ -75,7 +75,7 @@ def test_collect_fill_tasks_hybrid_only_empty_and_placeholders():
     assert tasks[1] == {
         "i": 1,
         "p": "PayDoc.Body.Record.Field",
-        "a": ["name", "type"],
+        "a": ["name"],
     }
 
 
