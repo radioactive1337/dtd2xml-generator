@@ -2,9 +2,12 @@
 
 from app.core.dtd_models import AttributeDef, ContentNode, DTDSchema, ElementDef
 from app.services.llm_service import (
+    annotate_repeat_counts,
     apply_llm_values,
     build_batch_xml_skeleton,
+    build_diversity_note,
     collect_fill_tasks,
+    group_tasks_into_batches,
     parse_batch_xml_response,
 )
 
@@ -144,3 +147,83 @@ def test_build_batch_xml_skeleton_and_parse_response():
         {"i": 0, "a": {"id": "ai-id"}},
         {"i": 1, "a": {"name": "filled", "type": "string"}},
     ]
+
+
+def test_parse_batch_ignores_copied_instance_index():
+    batch = [{"i": 0, "p": "PayDoc.bank", "a": ["name"], "n": 1, "m": 2}]
+    filled = '<fill><f i="0" p="PayDoc.bank" n="1/2" name="Сбербанк"/></fill>'
+    assert parse_batch_xml_response(filled, batch) == [{"i": 0, "a": {"name": "Сбербанк"}}]
+
+
+def _abt_account_tasks(account_index: int, start_i: int) -> list[dict]:
+    prefix = f"abt-accounts.abt-account[{account_index}]"
+    paths = [
+        prefix,
+        f"{prefix}.account",
+        f"{prefix}.account.bank",
+        f"{prefix}.account.bank.address",
+        f"{prefix}.account.bank.contact[0]",
+        f"{prefix}.account.bank.contact[1]",
+        f"{prefix}.account.bank.contact[2]",
+        f"{prefix}.account.bank.chief",
+        f"{prefix}.account.bank.chief.identity-card",
+        f"{prefix}.account.bank.chief-accountant",
+        f"{prefix}.account.bank.chief-accountant.identity-card",
+        f"{prefix}.account.bank.cr-info",
+    ]
+    return [
+        {"i": start_i + offset, "p": path, "a": ["name"]}
+        for offset, path in enumerate(paths)
+    ]
+
+
+def test_annotate_repeat_counts_and_skeleton_instance_index():
+    tasks = _abt_account_tasks(0, 0) + _abt_account_tasks(1, 12) + _abt_account_tasks(2, 24)
+    annotate_repeat_counts(tasks)
+
+    banks = [task for task in tasks if task["p"].endswith(".bank")]
+    assert [task["n"] for task in banks] == [1, 2, 3]
+    assert all(task["m"] == 3 for task in banks)
+
+    contacts = [task for task in tasks if ".contact[" in task["p"]]
+    assert [task["n"] for task in contacts] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert all(task["m"] == 9 for task in contacts)
+
+    skeleton = build_batch_xml_skeleton(banks)
+    assert 'n="1/3"' in skeleton
+    assert 'n="2/3"' in skeleton
+    assert 'n="3/3"' in skeleton
+
+
+def test_group_tasks_packs_sibling_accounts_into_one_batch():
+    tasks = _abt_account_tasks(0, 0) + _abt_account_tasks(1, 12) + _abt_account_tasks(2, 24)
+    batches = group_tasks_into_batches(tasks, batch_size=36, batch_max=48)
+
+    assert len(batches) == 1
+    assert [task["p"] for task in batches[0]] == [task["p"] for task in tasks]
+
+
+def test_group_tasks_does_not_split_an_account_across_batches():
+    tasks = _abt_account_tasks(0, 0) + _abt_account_tasks(1, 12)
+    batches = group_tasks_into_batches(tasks, batch_size=18, batch_max=48)
+
+    assert len(batches) == 2
+    assert all(task["p"].startswith("abt-accounts.abt-account[0]") for task in batches[0])
+    assert all(task["p"].startswith("abt-accounts.abt-account[1]") for task in batches[1])
+
+
+def test_diversity_note_lists_repeated_tags():
+    tasks = _abt_account_tasks(0, 0) + _abt_account_tasks(1, 12)
+    annotate_repeat_counts(tasks)
+    note = build_diversity_note(tasks)
+
+    assert "bank: 1/2, 2/2" in note
+    assert "contact: 1/6, 2/6, 3/6, 4/6, 5/6, 6/6" in note
+    assert "identifying values MUST differ" in note
+
+
+def test_diversity_note_empty_when_no_repeats():
+    tasks = [{"i": 0, "p": "PayDoc", "a": ["id"]}]
+    annotate_repeat_counts(tasks)
+    assert build_diversity_note(tasks) == ""
+    assert "n=" not in build_batch_xml_skeleton(tasks)

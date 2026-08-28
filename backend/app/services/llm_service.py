@@ -27,7 +27,9 @@ from app.core.xml_tree import (
 
 logger = logging.getLogger(__name__)
 
-_LLM_BATCH_SIZE = 12
+# Pack several sibling records into one request so the model can vary them.
+_LLM_BATCH_SIZE = 36
+_LLM_BATCH_MAX = 48
 _LLM_MAX_CONCURRENT = 4
 
 LlmProgressCallback = Callable[[str, str, int], Awaitable[None]]
@@ -36,11 +38,22 @@ _FILL_SYSTEM_PROMPT = (
     "You are a test data generator for QA automation. "
     "Fill the provided XML skeleton with realistic Russian business test data. "
     "Preserve the exact element structure, indices, paths, and attribute names. "
+    "When the same element type appears more than once (n='k/m' on <f>, "
+    "and [index] in p), each instance MUST use different identifying values: "
+    "different organizations/banks, people, INNs, BICs, account numbers, "
+    "emails, phones, addresses, and document numbers. "
+    "Do not default every bank to ВТБ or every person to the same name — "
+    "rotate through a wide set of real Russian companies and individuals, "
+    "using n to pick a distinct entity. "
+    "Enums, flags, currency codes, and country codes may be reused. "
+    "Keep values internally consistent within one element "
+    "(bank name matches its BIC and city). "
     "Return only valid XML without markdown fences or explanations."
 )
 
 _FILL_XML_NOTE = (
     "Each <f> element has i (index) and p (path). "
+    "When present, n is instance k of m of that element type in the document. "
     "Fill empty attributes and text. Do not add or remove elements.\n\n"
 )
 
@@ -161,11 +174,9 @@ class LLMService:
             logger.debug("LLM populate skipped: no fillable fields")
             return xml_text
 
+        annotate_repeat_counts(tasks)
         metadata = self._extract_metadata_for_tasks(schema, tasks)
-        batches = [
-            tasks[index : index + _LLM_BATCH_SIZE]
-            for index in range(0, len(tasks), _LLM_BATCH_SIZE)
-        ]
+        batches = group_tasks_into_batches(tasks)
         logger.info(
             "LLM populate [tasks=%d batches=%d fill_empty_only=%s]",
             len(tasks),
@@ -245,8 +256,10 @@ class LLMService:
             if fill_empty_only
             else ""
         )
+        diversity_note = build_diversity_note(batch)
         user_message = (
             f"{prefix}{_FILL_XML_NOTE}"
+            f"{diversity_note}"
             f"Schema metadata (JavaDoc-style comments):\n{metadata}\n\n"
             f"XML skeleton:\n{skeleton}"
         )
@@ -264,7 +277,7 @@ class LLMService:
                 content = await self._chat_completion(
                     system_prompt=_FILL_SYSTEM_PROMPT,
                     user_message=user_message,
-                    temperature=0.4 if attempt else 0.5,
+                    temperature=0.5 if attempt else 0.6,
                     cancel_event=cancel_event,
                 )
                 return parse_batch_xml_response(content, batch)
@@ -618,6 +631,113 @@ def _extract_xml(content: str) -> str:
     raise ValueError("LLM response did not contain valid XML")
 
 
+_PATH_TAG_INDEX = re.compile(r"\[\d+\]")
+_OUTER_REPEAT_KEY = re.compile(r"^((?:[^.\[\]]+\.)*[^.\[]+\[\d+\])")
+
+
+def _path_tag(path: str) -> str:
+    """Local element name from a dot-path, without sibling index."""
+    return _PATH_TAG_INDEX.sub("", path.rsplit(".", 1)[-1])
+
+
+def _outer_repeat_key(path: str) -> str:
+    """Path prefix through the first indexed sibling, or empty if none."""
+    match = _OUTER_REPEAT_KEY.match(path)
+    return match.group(1) if match else ""
+
+
+def annotate_repeat_counts(tasks: list[dict[str, Any]]) -> None:
+    """Attach 1-based n/m instance counts for element types that repeat."""
+    totals: dict[str, int] = {}
+    tags = [_path_tag(task["p"]) for task in tasks]
+    for tag in tags:
+        totals[tag] = totals.get(tag, 0) + 1
+    seen: dict[str, int] = {}
+    for task, tag in zip(tasks, tags, strict=True):
+        total = totals[tag]
+        if total <= 1:
+            continue
+        seen[tag] = seen.get(tag, 0) + 1
+        task["n"] = seen[tag]
+        task["m"] = total
+
+
+def build_diversity_note(batch: list[dict[str, Any]]) -> str:
+    """Prompt fragment listing repeated tags in this batch."""
+    by_tag: dict[str, list[str]] = {}
+    for task in batch:
+        total = int(task.get("m") or 1)
+        if total <= 1:
+            continue
+        tag = _path_tag(task["p"])
+        instance = int(task.get("n") or 1)
+        by_tag.setdefault(tag, []).append(f"{instance}/{total}")
+    if not by_tag:
+        return ""
+
+    lines = [
+        "Repeated elements in this batch: identifying values MUST differ "
+        "across instances of the same tag (different organizations, people, "
+        "IDs, account numbers, emails, addresses). "
+        "Boolean flags, enums, currency and country codes may repeat. "
+        "Keep values consistent inside one element. "
+        "n on each <f> is instance k of m of that element type in the document.",
+    ]
+    for tag, instances in by_tag.items():
+        lines.append(f"- {tag}: {', '.join(instances)}")
+    return "\n".join(lines) + "\n\n"
+
+
+def group_tasks_into_batches(
+    tasks: list[dict[str, Any]],
+    *,
+    batch_size: int = _LLM_BATCH_SIZE,
+    batch_max: int = _LLM_BATCH_MAX,
+) -> list[list[dict[str, Any]]]:
+    """Pack fill tasks so sibling records stay together when possible.
+
+    Consecutive tasks that share the same first indexed ancestor (e.g. all
+    fields under ``abt-account[0]``) form an atomic group. Groups are packed
+    into batches up to *batch_size* so several siblings are visible to the
+    model at once. Oversized groups are split at *batch_max*.
+    """
+    if not tasks:
+        return []
+
+    chunks: list[list[dict[str, Any]]] = []
+    index = 0
+    while index < len(tasks):
+        key = _outer_repeat_key(tasks[index]["p"])
+        if not key:
+            chunks.append([tasks[index]])
+            index += 1
+            continue
+        end = index + 1
+        while end < len(tasks) and _outer_repeat_key(tasks[end]["p"]) == key:
+            end += 1
+        group = tasks[index:end]
+        if len(group) <= batch_max:
+            chunks.append(group)
+        else:
+            for offset in range(0, len(group), batch_max):
+                chunks.append(group[offset : offset + batch_max])
+        index = end
+
+    batches: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    for chunk in chunks:
+        if current and len(current) + len(chunk) > batch_size:
+            batches.append(current)
+            current = []
+        current.extend(chunk)
+        if len(current) >= batch_size:
+            batches.append(current)
+            current = []
+    if current:
+        batches.append(current)
+    return batches
+
+
 def build_batch_xml_skeleton(batch: list[dict[str, Any]]) -> str:
     """Build a compact XML batch skeleton for LLM fill requests."""
     lines = ["<fill>"]
@@ -627,6 +747,9 @@ def build_batch_xml_skeleton(batch: list[dict[str, Any]]) -> str:
         attr_names: list[str] = task.get("a", [])
         needs_text = bool(task.get("t"))
         attrs = [f'i="{index}"', f'p="{path}"']
+        total = int(task.get("m") or 1)
+        if total > 1:
+            attrs.append(f'n="{int(task["n"])}/{total}"')
         for name in attr_names:
             attrs.append(f'{name}=""')
         attr_str = " ".join(attrs)
@@ -669,7 +792,7 @@ def parse_batch_xml_response(content: str, batch: list[dict[str, Any]]) -> list[
         filled_attrs = {
             name: value
             for name, value in node.attrib.items()
-            if name not in {"i", "p"} and name in allowed_attrs and value.strip()
+            if name not in {"i", "p", "n"} and name in allowed_attrs and value.strip()
         }
         if filled_attrs:
             item["a"] = filled_attrs
