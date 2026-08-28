@@ -286,3 +286,48 @@ def test_maximal_build_validates_against_dtd(schema):
     config = BuildConfig(root_element="PayDoc", mode="maximal", repeat_count=2)
     result = build_xml(schema, config)
     assert validate_xml(result.xml_text, schema).valid
+
+
+RECURSIVE_CHOICE_DTD = """
+<!ELEMENT root (node)>
+<!ELEMENT node (leaf | wrapper)>
+<!ELEMENT wrapper (node)>
+<!ELEMENT leaf EMPTY>
+"""
+
+RECURSIVE_ONLY_DTD = """
+<!ELEMENT root (node)>
+<!ELEMENT node (node)>
+"""
+
+
+@pytest.fixture
+def recursive_choice_schema():
+    return DTDParser().parse_string(RECURSIVE_CHOICE_DTD)
+
+
+@pytest.fixture
+def recursive_only_schema():
+    return DTDParser().parse_string(RECURSIVE_ONLY_DTD)
+
+
+def test_maximal_recursive_choice_does_not_overflow(recursive_choice_schema):
+    """Cyclic DTD + CHOICE used to recurse infinitely in branch-weight scoring."""
+    config = BuildConfig(root_element="root", mode="maximal")
+    result = build_xml(recursive_choice_schema, config)
+    root = etree.fromstring(result.xml_text.encode("utf-8"))
+    node = root.find("node")
+    assert node is not None
+    assert node.find("leaf") is not None
+    assert node.find("wrapper") is None
+    assert validate_xml(result.xml_text, recursive_choice_schema).valid
+
+
+def test_maximal_self_recursive_element_does_not_overflow(recursive_only_schema):
+    config = BuildConfig(root_element="root", mode="maximal")
+    result = build_xml(recursive_only_schema, config)
+    root = etree.fromstring(result.xml_text.encode("utf-8"))
+    node = root.find("node")
+    assert node is not None
+    assert list(node) == []
+    assert any("Cyclic reference skipped" in w for w in result.warnings)

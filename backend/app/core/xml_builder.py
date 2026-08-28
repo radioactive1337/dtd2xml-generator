@@ -14,6 +14,10 @@ from app.core.xml_dtd_element import create_element_for_dtd_name
 
 BuildMode = Literal["minimal", "maximal", "custom"]
 
+# Each nested group/element uses several Python stack frames. Cap so a cyclic
+# or extremely nested DTD cannot hit RecursionError (default limit is 1000).
+MAX_BUILD_DEPTH = 200
+
 
 class BuildConfig(BaseModel):
     schema_id: str = ""
@@ -45,7 +49,7 @@ class XMLBuilder:
             raise ValueError(f"Root element '{self.config.root_element}' not found in schema")
 
         root_def = self.schema.elements[self.config.root_element]
-        root_el = self._build_element(root_def, self.config.root_element, parent_path="")
+        root_el = self._build_element(root_def, self.config.root_element, parent_path="", depth=0)
         xml_text = etree.tostring(
             root_el,
             pretty_print=True,
@@ -63,13 +67,14 @@ class XMLBuilder:
         elem_def: ElementDef,
         elem_name: str,
         parent_path: str,
+        depth: int,
     ) -> etree._Element:
         self.node_count += 1
         current_path = f"{parent_path}.{elem_name}" if parent_path else elem_name
 
         el = create_element_for_dtd_name(self.schema, None, elem_name, elem_def)
         self._apply_attributes(el, elem_def, current_path)
-        self._build_content(el, elem_def.content_model, current_path, {elem_name})
+        self._build_content(el, elem_def.content_model, current_path, {elem_name}, depth)
         return el
 
     def _apply_attributes(
@@ -131,7 +136,13 @@ class XMLBuilder:
         node: ContentNode,
         parent_path: str,
         ancestry: set[str],
+        depth: int,
     ) -> None:
+        if depth >= MAX_BUILD_DEPTH:
+            self.warnings.append(
+                f"Nesting depth limit ({MAX_BUILD_DEPTH}) reached at '{parent_path}'"
+            )
+            return
         if node.kind == "EMPTY":
             return
         if node.kind == "ANY":
@@ -142,13 +153,13 @@ class XMLBuilder:
             parent_el.text = ""
             return
         if node.kind == "REF":
-            self._expand_node(parent_el, node, parent_path, ancestry)
+            self._expand_node(parent_el, node, parent_path, ancestry, depth + 1)
             return
         if node.kind == "SEQUENCE":
             for idx, child in enumerate(node.children):
                 struct_path = self._child_path(parent_path, child, idx)
                 expand_path = parent_path if child.kind == "REF" else struct_path
-                self._expand_node(parent_el, child, expand_path, ancestry)
+                self._expand_node(parent_el, child, expand_path, ancestry, depth + 1)
             return
         if node.kind == "CHOICE":
             options = self._select_choice_children(node, parent_path)
@@ -156,7 +167,7 @@ class XMLBuilder:
                 if child not in options:
                     continue
                 child_path = self._child_path(parent_path, child, idx)
-                self._expand_node(parent_el, child, child_path, ancestry)
+                self._expand_node(parent_el, child, child_path, ancestry, depth + 1)
 
     def _expand_node(
         self,
@@ -164,15 +175,21 @@ class XMLBuilder:
         node: ContentNode,
         parent_path: str,
         ancestry: set[str],
+        depth: int,
     ) -> None:
+        if depth >= MAX_BUILD_DEPTH:
+            self.warnings.append(
+                f"Nesting depth limit ({MAX_BUILD_DEPTH}) reached at '{parent_path}'"
+            )
+            return
         count = self._repeat_count(node, parent_path)
         if count == 0:
             return
         for _ in range(count):
             if node.kind == "REF":
-                self._append_ref(parent_el, node, parent_path, ancestry)
+                self._append_ref(parent_el, node, parent_path, ancestry, depth)
             else:
-                self._build_content(parent_el, node, parent_path, ancestry)
+                self._build_content(parent_el, node, parent_path, ancestry, depth + 1)
 
     def _node_repeat_path(self, node: ContentNode, context_path: str) -> str:
         if node.kind == "REF" and node.ref:
@@ -207,6 +224,7 @@ class XMLBuilder:
         node: ContentNode,
         parent_path: str,
         ancestry: set[str],
+        depth: int,
     ) -> None:
         ref_name = node.ref
         if not ref_name:
@@ -236,7 +254,9 @@ class XMLBuilder:
         if child_def.content_model.kind == "PCDATA":
             child_el.text = ""
         else:
-            self._build_content(child_el, child_def.content_model, child_path, new_ancestry)
+            self._build_content(
+                child_el, child_def.content_model, child_path, new_ancestry, depth + 1
+            )
 
     def _child_path(self, parent_path: str, child: ContentNode, index: int) -> str:
         child_name = child.ref if child.kind == "REF" else f"group-{index}"
@@ -328,36 +348,50 @@ class XMLBuilder:
 
     def _pick_richest_choice_child(self, options: list[ContentNode]) -> ContentNode:
         """Pick the choice branch that yields the largest subtree in maximal mode."""
-        return max(options, key=self._choice_branch_weight)
+        return max(options, key=lambda child: self._choice_branch_weight(child, set()))
 
-    def _choice_branch_weight(self, node: ContentNode) -> int:
+    def _choice_branch_weight(self, node: ContentNode, visiting: set[str]) -> int:
         if node.kind == "REF":
-            child_def = self.schema.elements.get(node.ref)
-            inner = self._content_weight(child_def.content_model) if child_def else 1
+            inner = self._ref_element_weight(node.ref, visiting)
             if node.quantifier in ("*", "+"):
                 return inner * self.config.repeat_count
             if node.quantifier == "?":
                 return inner
             return inner
         if node.kind == "SEQUENCE":
-            return sum(self._choice_branch_weight(child) for child in node.children)
+            return sum(self._choice_branch_weight(child, visiting) for child in node.children)
         if node.kind == "CHOICE":
             if not node.children:
                 return 0
-            return max(self._choice_branch_weight(child) for child in node.children)
+            return max(self._choice_branch_weight(child, visiting) for child in node.children)
         if node.kind == "PCDATA":
             return 1
         return 0
 
-    def _content_weight(self, node: ContentNode) -> int:
+    def _ref_element_weight(self, ref_name: str, visiting: set[str]) -> int:
+        """Weight of a referenced element's content, breaking DTD cycles at re-entry."""
+        if not ref_name:
+            return 1
+        if ref_name in visiting:
+            return 0
+        child_def = self.schema.elements.get(ref_name)
+        if child_def is None:
+            return 1
+        visiting.add(ref_name)
+        try:
+            return self._content_weight(child_def.content_model, visiting)
+        finally:
+            visiting.remove(ref_name)
+
+    def _content_weight(self, node: ContentNode, visiting: set[str]) -> int:
         if node.kind in ("EMPTY", "ANY"):
             return 0
         if node.kind == "PCDATA":
             return 1
         if node.kind == "REF":
-            return self._choice_branch_weight(node)
+            return self._choice_branch_weight(node, visiting)
         if node.kind == "SEQUENCE":
-            total = sum(self._content_weight(child) for child in node.children)
+            total = sum(self._content_weight(child, visiting) for child in node.children)
             if node.quantifier in ("*", "+"):
                 return total * self.config.repeat_count
             if node.quantifier == "?":
@@ -366,7 +400,7 @@ class XMLBuilder:
         if node.kind == "CHOICE":
             if not node.children:
                 return 0
-            pick = max(self._choice_branch_weight(child) for child in node.children)
+            pick = max(self._choice_branch_weight(child, visiting) for child in node.children)
             if node.quantifier in ("*", "+"):
                 return pick * self.config.repeat_count
             if node.quantifier == "?":
