@@ -7,6 +7,7 @@ import {
   deleteMappingPreset as apiDeleteMappingPreset,
 } from '../../api/mappingPresets'
 import { getMappingValidationIssues } from '../../utils/mappingUtils'
+import { usesLlmFill } from '../../utils/fillStrategies'
 
 export function useGeneratorMapping({ schemaId, elements, error, isHybridStrategy, fillStrategy }) {
   const dbAliases = ref([])
@@ -24,12 +25,7 @@ export function useGeneratorMapping({ schemaId, elements, error, isHybridStrateg
 
   let columnsFetchTimer = null
 
-  const usesLlmStrategy = computed(
-    () =>
-      fillStrategy.value === 'ai' ||
-      fillStrategy.value === 'hybrid_db_ai' ||
-      fillStrategy.value === 'hybrid_git_ai',
-  )
+  const usesLlmStrategy = computed(() => usesLlmFill(fillStrategy.value))
 
   const hasLlmBlocker = computed(
     () => usesLlmStrategy.value && !llmAlias.value,

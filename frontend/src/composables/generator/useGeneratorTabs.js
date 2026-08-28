@@ -1,4 +1,5 @@
 import { ref, computed, watch } from 'vue'
+import { usesDbFill } from '../../utils/fillStrategies'
 
 const ACTIVE_TAB_KEY = 'xml-gen-left-tab'
 const AUTO_VALIDATE_KEY = 'xml-gen-auto-validate'
@@ -73,7 +74,7 @@ export function useGeneratorTabs({
   })
 
   watch(fillStrategy, (val) => {
-    if ((val === 'hybrid_db_faker' || val === 'hybrid_db_ai') && !hybridTabSwitched) {
+    if (usesDbFill(val) && !hybridTabSwitched) {
       activeTab.value = 'data'
       hybridTabSwitched = true
     }
@@ -89,7 +90,7 @@ export function useGeneratorTabs({
   const dataTabBadgeLabel = computed(() => {
     if (hasMappingBlockers.value) return 'Ошибки в SQL-маппингах'
     if (hasLlmBlocker.value) return 'Не выбран LLM-алиас'
-    if (isHybridStrategy.value && !sqlMappings.value.length) return 'Нет SQL-маппингов для гибридной стратегии'
+    if (isHybridStrategy.value && !sqlMappings.value.length) return 'Нет SQL-маппингов для стратегии с БД'
     return ''
   })
 

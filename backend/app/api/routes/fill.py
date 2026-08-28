@@ -1,4 +1,4 @@
-"""XML data fill endpoints — hybrid pipeline (DB / Git reference / Faker / AI)."""
+"""XML data fill endpoints — pipeline (DB / Git reference / AI)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ from app.core.xml_tree import ProtectedAttrs
 from app.services.attribute_rules_service import validate_document
 from app.services.db_service import SqlMapping, apply_db_overrides
 from app.services.field_mapping_service import suggest_field_mappings as suggest_field_mappings_service
-from app.services.faker_service import populate_with_faker
 from app.services.git_reference_fill_service import populate_from_git
 from app.services.llm_service import LLMService, populate_with_llm
 from app.services.xml_structure_service import peek_root_element
@@ -37,33 +36,28 @@ logger = logging.getLogger(__name__)
 _LLM_CONCURRENCY = int(os.getenv("LLM_CONCURRENCY", "5"))
 _llm_semaphore = asyncio.Semaphore(_LLM_CONCURRENCY)
 
-# fmt: off
-Strategy = Literal[
-    "faker",
-    "ai",
-    "hybrid_db_faker",
-    "hybrid_db_ai",
-    "hybrid_git_faker",
-    "hybrid_git_ai",
-]
-# fmt: on
+Strategy = Literal["ai", "db_ai", "git_ai", "git_ai_db"]
 
-_HYBRID_DB = frozenset({"hybrid_db_faker", "hybrid_db_ai"})
-_HYBRID_GIT = frozenset({"hybrid_git_faker", "hybrid_git_ai"})
-_HYBRID = _HYBRID_DB | _HYBRID_GIT
-_AI_STRATEGIES = frozenset({"ai", "hybrid_db_ai", "hybrid_git_ai"})
-_FAKER_STRATEGIES = frozenset({"faker", "hybrid_db_faker", "hybrid_git_faker"})
+_DB_STRATEGIES = frozenset({"db_ai", "git_ai_db"})
+_GIT_STRATEGIES = frozenset({"git_ai", "git_ai_db"})
 
 ProgressCallback = Callable[[str, str, int], Awaitable[None]]
+
+
+def _llm_progress_window(strategy: Strategy) -> tuple[int, int]:
+    if strategy == "git_ai_db":
+        return 55, 40
+    if strategy in _DB_STRATEGIES or strategy in _GIT_STRATEGIES:
+        return 45, 50
+    return 15, 75
 
 
 class FillRequest(BaseModel):
     schema_id: str
     xml_text: str | None = None
-    strategy: Strategy = "faker"
+    strategy: Strategy = "ai"
     sql_mappings: list[SqlMapping] = Field(default_factory=list)
     llm_alias: str = "default"
-    faker_locale: str = "ru_RU"
     preserve_filled: bool = True
 
 
@@ -105,7 +99,7 @@ def _validate_hybrid_mappings(request: FillRequest) -> list[SqlMapping]:
     if not request.sql_mappings:
         raise HTTPException(
             status_code=400,
-            detail="sql_mappings cannot be empty for hybrid strategies",
+            detail="sql_mappings cannot be empty for DB fill strategies",
         )
     active_mappings = [
         m
@@ -133,9 +127,11 @@ async def _run_git_reference_stage(
     resolved_llm: str | None,
     on_progress: ProgressCallback,
     cancel_event: asyncio.Event | None = None,
+    *,
+    progress_percent: int = 15,
 ) -> tuple[str, ProtectedAttrs, list[str], dict[str, str]]:
     """Best-effort Git reference fill stage; returns updated xml/protected/warnings/provenance."""
-    await on_progress("git_reference", "Filling from Git reference library...", 40)
+    await on_progress("git_reference", "Filling from Git reference library...", progress_percent)
 
     ref_root = reference_xml_root()
     if ref_root is None:
@@ -149,9 +145,7 @@ async def _run_git_reference_stage(
             detail=f"Cannot detect root element for Git fill: {exc}",
         ) from exc
 
-    llm_client = None
-    if request.strategy == "hybrid_git_ai" and resolved_llm:
-        llm_client = LLMService(user, alias=resolved_llm)
+    llm_client = LLMService(user, alias=resolved_llm) if resolved_llm else None
 
     registry = get_schema_registry(user)
     schema = registry[request.schema_id]
@@ -165,7 +159,7 @@ async def _run_git_reference_stage(
             fill_empty_only=request.preserve_filled,
             protected_attrs=protected_attrs,
             llm=llm_client,
-            allow_ai=request.strategy == "hybrid_git_ai",
+            allow_ai=True,
             on_progress=on_progress,
             cancel_event=cancel_event,
         )
@@ -182,8 +176,9 @@ async def _run_git_reference_stage(
             detail=f"Git reference stage failed: {exc}",
         ) from exc
 
+    warn_percent = min(progress_percent + 5, 99)
     for warning in git_warnings:
-        await on_progress("git_warning", warning, 42)
+        await on_progress("git_warning", warning, warn_percent)
 
     return new_xml, protected_attrs | git_protected, git_warnings, provenance
 
@@ -194,12 +189,10 @@ async def execute_fill(
     on_progress: ProgressCallback = _noop_progress,
     cancel_event: asyncio.Event | None = None,
 ) -> tuple[str, list[str], dict[str, str]]:
-    resolved_llm: str | None = None
-    if request.strategy in _AI_STRATEGIES:
-        try:
-            resolved_llm = resolve_llm_alias(user, request.llm_alias)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        resolved_llm = resolve_llm_alias(user, request.llm_alias)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     registry = get_schema_registry(user)
     if request.schema_id not in registry:
@@ -221,7 +214,7 @@ async def execute_fill(
     fill_warnings: list[str] = []
     provenance: dict[str, str] = {}
 
-    if request.strategy in _HYBRID_DB:
+    if request.strategy in _DB_STRATEGIES:
         active_mappings = _validate_hybrid_mappings(request)
         await on_progress("db_query", "Querying database...", 10)
         try:
@@ -246,92 +239,65 @@ async def execute_fill(
                 status_code=422,
                 detail=f"Database stage failed: {exc}",
             ) from exc
-        await on_progress("db_done", "Database values applied", 35)
+        db_done_percent = 25 if request.strategy == "git_ai_db" else 35
+        await on_progress("db_done", "Database values applied", db_done_percent)
         for warning in fill_warnings:
-            await on_progress("db_warning", warning, 35)
+            await on_progress("db_warning", warning, db_done_percent)
 
-    if request.strategy in _HYBRID_GIT:
+    if request.strategy in _GIT_STRATEGIES:
+        git_percent = 30 if request.strategy == "git_ai_db" else 15
         xml, protected_attrs, git_warnings, provenance = await _run_git_reference_stage(
-            user, request, xml, protected_attrs, resolved_llm, on_progress, cancel_event
+            user,
+            request,
+            xml,
+            protected_attrs,
+            resolved_llm,
+            on_progress,
+            cancel_event,
+            progress_percent=git_percent,
         )
         fill_warnings.extend(git_warnings)
 
     fill_empty_only = request.preserve_filled
     try:
-        if request.strategy in _FAKER_STRATEGIES:
-            percent = 45 if request.strategy in _HYBRID else 15
-            await on_progress(
-                "faker",
-                "Generating test data with Smart Faker...",
-                percent,
-            )
-            result = await asyncio.to_thread(
-                populate_with_faker,
+        llm_percent, llm_span = _llm_progress_window(request.strategy)
+        await on_progress(
+            "llm_request",
+            "Waiting for LLM response...",
+            llm_percent,
+        )
+
+        async def llm_progress(step: str, message: str, percent: int) -> None:
+            await on_progress(step, message, percent)
+
+        async with _llm_semaphore:
+            result = await populate_with_llm(
                 xml,
                 schema,
-                locale=request.faker_locale,
+                user,
+                alias=resolved_llm,
                 fill_empty_only=fill_empty_only,
                 protected_attrs=protected_attrs,
+                on_progress=llm_progress,
+                progress_base=llm_percent,
+                progress_span=llm_span,
+                cancel_event=cancel_event,
             )
-        elif request.strategy in _AI_STRATEGIES:
-            llm_percent = 45 if request.strategy in _HYBRID else 15
-            await on_progress(
-                "llm_request",
-                "Waiting for LLM response...",
-                llm_percent,
-            )
-
-            async def llm_progress(step: str, message: str, percent: int) -> None:
-                await on_progress(step, message, percent)
-
-            assert resolved_llm is not None
-            async with _llm_semaphore:
-                result = await populate_with_llm(
-                    xml,
-                    schema,
-                    user,
-                    alias=resolved_llm,
-                    fill_empty_only=fill_empty_only,
-                    protected_attrs=protected_attrs,
-                    on_progress=llm_progress,
-                    progress_base=llm_percent,
-                    progress_span=50 if request.strategy in _HYBRID else 75,
-                    cancel_event=cancel_event,
-                )
-            if request.strategy in {"hybrid_db_ai", "hybrid_git_ai"}:
-                await on_progress(
-                    "faker_fallback",
-                    "Filling remaining fields with Smart Faker...",
-                    90,
-                )
-                result = await asyncio.to_thread(
-                    populate_with_faker,
-                    result,
-                    schema,
-                    locale=request.faker_locale,
-                    fill_empty_only=True,
-                    protected_attrs=protected_attrs,
-                )
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown strategy: {request.strategy!r}")
     except asyncio.CancelledError:
         raise
     except HTTPException:
         raise
     except Exception as exc:
-        stage = "LLM" if request.strategy in _AI_STRATEGIES else "Faker"
         logger.error(
-            "Fill %s stage failed [schema_id=%s strategy=%s locale=%s llm_alias=%s]: %s",
-            stage,
+            "Fill LLM stage failed [schema_id=%s strategy=%s llm_alias=%s]: %s",
             request.schema_id,
             request.strategy,
-            request.faker_locale,
             resolved_llm or request.llm_alias,
             exc,
         )
         raise HTTPException(
             status_code=422,
-            detail=f"{stage} stage failed: {exc}",
+            detail=f"LLM stage failed: {exc}",
         ) from exc
 
     try:
@@ -513,7 +479,7 @@ async def fill_xml_stream(
                 except asyncio.TimeoutError:
                     # Send a data: ping rather than an SSE comment. Comments are
                     # ignored by the frontend parser and often buffered by proxies,
-                    # which makes hybrid_git_ai look stuck after a single keepalive.
+                    # which makes git_ai look stuck after a single keepalive.
                     yield _sse_event({"step": "ping"})
                     await asyncio.sleep(0)
                     continue
