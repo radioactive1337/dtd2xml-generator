@@ -94,8 +94,12 @@
           >
             <span class="category-chevron" :class="{ 'category-chevron--open': isCategoryExpanded(cat.name) }">▶</span>
             <span class="category-name" v-html="highlightMatch(cat.name, searchQuery)" />
-            <span v-if="cat.root_element" class="category-root">{{ cat.root_element }}</span>
-            <span class="category-count">({{ cat.document_count }})</span>
+            <span
+              v-if="categoryRootDiffers(cat)"
+              class="category-root"
+              :title="`Корневой элемент: ${cat.root_element}`"
+            >{{ cat.root_element }}</span>
+            <span class="category-count">{{ cat.document_count }}</span>
           </button>
           <ul v-if="isCategoryExpanded(cat.name)" class="doc-list">
             <template v-if="isCategoryLoading(cat.name)">
@@ -228,6 +232,16 @@ watch(() => props.activeScope, () => { searchQuery.value = '' })
 
 function normalizeSearch(s) {
   return (s || '').toLowerCase().trim()
+}
+
+function normalizeLabelKey(s) {
+  return (s || '').toLowerCase().replace(/[\s_\-]+/g, '')
+}
+
+function categoryRootDiffers(cat) {
+  const root = cat.root_element
+  if (!root) return false
+  return normalizeLabelKey(cat.name) !== normalizeLabelKey(root)
 }
 
 function textContains(text, query) {
@@ -501,6 +515,7 @@ function onSync() {
 }
 
 .category-chevron {
+  flex-shrink: 0;
   font-size: 9px;
   transition: transform 0.15s;
   color: var(--text-muted);
@@ -511,19 +526,27 @@ function onSync() {
 }
 
 .category-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-weight: 500;
 }
 
 .category-root {
+  flex-shrink: 0;
   font-size: 11px;
   color: var(--accent);
   font-family: var(--font-mono);
 }
 
 .category-count {
+  flex-shrink: 0;
+  margin-left: auto;
   color: var(--text-muted);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .doc-list {

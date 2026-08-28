@@ -1,7 +1,7 @@
 import { ref, watch, onBeforeUnmount } from 'vue'
 
 const LEFT_PANEL_WIDTH_KEY = 'xml-gen-left-panel-width'
-const LEFT_MIN = 480
+const LEFT_MIN = 490
 const LEFT_MAX = 960
 
 function readLeftPanelWidth() {

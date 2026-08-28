@@ -375,7 +375,7 @@ function runCompareAndFocusTab() {
   flex-direction: column;
   gap: 0;
   flex-shrink: 0;
-  min-width: 480px;
+  min-width: 490px;
   height: 100%;
   overflow: hidden;
 }
