@@ -67,6 +67,61 @@ def test_faker_fill_works_without_llm_aliases(
     assert 'id="' in data["xml_text"]
 
 
+def test_faker_fill_preserves_existing_values_by_default(
+    client: TestClient,
+    monkeypatch: MonkeyPatch,
+):
+    from lxml import etree
+
+    _use_empty_user_connections(monkeypatch)
+    schema_id = _upload_fixture(client)
+    xml_text = _skeleton_xml(schema_id)
+    root = etree.fromstring(xml_text.encode("utf-8"))
+    root.set("id", "keep-me")
+    xml_text = etree.tostring(root, encoding="unicode")
+
+    response = client.post(
+        "/api/fill",
+        json={
+            "schema_id": schema_id,
+            "xml_text": xml_text,
+            "strategy": "faker",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    filled = etree.fromstring(response.json()["xml_text"].encode("utf-8"))
+    assert filled.attrib.get("id") == "keep-me"
+
+
+def test_faker_fill_overwrites_existing_values_when_preserve_disabled(
+    client: TestClient,
+    monkeypatch: MonkeyPatch,
+):
+    from lxml import etree
+
+    _use_empty_user_connections(monkeypatch)
+    schema_id = _upload_fixture(client)
+    xml_text = _skeleton_xml(schema_id)
+    root = etree.fromstring(xml_text.encode("utf-8"))
+    root.set("id", "keep-me")
+    xml_text = etree.tostring(root, encoding="unicode")
+
+    response = client.post(
+        "/api/fill",
+        json={
+            "schema_id": schema_id,
+            "xml_text": xml_text,
+            "strategy": "faker",
+            "preserve_filled": False,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    filled = etree.fromstring(response.json()["xml_text"].encode("utf-8"))
+    assert filled.attrib.get("id") != "keep-me"
+
+
 def test_ai_fill_requires_llm_aliases(client: TestClient, monkeypatch: MonkeyPatch):
     _use_empty_user_connections(monkeypatch)
     schema_id = _upload_fixture(client)

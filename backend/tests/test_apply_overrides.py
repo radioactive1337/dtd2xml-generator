@@ -129,3 +129,58 @@ async def test_apply_overrides_no_rows_adds_warning(db_user: UserContext):
     assert protected == frozenset()
     assert len(warnings) == 1
     assert "no rows" in warnings[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_apply_overrides_fill_empty_only_skips_filled(db_user: UserContext):
+    mapping = SqlMapping(
+        query="SELECT 1",
+        target_element="client",
+        fields={"inn": "inn", "name": "name"},
+        db_alias="test_db",
+    )
+    xml = SAMPLE_XML.replace('inn=""', 'inn="already"', 1)
+
+    with patch.object(
+        DBService,
+        "run_query",
+        new=AsyncMock(return_value=[{"inn": "7701", "name": "Acme"}]),
+    ):
+        xml_out, protected, warnings = await DBService(db_user).apply_overrides(
+            xml,
+            [mapping],
+            fill_empty_only=True,
+        )
+
+    assert warnings == []
+    assert xml_out.count('inn="already"') == 1
+    assert xml_out.count('inn="7701"') == 2
+    assert xml_out.count('name="Acme"') == 3
+    assert len(protected) == 6
+
+
+@pytest.mark.asyncio
+async def test_apply_overrides_overwrites_filled_when_not_fill_empty_only(db_user: UserContext):
+    mapping = SqlMapping(
+        query="SELECT 1",
+        target_element="client",
+        fields={"inn": "inn"},
+        db_alias="test_db",
+    )
+    xml = SAMPLE_XML.replace('inn=""', 'inn="already"', 1)
+
+    with patch.object(
+        DBService,
+        "run_query",
+        new=AsyncMock(return_value=[{"inn": "7701"}]),
+    ):
+        xml_out, protected, warnings = await DBService(db_user).apply_overrides(
+            xml,
+            [mapping],
+            fill_empty_only=False,
+        )
+
+    assert warnings == []
+    assert 'inn="already"' not in xml_out
+    assert xml_out.count('inn="7701"') == 3
+    assert len(protected) == 3

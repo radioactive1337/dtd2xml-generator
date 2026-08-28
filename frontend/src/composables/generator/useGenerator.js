@@ -5,7 +5,9 @@ import { stageFillXml } from '../../api/fill'
 import { pickPrimarySchema, normalizeDtdUploadResult, normalizeDtdListResult } from '../../utils/dtdSchema'
 import { clearAllDatalistState } from '../../utils/datalistInput'
 import { formatElements } from '../../utils/ruPlural'
+import { peekXmlRootElement } from '../../utils/xmlPaths'
 import { translateApiError } from '../../utils/apiErrors'
+import { extractPushWarnings } from '../../utils/gitPushWarnings'
 import { useGenerationHistory } from '../useGenerationHistory'
 import { useXmlLibrary } from '../useXmlLibrary'
 import { useGeneratorLayout } from './useGeneratorLayout'
@@ -72,11 +74,12 @@ export function useGenerator() {
   })
 
   async function onLoadLibraryDocument(xmlText) {
+    xml.clearGenerationState()
     await xml.setProgrammaticXml(xmlText, { dirty: true })
     if (schema.schemaId.value) {
       await stageFillXml(schema.schemaId.value, xmlText)
+      await xml.syncFromPastedXml(xmlText)
     }
-    xml.clearGenerationState()
   }
 
   const xmlLibrary = useXmlLibrary({ onLoadDocument: onLoadLibraryDocument })
@@ -96,25 +99,37 @@ export function useGenerator() {
 
   const gitPushMessage = ref('')
   const gitPushError = ref('')
+  const gitPushWarnings = ref([])
+  const gitPushWarningCount = ref(0)
 
   function resetGitPushFeedback() {
     gitPushMessage.value = ''
     gitPushError.value = ''
+    gitPushWarnings.value = []
+    gitPushWarningCount.value = 0
   }
 
-  async function handleGitPush({ filename, commitMessage }) {
+  function clearGitPushWarnings() {
+    gitPushWarnings.value = []
+    gitPushWarningCount.value = 0
+  }
+
+  async function handleGitPush({ filename, commitMessage, acknowledgeWarnings = false }) {
     const xmlText = xml.getEditorXmlText() || xml.xmlText.value || ''
-    const rootElement = schema.rootElement.value
+    const peekedRoot = peekXmlRootElement(xmlText)
+    const rootElement = peekedRoot || schema.rootElement.value
     const schemaId = schema.schemaId.value
     if (!rootElement) {
-      gitPushError.value = 'Выберите корневой элемент перед отправкой в Git'
+      gitPushError.value = 'Не удалось определить корневой элемент документа'
       return
     }
     if (!schemaId) {
       gitPushError.value = 'Выберите DTD-схему перед отправкой в Git'
       return
     }
-    resetGitPushFeedback()
+    gitPushMessage.value = ''
+    gitPushError.value = ''
+    if (!acknowledgeWarnings) clearGitPushWarnings()
     try {
       const result = await xmlLibrary.pushToGit({
         rootElement,
@@ -122,7 +137,9 @@ export function useGenerator() {
         xmlText,
         schemaId,
         commitMessage,
+        acknowledgeWarnings,
       })
+      clearGitPushWarnings()
       if (result?.status === 'ok') {
         gitPushMessage.value = result.overwritten
           ? `Файл обновлён: ${result.path}`
@@ -132,8 +149,15 @@ export function useGenerator() {
         gitPushMessage.value = result.message || 'Изменений нет'
       }
     } catch (err) {
+      const pending = extractPushWarnings(err)
+      if (pending) {
+        gitPushWarnings.value = pending.warnings
+        gitPushWarningCount.value = pending.warningCount
+        gitPushError.value = ''
+        return
+      }
       gitPushError.value = translateApiError(
-        err?.response?.data?.detail || err?.message || String(err),
+        err?.message || err?.response?.data?.detail || String(err),
       )
     }
   }
@@ -259,7 +283,6 @@ export function useGenerator() {
     llmAlias: mapping.llmAlias,
     isHybridStrategy,
     sqlMappings: mapping.sqlMappings,
-    fieldOverrides: mapping.fieldOverrides,
     xmlText: xml.xmlText,
     xmlDirty: xml.xmlDirty,
     buildInfo: xml.buildInfo,
@@ -270,6 +293,7 @@ export function useGenerator() {
     filling,
     validating,
     autoValidateAfterFill: tabs.autoValidateAfterFill,
+    preserveFilled: tabs.preserveFilled,
     getEditorXmlText: xml.getEditorXmlText,
     setProgrammaticXml: xml.setProgrammaticXml,
     addHistoryEntry,
@@ -411,6 +435,7 @@ export function useGenerator() {
     goToValidationError: xml.goToValidationError,
     onEditorContentChange: xml.onEditorContentChange,
     onXmlFileImported: xml.onXmlFileImported,
+    onDocumentPaste: xml.onDocumentPaste,
     libraryActiveScope: xmlLibrary.activeScope,
     sharedCategories: xmlLibrary.sharedCategories,
     personalDocuments: xmlLibrary.personalDocuments,
@@ -423,6 +448,8 @@ export function useGenerator() {
     gitPushEnabled,
     gitPushMessage,
     gitPushError,
+    gitPushWarnings,
+    gitPushWarningCount,
     resetGitPushFeedback,
     handleGitPush,
     categoryDocuments,

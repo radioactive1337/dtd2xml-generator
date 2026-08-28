@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import re
 from typing import Literal
 
@@ -37,6 +38,7 @@ class XMLBuilder:
         self.config = config
         self.warnings: list[str] = []
         self.node_count = 0
+        self._enum_offsets: dict[int, int] = {}
 
     def build(self) -> BuildResult:
         if self.config.root_element not in self.schema.elements:
@@ -103,13 +105,25 @@ class XMLBuilder:
         return current_path in self.config.custom_paths or attr_path in self.config.custom_paths
 
     def _attribute_placeholder(self, attr: AttributeDef) -> str:
-        if constrained := attr.dtd_default_value():
-            return constrained
-        if attr.attr_type == "ENUM" and attr.allowed_values:
-            return attr.allowed_values[0]
+        if locked := attr.locked_value():
+            return locked
+        if attr.attr_type == "ENUM" and len(attr.allowed_values) > 1:
+            return self._next_enum_value(attr)
         if attr.attr_type == "ID":
             return "id-1"
+        if default := attr.dtd_default_value():
+            return default
         return ""
+
+    def _next_enum_value(self, attr: AttributeDef) -> str:
+        """Cycle through the DTD enum pool so repeated elements get variety."""
+        values = attr.allowed_values
+        key = id(attr)
+        if key not in self._enum_offsets:
+            self._enum_offsets[key] = random.randrange(len(values))
+        index = self._enum_offsets[key]
+        self._enum_offsets[key] = index + 1
+        return values[index % len(values)]
 
     def _build_content(
         self,

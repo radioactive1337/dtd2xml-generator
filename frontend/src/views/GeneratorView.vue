@@ -54,21 +54,19 @@
             :llm-aliases="llmAliases"
             :default-llm-alias="defaultLlmAlias"
             v-model:auto-validate-after-fill="autoValidateAfterFill"
+            v-model:preserve-filled="preserveFilled"
             v-model:mapping-preset-name="mappingPresetName"
             v-model:selected-mapping-preset-names="selectedMappingPresetNames"
-            :field-overrides="fieldOverrides"
             :is-hybrid-strategy="isHybridStrategy"
             :mapping-presets="mappingPresets"
             :preset-dropdown-label="presetDropdownLabel"
             :sql-mappings="sqlMappings"
-            :xml-text="liveXmlText || xmlText"
             :mapping-preview="mappingPreview"
             :mapping-validation="mappingValidation"
+            :fill-provenance="fillProvenance"
+            :fill-warnings="fillWarnings"
             @save-mapping-preset="saveMappingPreset"
             @open-mapping-wizard="openMappingWizard"
-            @add-field-override="addFieldOverride"
-            @remove-field-override="removeFieldOverride"
-            @update-field-override="updateFieldOverride"
             @remove-mapping="removeMapping"
             @delete-mapping-preset="deleteMappingPreset"
             @remove-selected-preset="removeSelectedPreset"
@@ -172,24 +170,23 @@
         :unique-ranges="uniqueRanges"
         :git-push-enabled="gitPushEnabled"
         :root-element="rootElement"
-        :schema-id="schemaId"
-        :can-generate="canGenerate"
-        :generating="generating"
         :git-push-submitting="gitPushSubmitting"
         :git-push-message="gitPushMessage"
         :git-push-error="gitPushError"
+        :git-push-warnings="gitPushWarnings"
+        :git-push-warning-count="gitPushWarningCount"
         :show-compare-button="!!schemaId"
         :comparing="comparing"
         @content-change="onEditorContentChange"
         @clear="onEditorClear"
         @import="onXmlFileImported"
+        @document-paste="onDocumentPaste"
         @save="handleLibrarySave"
         @share="openShareInlineDialog"
         @push-to-git="handleGitPush"
         @push-dialog-open="resetGitPushFeedback"
         @push-dialog-close="resetGitPushFeedback"
         @run-compare="runCompareAndFocusTab"
-        @generate="generate"
       />
     </div>
 
@@ -259,7 +256,6 @@ const {
   wizardInitialMapping,
   mappingPreview,
   sqlMappings,
-  fieldOverrides,
   presetDropdownLabel,
   mappingValidation,
   hasMappingBlockers,
@@ -273,12 +269,15 @@ const {
   fillStatusMessage,
   fillPercent,
   fillElapsedLabel,
+  fillProvenance,
+  fillWarnings,
   validating,
   validationResult,
   generationHistory,
   historyMaxEntries,
   activeTab,
   autoValidateAfterFill,
+  preserveFilled,
   showDataBadge,
   dataTabBadgeLabel,
   resultsTabBadge,
@@ -292,9 +291,6 @@ const {
   openMappingWizard,
   onWizardClose,
   removeMapping,
-  addFieldOverride,
-  removeFieldOverride,
-  updateFieldOverride,
   saveMappingPreset,
   removeSelectedPreset,
   deleteMappingPreset,
@@ -303,6 +299,7 @@ const {
   onEditorContentChange,
   onEditorClear,
   onXmlFileImported,
+  onDocumentPaste,
   restoreFromHistory,
   removeHistoryEntry,
   clearGenerationHistory,
@@ -318,6 +315,8 @@ const {
   gitPushSubmitting,
   gitPushMessage,
   gitPushError,
+  gitPushWarnings,
+  gitPushWarningCount,
   resetGitPushFeedback,
   handleGitPush,
   categoryDocuments,

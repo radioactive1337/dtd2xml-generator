@@ -6,6 +6,8 @@
         <option value="ai">AI / LLM (контекстная генерация)</option>
         <option value="hybrid_db_faker">Гибрид: БД + Faker</option>
         <option value="hybrid_db_ai">Гибрид: БД + AI</option>
+        <option value="hybrid_git_faker">Гибрид: Git-эталоны + Faker</option>
+        <option value="hybrid_git_ai">Гибрид: Git-эталоны + AI</option>
       </select>
     </div>
 
@@ -27,22 +29,49 @@
       Алиасы LLM не настроены — добавьте их в <code>config/connections.json</code> (см. Настройки).
     </p>
 
-    <label class="auto-validate-label">
-      <input
-        type="checkbox"
-        :checked="autoValidateAfterFill"
-        @change="$emit('update:autoValidateAfterFill', $event.target.checked)"
-      />
-      Проверять DTD после заполнения
-    </label>
+    <div class="fill-options">
+      <label class="auto-validate-label">
+        <input
+          type="checkbox"
+          :checked="preserveFilled"
+          @change="$emit('update:preserveFilled', $event.target.checked)"
+        />
+        Не перезаписывать уже заполненные поля
+      </label>
+      <p class="fill-options-hint">
+        Пустые и заглушки заполняются. Что уже стоит в XML — не трогается.
+      </p>
+      <label class="auto-validate-label">
+        <input
+          type="checkbox"
+          :checked="autoValidateAfterFill"
+          @change="$emit('update:autoValidateAfterFill', $event.target.checked)"
+        />
+        Проверять DTD после заполнения
+      </label>
+    </div>
 
-    <FieldOverridesPanel
-      :rows="fieldOverrides"
-      :xml-text="xmlText"
-      @add-row="$emit('add-field-override')"
-      @remove-row="$emit('remove-field-override', $event)"
-      @update-row="(index, key, value) => $emit('update-field-override', index, key, value)"
-    />
+    <div v-if="provenanceEntries.length" class="provenance-panel">
+      <div class="overrides-header">
+        <span class="overrides-title">Источник значений (Git)</span>
+        <span class="provenance-count">{{ provenanceEntries.length }}</span>
+      </div>
+      <ul class="provenance-list">
+        <li v-for="[path, source] in provenanceEntries" :key="path" class="provenance-item">
+          <code class="provenance-path">{{ path }}</code>
+          <span class="provenance-badge" :title="source">{{ formatProvenanceBadge(source) }}</span>
+        </li>
+      </ul>
+    </div>
+
+    <div v-if="fillWarnings.length" class="fill-warnings-panel">
+      <div class="overrides-header">
+        <span class="overrides-title">Предупреждения заполнения</span>
+      </div>
+      <ul class="fill-warnings-list">
+        <li v-for="(warning, index) in fillWarnings" :key="index">{{ warning }}</li>
+      </ul>
+    </div>
 
     <div v-if="isHybridStrategy" class="db-overrides-panel">
       <div class="overrides-header">
@@ -128,7 +157,7 @@
             </button>
           </span>
         </div>
-        <span class="overrides-hint">Этап 1 — сначала БД, затем фиксированные поля, затем Faker/AI</span>
+        <span class="overrides-hint">Этап 1 — сначала БД, затем Faker/AI</span>
       </div>
 
       <div v-for="(mapping, mi) in sqlMappings" :key="mi" class="mapping-card">
@@ -201,7 +230,6 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { formatMappings } from '../../utils/ruPlural'
 import { shareMappingPreset } from '../../api/mappingPresets'
 import { translateApiError } from '../../utils/apiErrors'
-import FieldOverridesPanel from './FieldOverridesPanel.vue'
 import ShareDocumentDialog from './ShareDocumentDialog.vue'
 
 const props = defineProps({
@@ -210,31 +238,42 @@ const props = defineProps({
   llmAliases: { type: Array, default: () => [] },
   defaultLlmAlias: { type: String, default: '' },
   autoValidateAfterFill: { type: Boolean, default: true },
+  preserveFilled: { type: Boolean, default: true },
   isHybridStrategy: { type: Boolean, default: false },
   mappingPresetName: { type: String, default: '' },
   selectedMappingPresetNames: { type: Array, default: () => [] },
   mappingPresets: { type: Array, default: () => [] },
   presetDropdownLabel: { type: String, default: '' },
   sqlMappings: { type: Array, default: () => [] },
-  fieldOverrides: { type: Array, default: () => [] },
-  xmlText: { type: String, default: '' },
   mappingPreview: { type: Object, default: () => ({}) },
   mappingValidation: { type: Array, default: () => [] },
+  fillProvenance: { type: Object, default: () => ({}) },
+  fillWarnings: { type: Array, default: () => [] },
 })
 
 const usesLlmStrategy = computed(
-  () => props.fillStrategy === 'ai' || props.fillStrategy === 'hybrid_db_ai',
+  () =>
+    props.fillStrategy === 'ai' ||
+    props.fillStrategy === 'hybrid_db_ai' ||
+    props.fillStrategy === 'hybrid_git_ai',
 )
+
+const provenanceEntries = computed(() => Object.entries(props.fillProvenance || {}))
+
+function formatProvenanceBadge(source) {
+  if (!source) return 'git'
+  if (source.startsWith('git-ai:')) return 'git-ai'
+  if (source.startsWith('git:')) return 'git'
+  return source
+}
 
 const emit = defineEmits([
   'update:fillStrategy',
   'update:llmAlias',
   'update:autoValidateAfterFill',
+  'update:preserveFilled',
   'update:mappingPresetName',
   'update:selectedMappingPresetNames',
-  'add-field-override',
-  'remove-field-override',
-  'update-field-override',
   'save-mapping-preset',
   'open-mapping-wizard',
   'remove-mapping',
@@ -336,6 +375,18 @@ onBeforeUnmount(() => {
   color: var(--warning);
 }
 
+.fill-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fill-options-hint {
+  margin: -2px 0 4px 20px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .auto-validate-label {
   display: inline-flex;
   align-items: center;
@@ -345,7 +396,6 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: var(--text-muted);
   cursor: pointer;
-  white-space: nowrap;
 }
 
 .auto-validate-label input[type="checkbox"] {
@@ -356,6 +406,66 @@ onBeforeUnmount(() => {
   margin: 0;
   flex-shrink: 0;
   accent-color: var(--accent);
+}
+
+.provenance-panel,
+.fill-warnings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--border) 15%, transparent);
+}
+
+.provenance-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.provenance-list,
+.fill-warnings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.provenance-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.provenance-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.provenance-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.fill-warnings-list li {
+  font-size: 12px;
+  color: var(--warning);
 }
 
 .db-overrides-panel {

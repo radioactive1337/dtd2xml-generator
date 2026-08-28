@@ -129,33 +129,12 @@
     <p v-if="importError" class="import-error">{{ importError }}</p>
     <div class="editor-stage">
       <div ref="editorContainer" class="editor-container" />
-      <div v-if="!modelValue" class="editor-empty" aria-live="polite">
-        <div class="editor-empty-panel">
-          <h3 class="editor-empty-title">Как получить XML</h3>
-          <ol class="editor-empty-steps">
-            <li :class="{ done: !!schemaId }">Загрузить DTD слева</li>
-            <li :class="{ done: !!rootElement }">Выбрать корневой элемент</li>
-            <li>Нажать «Сгенерировать»</li>
-          </ol>
-          <div class="editor-empty-actions">
-            <button
-              class="btn-primary"
-              :disabled="!canGenerate || generating"
-              @click="emit('generate')"
-            >
-              {{ generating ? 'Генерация…' : 'Сгенерировать XML' }}
-            </button>
-            <button class="btn-secondary" @click="triggerImport">Импорт .xml</button>
-          </div>
-          <p v-if="generateDisabledReason" class="editor-empty-reason">{{ generateDisabledReason }}</p>
-        </div>
-      </div>
     </div>
 
     <div v-if="showPushDialog" class="save-dialog-backdrop" @click.self="closePushDialog">
-      <form class="save-dialog" @submit.prevent="submitPush">
+      <form class="save-dialog push-dialog" @submit.prevent="submitPush">
         <h4 class="save-dialog-title">Отправить в Git</h4>
-        <p v-if="rootElement" class="push-path-hint">
+        <p v-if="pushFolderName" class="push-path-hint">
           Путь: <code>{{ pushTargetPath }}</code>
         </p>
         <p class="push-overwrite-hint">
@@ -184,6 +163,25 @@
             :disabled="gitPushSubmitting"
           />
         </label>
+        <div v-if="gitPushWarnings.length" class="push-warnings">
+          <p class="push-warnings-heading">{{ pushWarningsHeading }}</p>
+          <ul class="push-warnings-list">
+            <li v-for="(warning, index) in gitPushWarnings" :key="index">
+              {{ formatPushWarningLabel(warning) }}
+            </li>
+          </ul>
+          <p v-if="pushWarningsTruncated" class="push-warnings-more">
+            … и ещё {{ gitPushWarningCount - gitPushWarnings.length }}
+          </p>
+          <label class="push-warnings-ack">
+            <input
+              v-model="warningsAcknowledged"
+              type="checkbox"
+              :disabled="gitPushSubmitting"
+            />
+            <span>Я ознакомился с предупреждениями и всё равно хочу отправить</span>
+          </label>
+        </div>
         <p v-if="gitPushError" class="push-feedback push-feedback-error">{{ gitPushError }}</p>
         <p v-else-if="gitPushMessage" class="push-feedback push-feedback-success">{{ gitPushMessage }}</p>
         <div class="save-dialog-actions">
@@ -199,9 +197,9 @@
             v-if="!gitPushMessage"
             type="submit"
             class="btn-primary btn-sm"
-            :disabled="!pushFilename.trim() || gitPushSubmitting"
+            :disabled="pushSubmitDisabled"
           >
-            {{ gitPushSubmitting ? 'Отправка…' : 'Отправить' }}
+            {{ pushSubmitLabel }}
           </button>
         </div>
       </form>
@@ -234,6 +232,9 @@ import loader from '@monaco-editor/loader'
 import { registerXmlFormatter } from '../utils/formatXml'
 import { escapeXmlText, unescapeXmlText } from '../utils/escapeXml'
 import { readXmlFileAsText } from '../utils/readXmlFile'
+import { peekXmlRootElement } from '../utils/xmlPaths'
+import { formatPushWarningLabel } from '../utils/gitPushWarnings'
+import { formatWarnings } from '../utils/ruPlural'
 import { useTheme } from '../composables/useTheme'
 
 const props = defineProps({
@@ -244,12 +245,11 @@ const props = defineProps({
   uniqueRanges: { type: Array, default: () => [] },
   gitPushEnabled: { type: Boolean, default: false },
   rootElement: { type: String, default: '' },
-  schemaId: { type: String, default: '' },
-  canGenerate: { type: Boolean, default: false },
-  generating: { type: Boolean, default: false },
   gitPushSubmitting: { type: Boolean, default: false },
   gitPushMessage: { type: String, default: '' },
   gitPushError: { type: String, default: '' },
+  gitPushWarnings: { type: Array, default: () => [] },
+  gitPushWarningCount: { type: Number, default: 0 },
   showCompareButton: { type: Boolean, default: false },
   comparing: { type: Boolean, default: false },
 })
@@ -257,6 +257,7 @@ const props = defineProps({
 const emit = defineEmits([
   'content-change',
   'import',
+  'document-paste',
   'clear',
   'save',
   'share',
@@ -264,7 +265,6 @@ const emit = defineEmits([
   'push-dialog-open',
   'push-dialog-close',
   'run-compare',
-  'generate',
 ])
 
 const { isDark } = useTheme()
@@ -282,20 +282,44 @@ const hasSelection = ref(false)
 const moreOpen = ref(false)
 const moreRef = ref(null)
 
-const generateDisabledReason = computed(() => {
-  if (props.canGenerate) return ''
-  if (!props.schemaId) return 'Сначала загрузите DTD слева'
-  if (!props.rootElement) return 'Выберите корневой элемент слева'
-  return ''
-})
+const pushFolderName = computed(
+  () => peekXmlRootElement(props.modelValue) || props.rootElement || '',
+)
 
 const pushTargetPath = computed(() => {
-  const folder = props.rootElement || 'root'
+  const folder = pushFolderName.value || 'root'
   const file = pushFilename.value.trim() || 'document.xml'
   return `${folder}/${file}`
 })
 
+const warningsAcknowledged = ref(false)
+
+const pushWarningsTruncated = computed(
+  () => props.gitPushWarningCount > props.gitPushWarnings.length,
+)
+
+const pushWarningsHeading = computed(() => {
+  const count = props.gitPushWarningCount || props.gitPushWarnings.length
+  return `Перед отправкой в Git: ${formatWarnings(count)}`
+})
+
+const pushSubmitDisabled = computed(() => {
+  if (!pushFilename.value.trim() || props.gitPushSubmitting) return true
+  if (props.gitPushWarnings.length && !warningsAcknowledged.value) return true
+  return false
+})
+
+const pushSubmitLabel = computed(() => {
+  if (props.gitPushSubmitting) {
+    return props.gitPushWarnings.length ? 'Отправка…' : 'Проверка…'
+  }
+  if (props.gitPushWarnings.length) return 'Отправить всё равно'
+  return 'Отправить'
+})
+
 function defaultPushFilename() {
+  const peeked = peekXmlRootElement(editor?.getValue() ?? props.modelValue)
+  if (peeked) return `${peeked}.xml`
   const base = (props.filename || 'generated.xml').replace(/\.xml$/i, '')
   return `${base || 'document'}.xml`
 }
@@ -414,6 +438,25 @@ function schedulePasteFlush() {
   pasteFlushTimer = setTimeout(notifyContentChange, 0)
 }
 
+function isFullDocumentPaste(range) {
+  const model = editor?.getModel()
+  if (!model || !range) return false
+  const full = model.getFullModelRange()
+  return (
+    range.startLineNumber === 1 &&
+    range.startColumn === 1 &&
+    range.endLineNumber === full.endLineNumber &&
+    range.endColumn === full.endColumn
+  )
+}
+
+function onEditorPaste(e) {
+  schedulePasteFlush()
+  if (!isFullDocumentPaste(e?.range)) return
+  const text = editor.getValue()
+  if (text?.trim()) emit('document-paste', text)
+}
+
 onMounted(async () => {
   monaco = await loader.init()
   registerXmlFormatter(monaco)
@@ -433,7 +476,7 @@ onMounted(async () => {
   })
 
   editor.onDidChangeModelContent(onModelContentChanged)
-  editor.onDidPaste(schedulePasteFlush)
+  editor.onDidPaste(onEditorPaste)
   editor.onDidChangeCursorSelection(() => {
     hasSelection.value = !editor.getSelection()?.isEmpty()
   })
@@ -593,6 +636,7 @@ function clearEditor() {
 function onGitPushClick() {
   pushFilename.value = defaultPushFilename()
   pushCommitMessage.value = ''
+  warningsAcknowledged.value = false
   showPushDialog.value = true
   emit('push-dialog-open')
 }
@@ -606,9 +650,11 @@ function closePushDialog() {
 function submitPush() {
   const filename = pushFilename.value.trim()
   if (!filename || props.gitPushSubmitting) return
+  if (props.gitPushWarnings.length && !warningsAcknowledged.value) return
   emit('push-to-git', {
     filename,
     commitMessage: pushCommitMessage.value.trim(),
+    acknowledgeWarnings: props.gitPushWarnings.length > 0 && warningsAcknowledged.value,
   })
 }
 
@@ -616,6 +662,13 @@ watch(
   () => props.gitPushMessage,
   (message) => {
     if (message) showPushDialog.value = true
+  },
+)
+
+watch(
+  () => props.gitPushWarnings,
+  () => {
+    warningsAcknowledged.value = false
   },
 )
 
@@ -797,78 +850,6 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   overflow: hidden;
 }
 
-.editor-empty {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  border-radius: var(--radius);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, transparent), color-mix(in srgb, var(--surface2) 94%, transparent));
-}
-
-.editor-empty-panel {
-  width: min(420px, 100%);
-  padding: 24px;
-  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
-  border-radius: calc(var(--radius) + 2px);
-  background: color-mix(in srgb, var(--surface) 96%, var(--surface2));
-  box-shadow: 0 16px 36px color-mix(in srgb, var(--text) 10%, transparent);
-}
-
-.editor-empty-title {
-  margin: 0 0 14px;
-  font-size: 22px;
-  line-height: 1.15;
-}
-
-.editor-empty-steps {
-  margin: 0;
-  padding-left: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  color: var(--text-muted);
-}
-
-.editor-empty-steps li.done {
-  color: var(--text);
-}
-
-.editor-empty-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 18px;
-}
-
-.editor-empty-reason {
-  margin: 12px 0 0;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-@media (max-width: 720px) {
-  .editor-empty {
-    align-items: flex-start;
-    padding: 14px;
-  }
-
-  .editor-empty-panel {
-    padding: 18px;
-  }
-
-  .editor-empty-title {
-    font-size: 19px;
-  }
-
-  .editor-empty-actions {
-    flex-direction: column;
-  }
-}
-
 .btn-sm {
   padding: 4px 8px;
   font-size: 11px;
@@ -893,6 +874,10 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.push-dialog {
+  width: min(460px, 92vw);
 }
 
 .save-dialog-title {
@@ -949,10 +934,80 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
 
 .push-feedback-error {
   color: var(--danger, #ef4444);
+  white-space: pre-wrap;
 }
 
 .push-feedback-success {
   color: var(--success, #22c55e);
+}
+
+.push-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.push-warnings-heading {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warning);
+}
+
+.push-warnings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.push-warnings-list li {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--warning);
+}
+
+.push-warnings-more {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.push-warnings-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.push-warnings-ack input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  max-width: 14px;
+  margin: 1px 0 0;
+  padding: 0;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  accent-color: var(--accent);
+}
+
+.push-warnings-ack span {
+  flex: 1;
+  min-width: 0;
 }
 </style>
 

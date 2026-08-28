@@ -62,7 +62,10 @@ export async function deletePersonalDocument(name) {
 }
 
 export async function pushDocumentToGit(payload) {
-  const { data } = await client.post('/xml-library/shared/push', payload)
+  const { data } = await client.post('/xml-library/shared/push', {
+    ...payload,
+    acknowledge_warnings: Boolean(payload.acknowledge_warnings),
+  })
   return data
 }
 

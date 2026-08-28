@@ -13,6 +13,7 @@ import {
   syncSharedLibrary,
 } from '../api/xmlLibrary'
 import { translateApiError } from '../utils/apiErrors'
+import { extractPushWarnings } from '../utils/gitPushWarnings'
 
 export function useXmlLibrary({ onLoadDocument } = {}) {
   const activeScope = ref('shared')
@@ -100,6 +101,7 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
     xmlText,
     schemaId,
     commitMessage = '',
+    acknowledgeWarnings = false,
   }) {
     if (gitPushing.value) return
     libraryError.value = ''
@@ -111,6 +113,7 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
         xml_text: xmlText,
         schema_id: schemaId,
         commit_message: commitMessage.trim() || null,
+        acknowledge_warnings: acknowledgeWarnings,
       })
       if (result.status === 'ok') {
         await refreshSharedCategories()
@@ -120,7 +123,11 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
       }
       return result
     } catch (err) {
-      libraryError.value = translateApiError(err?.response?.data?.detail || err?.message || String(err))
+      if (!extractPushWarnings(err)) {
+        libraryError.value = translateApiError(
+          err?.response?.data?.detail || err?.message || String(err),
+        )
+      }
       throw err
     } finally {
       gitPushing.value = false

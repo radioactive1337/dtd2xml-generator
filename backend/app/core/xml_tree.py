@@ -123,10 +123,11 @@ def is_fillable_attribute_value(
         return True
     if attr_def is None:
         return False
+    if attr_def.attr_type == "ENUM" and len(attr_def.allowed_values) > 1:
+        # Builder already sampled from the pool; any in-pool value is final.
+        return False
     if constrained := attr_def.dtd_default_value():
         return stripped == constrained
-    if attr_def.attr_type == "ENUM" and attr_def.allowed_values:
-        return stripped == attr_def.allowed_values[0]
     return False
 
 

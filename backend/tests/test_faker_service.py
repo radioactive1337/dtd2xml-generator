@@ -113,3 +113,18 @@ def test_literal_default_attribute_populated(enterprise_schema):
     result = populate_with_faker(skeleton, enterprise_schema)
     root = etree.fromstring(result.encode("utf-8"))
     assert root.attrib.get("document_type") == "a"
+
+
+CUSTOMER_DTD = """
+<!ELEMENT customer (contact*)>
+<!ELEMENT contact EMPTY>
+<!ATTLIST contact type (email|phone) "email" value CDATA #IMPLIED is-corp (true|false) "false">
+"""
+
+
+def test_faker_samples_enum_even_when_dtd_has_default():
+    schema = DTDParser().parse_string(CUSTOMER_DTD)
+    service = FakerService()
+    attr = schema.elements["contact"].attributes["type"]
+    values = {service.generate_attribute_value("type", attr) for _ in range(40)}
+    assert values == {"email", "phone"}

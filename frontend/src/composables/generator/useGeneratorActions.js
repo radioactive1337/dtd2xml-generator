@@ -15,7 +15,6 @@ export function useGeneratorActions({
   llmAlias,
   isHybridStrategy,
   sqlMappings,
-  fieldOverrides,
   xmlText,
   xmlDirty,
   buildInfo,
@@ -26,6 +25,7 @@ export function useGeneratorActions({
   filling,
   validating,
   autoValidateAfterFill,
+  preserveFilled,
   getEditorXmlText,
   setProgrammaticXml,
   addHistoryEntry,
@@ -34,6 +34,8 @@ export function useGeneratorActions({
   const fillStatusMessage = ref('')
   const fillPercent = ref(0)
   const fillElapsedSeconds = ref(0)
+  const fillProvenance = ref({})
+  const fillWarnings = ref([])
 
   let generateRequestSeq = 0
   let fillElapsedTimer = null
@@ -68,6 +70,8 @@ export function useGeneratorActions({
     fillStatusMessage.value = ''
     fillPercent.value = 0
     fillElapsedSeconds.value = 0
+    fillProvenance.value = {}
+    fillWarnings.value = []
   }
 
   async function generate() {
@@ -172,6 +176,7 @@ export function useGeneratorActions({
       const request = {
         schema_id: schemaId.value,
         strategy: fillStrategy.value,
+        preserve_filled: preserveFilled.value,
       }
       if (llmAlias.value) {
         request.llm_alias = llmAlias.value
@@ -189,17 +194,6 @@ export function useGeneratorActions({
             db_alias: m.db_alias || null,
           }))
       }
-      const activeOverrides = fieldOverrides.value
-        .filter((o) => o.target_path?.trim() && o.xml_attr?.trim())
-        .map(({ _presetSource, ...o }) => ({
-          target_path: o.target_path.trim(),
-          xml_attr: o.xml_attr.trim(),
-          value: o.value ?? '',
-          target_element: o.target_element?.trim() || null,
-        }))
-      if (activeOverrides.length) {
-        request.field_overrides = activeOverrides
-      }
       const result = await fillXmlStream(
         request,
         ({ step, message, percent }) => {
@@ -212,6 +206,8 @@ export function useGeneratorActions({
       )
       await setProgrammaticXml(result.xml_text)
       xmlDirty.value = false
+      fillProvenance.value = result.provenance || {}
+      fillWarnings.value = result.warnings || []
       filled = true
     } catch (e) {
       if (e.name === 'AbortError') {
@@ -261,6 +257,8 @@ export function useGeneratorActions({
     fillStatusMessage,
     fillPercent,
     fillElapsedLabel,
+    fillProvenance,
+    fillWarnings,
     generate,
     fill,
     cancelFill,

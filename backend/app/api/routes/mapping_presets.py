@@ -25,13 +25,6 @@ class MappingField(BaseModel):
     xml_attr: str = ""
 
 
-class FieldOverrideEntry(BaseModel):
-    target_path: str = ""
-    xml_attr: str = ""
-    value: str = ""
-    target_element: str = ""
-
-
 class SqlMappingEntry(BaseModel):
     target_element: str = ""
     query: str = ""
@@ -44,7 +37,6 @@ class MappingPresetSummary(BaseModel):
     name: str
     schema_id: str = ""
     mapping_count: int
-    field_override_count: int = 0
     shared_by_name: str = ""
 
 
@@ -52,7 +44,6 @@ class MappingPresetData(BaseModel):
     name: str
     schema_id: str = ""
     mappings: list[SqlMappingEntry] = Field(default_factory=list)
-    field_overrides: list[FieldOverrideEntry] = Field(default_factory=list)
 
 
 def _safe_name(name: str) -> str:
@@ -92,7 +83,6 @@ async def list_mapping_presets(
                 name=data.get("name", path.stem),
                 schema_id=preset_schema,
                 mapping_count=len(data.get("mappings", [])),
-                field_override_count=len(data.get("field_overrides", [])),
                 shared_by_name=data.get("shared_by_name", ""),
             )
         )
@@ -144,10 +134,6 @@ async def load_mapping_preset(
         name=data.get("name", name),
         schema_id=data.get("schema_id", ""),
         mappings=mappings,
-        field_overrides=[
-            FieldOverrideEntry(**entry)
-            for entry in data.get("field_overrides", [])
-        ],
     )
 
 

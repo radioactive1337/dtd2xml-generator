@@ -133,6 +133,18 @@ export function useGeneratorXml({
     }
   }
 
+  async function onDocumentPaste(text) {
+    // Full-document paste already updated the editor; only sync tree/root.
+    validationResult.value = null
+    buildInfo.value = null
+    xmlDirty.value = true
+    liveXmlText.value = text || ''
+    xmlText.value = text || ''
+    if (schemaId.value) {
+      await syncFromPastedXml(text)
+    }
+  }
+
   async function waitForDtdTreeRef(maxAttempts = 5) {
     for (let i = 0; i < maxAttempts; i += 1) {
       const treeRef = structureTabRef.value?.dtdTreeRef
@@ -266,6 +278,7 @@ export function useGeneratorXml({
     onEditorContentChange,
     onEditorClear,
     onXmlFileImported,
+    onDocumentPaste,
     syncFromPastedXml,
     restoreFromHistory,
     clearGenerationState,

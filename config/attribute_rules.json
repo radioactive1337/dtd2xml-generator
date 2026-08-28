@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "deny_copy": [
+    "passport*",
+    "accountNumber",
+    "inn"
+  ],
+  "rules": [
+    {
+      "id": "kladr-format",
+      "element": "PayDoc",
+      "attr": "kladr",
+      "severity": "error",
+      "applies_to": ["git_push", "post_fill", "git_ai_fill"],
+      "checks": [
+        { "type": "regex", "pattern": "^[0-9]{11,19}$" },
+        { "type": "not_placeholder" }
+      ],
+      "message": "kladr должен состоять из 11–19 цифр"
+    },
+    {
+      "id": "status-enum",
+      "attr": "status",
+      "severity": "warning",
+      "applies_to": ["post_fill", "git_push"],
+      "checks": [
+        { "type": "enum", "values": ["NEW", "ACTIVE", "CLOSED"] }
+      ],
+      "message": "status должен быть одним из: NEW, ACTIVE, CLOSED"
+    },
+    {
+      "id": "id-not-placeholder",
+      "attr": "id",
+      "severity": "error",
+      "applies_to": ["git_push", "git_ai_fill"],
+      "checks": [
+        { "type": "not_placeholder" },
+        { "type": "min_length", "min_length": 2 }
+      ],
+      "message": "id не должен быть пустым или placeholder"
+    }
+  ]
+}

@@ -68,15 +68,16 @@ def test_real_values_are_not_fillable_without_schema():
     assert not is_fillable_attribute_value("false")
 
 
-def test_enum_first_value_is_fillable():
+def test_enum_pool_values_are_not_placeholders():
     attr_def = AttributeDef(
         name="type",
         attr_type="ENUM",
         default_decl="#REQUIRED",
         allowed_values=["string", "number", "date"],
     )
-    assert is_fillable_attribute_value("string", attr_def=attr_def)
+    assert not is_fillable_attribute_value("string", attr_def=attr_def)
     assert not is_fillable_attribute_value("number", attr_def=attr_def)
+    assert is_fillable_attribute_value("", attr_def=attr_def)
 
 
 def test_compute_attribute_fill_stats_counts_placeholders_as_unfilled():
@@ -86,8 +87,10 @@ def test_compute_attribute_fill_stats_counts_placeholders_as_unfilled():
         "</PayDoc>"
     )
     stats = compute_attribute_fill_stats(xml, _paydoc_schema())
-    assert stats == AttributeFillStats(total=5, filled=1)
-    assert stats.fill_percent == 20.0
+    # id-1, empty kladr, empty name are placeholders; active="true" (CDATA)
+    # and type="string" (enum pool value) count as filled.
+    assert stats == AttributeFillStats(total=5, filled=2)
+    assert stats.fill_percent == 40.0
 
 
 def test_compute_attribute_fill_stats_empty_document_has_full_rate():

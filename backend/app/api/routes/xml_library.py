@@ -24,9 +24,15 @@ from app.config import (
 from app.api.routes.dtd import get_merged_schema
 from app.core.xml_tree import git_push_attribute_fill_error
 from app.services import reference_xml_service as ref_service
+from app.services.attribute_rules_service import (
+    format_push_rule_error,
+    push_warnings_ack_detail,
+    validate_document,
+)
 from app.services.git_identity_service import ensure_git_commit_author
 from app.services.git_push_service import push_document
 from app.services.reference_xml_sync import GitAuth, load_sync_state, sync_reference_repository
+from app.services.xml_structure_service import XmlParseError, peek_root_element
 from app.services.xml_share_service import (
     ShareDocumentRequest,
     ShareDocumentResponse,
@@ -60,9 +66,10 @@ class SyncResponse(BaseModel):
 class PushToGitRequest(BaseModel):
     xml_text: str
     filename: str
-    root_element: str
+    root_element: str = ""
     schema_id: str
     commit_message: str | None = None
+    acknowledge_warnings: bool = False
 
 
 class PushToGitResponse(BaseModel):
@@ -71,6 +78,7 @@ class PushToGitResponse(BaseModel):
     path: str
     message: str
     overwritten: bool = False
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CategoryResponse(BaseModel):
@@ -212,6 +220,20 @@ async def shared_sync(
     )
 
 
+def _root_element_from_xml(xml_text: str) -> str:
+    """Folder name for Git push: always the document element, never the UI selection."""
+    try:
+        name = peek_root_element(xml_text)
+    except XmlParseError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Не удалось определить корневой элемент документа: {exc}",
+        ) from exc
+    if ":" in name:
+        name = name.rsplit(":", 1)[-1]
+    return name
+
+
 @router.post("/shared/push", response_model=PushToGitResponse)
 async def push_to_git(
     body: PushToGitRequest,
@@ -222,12 +244,22 @@ async def push_to_git(
     fill_error = git_push_attribute_fill_error(body.xml_text, schema)
     if fill_error:
         raise HTTPException(status_code=400, detail=fill_error)
+
+    rule_report = validate_document(body.xml_text, schema, context="git_push")
+    rule_error = format_push_rule_error(rule_report)
+    if rule_error:
+        raise HTTPException(status_code=400, detail=rule_error)
+    if rule_report.has_warnings and not body.acknowledge_warnings:
+        raise HTTPException(status_code=409, detail=push_warnings_ack_detail(rule_report))
+    push_warnings = [v.message for v in rule_report.warnings]
+
+    root_element = _root_element_from_xml(body.xml_text)
     git_auth = _git_auth_for_user(user, settings)
     author_name, author_email = ensure_git_commit_author(user, settings)
     result = await push_document(
         settings,
         git_auth=git_auth,
-        root_element=body.root_element,
+        root_element=root_element,
         filename=body.filename,
         xml_text=body.xml_text,
         author_name=author_name,
@@ -242,6 +274,7 @@ async def push_to_git(
         path=result.path,
         message=result.message,
         overwritten=result.overwritten,
+        warnings=push_warnings,
     )
 
 

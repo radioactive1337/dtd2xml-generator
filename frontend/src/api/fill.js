@@ -97,10 +97,16 @@ export async function fillXmlStream(request, onProgress, { signal } = {}) {
     buffer = remainder
 
     for (const event of events) {
+      if (!event?.step || event.step === 'ping') {
+        continue
+      }
+
       if (event.step === 'complete') {
         result = {
           xml_text: event.xml_text,
           strategy: request.strategy,
+          warnings: event.warnings || [],
+          provenance: event.provenance || {},
         }
         onProgress?.({
           step: 'complete',

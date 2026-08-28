@@ -91,10 +91,12 @@ class FakerService:
         name: str,
         attr_def: AttributeDef | None = None,
     ) -> str:
-        if attr_def and (constrained := attr_def.dtd_default_value()):
-            return constrained
+        if attr_def and (locked := attr_def.locked_value()):
+            return locked
         if attr_def and attr_def.attr_type == "ENUM" and attr_def.allowed_values:
             return random.choice(attr_def.allowed_values)
+        if attr_def and (constrained := attr_def.dtd_default_value()):
+            return constrained
         if attr_def and attr_def.attr_type == "ID":
             return f"id-{self.faker.uuid4()[:8]}"
         return self._value_for_name(name)
