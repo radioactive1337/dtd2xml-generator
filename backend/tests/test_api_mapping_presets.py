@@ -1,7 +1,5 @@
 """Tests for mapping preset API endpoints."""
 
-import json
-
 from fastapi.testclient import TestClient
 
 from app.user_context import dev_user_context
@@ -65,28 +63,3 @@ def test_delete_mapping_preset(client: TestClient):
 
     response = client.get("/api/mapping-presets/Customer%20mapping")
     assert response.status_code == 404
-
-
-def test_load_legacy_dict_fields(client: TestClient):
-    presets_dir = dev_user_context().mapping_presets_dir
-    presets_dir.mkdir(parents=True, exist_ok=True)
-    legacy = {
-        "name": "Legacy",
-        "schema_id": "",
-        "db_alias": "pg",
-        "mappings": [
-            {
-                "target_element": "Item",
-                "query": "SELECT a FROM t",
-                "fields": {"a": "attrA"},
-            }
-        ],
-    }
-    (presets_dir / "Legacy.json").write_text(json.dumps(legacy), encoding="utf-8")
-
-    response = client.get("/api/mapping-presets/Legacy")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["mappings"][0]["fields"] == [{"db_col": "a", "xml_attr": "attrA"}]
-    assert data["mappings"][0]["db_alias"] == "pg"
-    assert "db_alias" not in data

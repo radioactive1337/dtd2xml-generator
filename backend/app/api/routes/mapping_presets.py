@@ -47,7 +47,7 @@ class MappingPresetData(BaseModel):
 
 
 def _safe_name(name: str) -> str:
-    if not re.match(r"^[\w\-. ]+$", name):
+    if not re.match(r"^[\w\-. ()]+$", name):
         raise HTTPException(status_code=400, detail="Invalid preset name")
     return name
 
@@ -55,15 +55,6 @@ def _safe_name(name: str) -> str:
 def _preset_path(user: UserContext, name: str) -> Path:
     user.mapping_presets_dir.mkdir(parents=True, exist_ok=True)
     return user.mapping_presets_dir / f"{_safe_name(name)}.json"
-
-
-def _normalize_fields(raw_fields: list | dict) -> list[MappingField]:
-    if isinstance(raw_fields, dict):
-        return [
-            MappingField(db_col=db_col, xml_attr=xml_attr)
-            for db_col, xml_attr in raw_fields.items()
-        ]
-    return [MappingField(**field) for field in raw_fields]
 
 
 @router.get("", response_model=list[MappingPresetSummary])
@@ -119,22 +110,7 @@ async def load_mapping_preset(
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Mapping preset '{name}' not found")
     data = json.loads(path.read_text(encoding="utf-8"))
-    legacy_alias = data.get("db_alias", "")
-    mappings = [
-        SqlMappingEntry(
-            target_element=m.get("target_element", ""),
-            query=m.get("query", ""),
-            fields=_normalize_fields(m.get("fields", [])),
-            db_alias=m.get("db_alias") or legacy_alias,
-            target_path=m.get("target_path", ""),
-        )
-        for m in data.get("mappings", [])
-    ]
-    return MappingPresetData(
-        name=data.get("name", name),
-        schema_id=data.get("schema_id", ""),
-        mappings=mappings,
-    )
+    return MappingPresetData.model_validate(data)
 
 
 @router.delete("/{name}")
