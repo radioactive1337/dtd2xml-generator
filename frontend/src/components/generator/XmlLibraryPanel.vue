@@ -109,15 +109,14 @@
               <li
                 v-for="doc in getVisibleDocs(cat.name)"
                 :key="doc.doc_id"
-                class="doc-item"
               >
-                <span class="doc-title" v-html="highlightMatch(doc.title, searchQuery)" />
                 <button
                   type="button"
-                  class="btn-secondary btn-sm"
+                  class="doc-item doc-item--button"
+                  :title="`Открыть «${doc.title}»`"
                   @click="$emit('open-shared', cat.name, doc.doc_id)"
                 >
-                  Открыть
+                  <span class="doc-title" v-html="highlightMatch(doc.title, searchQuery)" />
                 </button>
               </li>
               <li
@@ -571,6 +570,20 @@ function onSync() {
   background: color-mix(in srgb, var(--surface) 50%, transparent);
 }
 
+.doc-item--button {
+  width: 100%;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.doc-item--button:hover,
+.doc-item--button:focus-visible {
+  background: color-mix(in srgb, var(--surface) 35%, var(--accent) 12%);
+}
+
 .doc-info {
   display: flex;
   flex-direction: column;
@@ -579,6 +592,7 @@ function onSync() {
 }
 
 .doc-title {
+  min-width: 0;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
