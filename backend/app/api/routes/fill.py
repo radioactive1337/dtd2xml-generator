@@ -18,7 +18,7 @@ from app.api.routes.dtd import get_schema_registry
 from app.api.routes.generate import get_last_generated, set_last_generated
 from app.auth.sessions import get_current_user
 from app.config import reference_xml_root, resolve_llm_alias
-from app.core.xml_tree import ProtectedAttrs
+from app.core.xml_tree import ProtectedAttrs, prefill_empty_enums
 from app.services.attribute_rules_service import validate_document
 from app.services.db_service import SqlMapping, apply_db_overrides
 from app.services.field_mapping_service import suggest_field_mappings as suggest_field_mappings_service
@@ -210,6 +210,15 @@ async def execute_fill(
             status_code=400,
             detail="xml_text is required when no generated XML is cached on the server",
         )
+
+    xml, enum_prefill_count = prefill_empty_enums(xml, schema)
+    if enum_prefill_count:
+        await on_progress(
+            "enum_prefill",
+            f"Заполнено {enum_prefill_count} enum-атрибут(ов) случайным допустимым значением",
+            5,
+        )
+
     protected_attrs: ProtectedAttrs = frozenset()
     fill_warnings: list[str] = []
     provenance: dict[str, str] = {}

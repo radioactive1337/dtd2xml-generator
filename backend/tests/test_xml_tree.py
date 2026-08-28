@@ -9,6 +9,7 @@ from app.core.xml_tree import (
     element_dot_path,
     git_push_attribute_fill_error,
     is_fillable_attribute_value,
+    prefill_empty_enums,
 )
 
 
@@ -128,3 +129,61 @@ def test_git_push_attribute_fill_error_exact_threshold():
 def test_git_push_attribute_fill_error_blocks_zero_fill():
     xml = '<PayDoc id="id-1" kladr="" active="" extra=""/>'
     assert git_push_attribute_fill_error(xml, None) is not None
+
+
+def test_prefill_empty_enums_assigns_allowed_value():
+    xml = '<PayDoc id="id-1"><Body><Field name="amount" type=""/></Body></PayDoc>'
+    new_xml, count = prefill_empty_enums(xml, _paydoc_schema())
+    assert count == 1
+    root = etree.fromstring(new_xml.encode("utf-8"))
+    field = root.find("Body/Field")
+    assert field.get("type") in {"string", "number"}
+
+
+def test_prefill_empty_enums_leaves_in_pool_value_untouched():
+    xml = '<PayDoc id="id-1"><Body><Field name="amount" type="number"/></Body></PayDoc>'
+    new_xml, count = prefill_empty_enums(xml, _paydoc_schema())
+    assert count == 0
+    assert new_xml == xml
+
+
+def test_prefill_empty_enums_never_touches_non_enum_attrs():
+    xml = '<PayDoc id="id-1" kladr="" active=""><Body><Field name="" type="string"/></Body></PayDoc>'
+    new_xml, count = prefill_empty_enums(xml, _paydoc_schema())
+    assert count == 0
+    root = etree.fromstring(new_xml.encode("utf-8"))
+    assert root.get("kladr") == ""
+    assert root.get("active") == ""
+    assert root.find("Body/Field").get("name") == ""
+
+
+def test_prefill_empty_enums_returns_input_unchanged_without_schema():
+    xml = '<PayDoc id="id-1"><Body><Field name="amount" type=""/></Body></PayDoc>'
+    new_xml, count = prefill_empty_enums(xml, None)
+    assert count == 0
+    assert new_xml == xml
+
+
+def test_prefill_empty_enums_fills_single_value_enum():
+    schema = DTDSchema(
+        elements={
+            "Doc": ElementDef(
+                name="Doc",
+                content_raw="EMPTY",
+                content_model=ContentNode(kind="EMPTY"),
+                attributes={
+                    "kind": AttributeDef(
+                        name="kind",
+                        attr_type="ENUM",
+                        default_decl="#REQUIRED",
+                        allowed_values=["fixed-value"],
+                    ),
+                },
+            ),
+        }
+    )
+    xml = '<Doc kind=""/>'
+    new_xml, count = prefill_empty_enums(xml, schema)
+    assert count == 1
+    root = etree.fromstring(new_xml.encode("utf-8"))
+    assert root.get("kind") == "fixed-value"

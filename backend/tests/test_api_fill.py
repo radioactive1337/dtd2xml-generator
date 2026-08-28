@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from lxml import etree
 from pytest import MonkeyPatch
 
 from app.api.routes import dtd as dtd_routes
@@ -189,3 +190,40 @@ def test_git_ai_skips_db_stage(
 
     assert response.status_code == 200, response.text
     assert response.json()["strategy"] == "git_ai"
+
+
+def test_ai_fill_prefills_empty_enum_before_llm_runs(
+    client: TestClient,
+    monkeypatch: MonkeyPatch,
+):
+    schema_id = _upload_fixture(client)
+    _mock_llm_alias(monkeypatch)
+
+    # status is an ENUM (%Status; = active|inactive|pending); cleared to "" here
+    # to simulate the editor's "clear attribute values" action on a selection.
+    xml_text = (
+        '<PayDoc id="doc-1" kladr="7700000000000" active="true" status="">'
+        '<Header version="1.0"><Title>t</Title></Header>'
+        '<Body><Record><Field name="amount" type="number">1</Field></Record></Body>'
+        "</PayDoc>"
+    )
+
+    async def fake_llm(xml, schema, user, alias="default", **kwargs):
+        # Echo back unchanged — the enum must already be valid by this point,
+        # proving the pre-fill step ran before the LLM stage.
+        return xml
+
+    monkeypatch.setattr("app.api.routes.fill.populate_with_llm", fake_llm)
+
+    response = client.post(
+        "/api/fill",
+        json={
+            "schema_id": schema_id,
+            "xml_text": xml_text,
+            "strategy": "ai",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    result_root = etree.fromstring(response.json()["xml_text"].encode("utf-8"))
+    assert result_root.get("status") in {"active", "inactive", "pending"}
