@@ -89,7 +89,9 @@
           <button
             type="button"
             class="category-toggle"
+            :class="{ 'category-toggle--current': categoryMatchesCurrentRoot(cat) }"
             :aria-expanded="isCategoryExpanded(cat.name)"
+            :aria-current="categoryMatchesCurrentRoot(cat) ? 'true' : undefined"
             @click="toggleCategory(cat.name)"
           >
             <span class="category-chevron" :class="{ 'category-chevron--open': isCategoryExpanded(cat.name) }">▶</span>
@@ -202,6 +204,7 @@ const props = defineProps({
   categoryDocuments: { type: Object, default: () => ({}) },
   loadingCategory: { type: String, default: null },
   currentSchemaId: { type: String, default: '' },
+  currentRootElement: { type: String, default: '' },
 })
 
 const emit = defineEmits([
@@ -241,6 +244,15 @@ function categoryRootDiffers(cat) {
   const root = cat.root_element
   if (!root) return false
   return normalizeLabelKey(cat.name) !== normalizeLabelKey(root)
+}
+
+function categoryMatchesCurrentRoot(cat) {
+  const current = normalizeLabelKey(props.currentRootElement)
+  if (!current) return false
+  return (
+    normalizeLabelKey(cat.name) === current ||
+    normalizeLabelKey(cat.root_element) === current
+  )
 }
 
 function textContains(text, query) {
@@ -292,19 +304,22 @@ watch(
 )
 
 const searchFilteredCategories = computed(() => {
-  const rootFiltered = props.sharedCategories
   const q = normalizeSearch(searchQuery.value)
-  if (!q) return rootFiltered
-
-  return rootFiltered.filter((cat) => {
-    if (textContains(cat.name, q)) return true
-    if (textContains(cat.root_element, q)) return true
-    // Check already-loaded docs for title match
-    const docs = props.categoryDocuments[cat.name]
-    if (docs) return docs.some((d) => textContains(d.title, q))
-    // Category docs not yet loaded — exclude from results by title,
-    // but keep if name/root_element already matched above.
-    return false
+  let list = props.sharedCategories
+  if (q) {
+    list = list.filter((cat) => {
+      if (textContains(cat.name, q)) return true
+      if (textContains(cat.root_element, q)) return true
+      const docs = props.categoryDocuments[cat.name]
+      if (docs) return docs.some((d) => textContains(d.title, q))
+      return false
+    })
+  }
+  if (!normalizeLabelKey(props.currentRootElement)) return list
+  return [...list].sort((a, b) => {
+    const aMatch = categoryMatchesCurrentRoot(a) ? 0 : 1
+    const bMatch = categoryMatchesCurrentRoot(b) ? 0 : 1
+    return aMatch - bMatch
   })
 })
 
@@ -511,6 +526,11 @@ function onSync() {
   font-size: 12px;
   cursor: pointer;
   text-align: left;
+}
+
+.category-toggle--current {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
 }
 
 .category-chevron {
