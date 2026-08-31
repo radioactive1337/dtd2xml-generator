@@ -11,7 +11,7 @@
           <router-link to="/settings" class="nav-link">Настройки</router-link>
           <router-link v-if="isAdmin" to="/admin" class="nav-link">Админ</router-link>
           <span class="nav-sep" aria-hidden="true"></span>
-          <a href="/tools/util1.html" target="_blank" rel="noopener noreferrer" class="nav-link nav-link-external">
+          <a :href="UTIL_1_URL" target="_blank" rel="noopener noreferrer" class="nav-link nav-link-external">
             Утилита 1
             <svg class="external-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -19,7 +19,7 @@
               <path d="M10 14 21 3" />
             </svg>
           </a>
-          <a href="/tools/util2.html" target="_blank" rel="noopener noreferrer" class="nav-link nav-link-external">
+          <a :href="UTIL_2_URL" target="_blank" rel="noopener noreferrer" class="nav-link nav-link-external">
             Утилита 2
             <svg class="external-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -114,7 +114,12 @@ const { isDark, toggleTheme } = useTheme()
 const { user, isAdmin, refresh, logout } = useAuth()
 const router = useRouter()
 
-// TODO: paste the real DTD documentation URL here
+// TODO: paste the real utility/DTD documentation URLs here.
+// These utilities live on their own origin (not our app) - keeping them as
+// plain external links avoids the browser CORS block that hits requests
+// made from a page hosted under our domain.
+const UTIL_1_URL = 'https://TODO-paste-util-1-link-here'
+const UTIL_2_URL = 'https://TODO-paste-util-2-link-here'
 const DTD_DOC_URL = 'https://TODO-paste-dtd-doc-link-here'
 
 onMounted(() => {
