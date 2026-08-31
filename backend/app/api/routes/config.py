@@ -13,12 +13,17 @@ from app.auth.sessions import get_current_user
 from app.config import (
     DatabaseConfig,
     LLMConfig,
+    MANAGED_ALIAS_DETAIL,
     clear_user_git_settings,
     get_connection_aliases,
     get_reference_xml_settings,
+    get_shared_db_aliases,
+    get_shared_llm_aliases,
     get_user_git_author_email,
     get_user_git_author_name,
     get_user_git_user,
+    is_managed_db_alias,
+    is_managed_llm_alias,
     load_connections,
     reference_xml_requires_https_token,
     resolve_git_auth,
@@ -103,6 +108,7 @@ class DatabaseAliasResponse(BaseModel):
     database: str
     user: str
     sid: str | None = None
+    managed: bool = False
 
 
 class LlmAliasResponse(BaseModel):
@@ -110,6 +116,7 @@ class LlmAliasResponse(BaseModel):
     base_url: str
     model: str
     timeout: float
+    managed: bool = False
 
 
 class ConnectionsResponse(BaseModel):
@@ -142,12 +149,24 @@ def _validate_alias(alias: str) -> str:
     return name
 
 
+def _managed_db_conflict(alias: str) -> None:
+    if is_managed_db_alias(alias):
+        raise HTTPException(status_code=409, detail=MANAGED_ALIAS_DETAIL)
+
+
+def _managed_llm_conflict(alias: str) -> None:
+    if is_managed_llm_alias(alias):
+        raise HTTPException(status_code=409, detail=MANAGED_ALIAS_DETAIL)
+
+
 @router.get("/connections", response_model=ConnectionsResponse)
 async def get_connections(
     user: UserContext = Depends(get_current_user),
 ) -> ConnectionsResponse:
     connections = load_connections(user)
     aliases = get_connection_aliases(user)
+    shared_db = get_shared_db_aliases()
+    shared_llm = get_shared_llm_aliases()
     return ConnectionsResponse(
         databases=[
             DatabaseAliasResponse(
@@ -158,6 +177,7 @@ async def get_connections(
                 database=cfg.database,
                 user=cfg.user,
                 sid=cfg.sid,
+                managed=cfg.alias in shared_db,
             )
             for cfg in connections.databases.values()
         ],
@@ -167,6 +187,7 @@ async def get_connections(
                 base_url=cfg.base_url,
                 model=cfg.model,
                 timeout=cfg.timeout,
+                managed=cfg.alias in shared_llm,
             )
             for cfg in connections.llm.values()
         ],
@@ -187,6 +208,7 @@ async def create_database_alias(
     user: UserContext = Depends(get_current_user),
 ) -> DatabaseAliasResponse:
     alias = _validate_alias(body.alias)
+    _managed_db_conflict(alias)
     raw = _load_raw_user_connections(user)
     databases = raw.setdefault("databases", {})
     if alias in databases:
@@ -216,6 +238,7 @@ async def update_database_alias(
     user: UserContext = Depends(get_current_user),
 ) -> DatabaseAliasResponse:
     alias = _validate_alias(alias)
+    _managed_db_conflict(alias)
     raw = _load_raw_user_connections(user)
     databases = raw.setdefault("databases", {})
     if alias not in databases:
@@ -247,6 +270,7 @@ async def delete_database_alias(
     user: UserContext = Depends(get_current_user),
 ) -> dict[str, str]:
     alias = _validate_alias(alias)
+    _managed_db_conflict(alias)
     raw = _load_raw_user_connections(user)
     databases = raw.get("databases", {})
     if alias not in databases:
@@ -262,6 +286,7 @@ async def create_llm_alias(
     user: UserContext = Depends(get_current_user),
 ) -> LlmAliasResponse:
     alias = _validate_alias(body.alias)
+    _managed_llm_conflict(alias)
     raw = _load_raw_user_connections(user)
     llm = raw.setdefault("llm", {})
     if alias in llm:
@@ -288,6 +313,7 @@ async def update_llm_alias(
     user: UserContext = Depends(get_current_user),
 ) -> LlmAliasResponse:
     alias = _validate_alias(alias)
+    _managed_llm_conflict(alias)
     raw = _load_raw_user_connections(user)
     llm = raw.setdefault("llm", {})
     if alias not in llm:
@@ -316,6 +342,7 @@ async def delete_llm_alias(
     user: UserContext = Depends(get_current_user),
 ) -> dict[str, str]:
     alias = _validate_alias(alias)
+    _managed_llm_conflict(alias)
     raw = _load_raw_user_connections(user)
     llm = raw.get("llm", {})
     if alias not in llm:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,13 +17,32 @@ from app import config
 from app.auth.sessions import get_current_admin
 from app.auth.users import create_user, delete_user, get_user_by_id, list_all_users, validate_username
 from app.config import (
+    DatabaseConfig,
+    LLMConfig,
     is_allow_self_registration,
     load_app_settings,
+    load_shared_connections,
     shared_dtd_dir,
+    _load_raw_shared_connections,
+    _save_raw_shared_connections,
 )
+from app.api.routes.config import (
+    AliasRequest,
+    ConnectionTestResponse,
+    DatabaseAliasResponse,
+    DatabaseCreateRequest,
+    DatabaseUpdateRequest,
+    LlmAliasResponse,
+    LlmCreateRequest,
+    LlmUpdateRequest,
+    _validate_alias,
+)
+from app.services.db_service import DBService
+from app.services.llm_service import LLMService
 from app.user_context import UserContext, user_context_from_record
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+logger = logging.getLogger(__name__)
 
 
 class AdminUserInfo(BaseModel):
@@ -62,6 +82,11 @@ class AdminSettingsUpdate(BaseModel):
 
 class AdminCreateUserRequest(BaseModel):
     username: str
+
+
+class AdminConnectionsResponse(BaseModel):
+    databases: list[DatabaseAliasResponse]
+    llm: list[LlmAliasResponse]
 
 
 def _user_to_admin_info(user) -> AdminUserInfo:
@@ -243,3 +268,225 @@ async def admin_update_settings(
     load_app_settings()
 
     return AdminSettingsResponse(allow_self_registration=body.allow_self_registration)
+
+
+@router.get("/connections", response_model=AdminConnectionsResponse)
+async def admin_get_connections(
+    _admin: UserContext = Depends(get_current_admin),
+) -> AdminConnectionsResponse:
+    connections = load_shared_connections()
+    return AdminConnectionsResponse(
+        databases=[
+            DatabaseAliasResponse(
+                alias=cfg.alias,
+                driver=cfg.driver,
+                host=cfg.host,
+                port=cfg.port,
+                database=cfg.database,
+                user=cfg.user,
+                sid=cfg.sid,
+                managed=True,
+            )
+            for cfg in connections.databases.values()
+        ],
+        llm=[
+            LlmAliasResponse(
+                alias=cfg.alias,
+                base_url=cfg.base_url,
+                model=cfg.model,
+                timeout=cfg.timeout,
+                managed=True,
+            )
+            for cfg in connections.llm.values()
+        ],
+    )
+
+
+@router.post("/databases", response_model=DatabaseAliasResponse)
+async def admin_create_database_alias(
+    body: DatabaseCreateRequest,
+    _admin: UserContext = Depends(get_current_admin),
+) -> DatabaseAliasResponse:
+    alias = _validate_alias(body.alias)
+    raw = _load_raw_shared_connections()
+    databases = raw.setdefault("databases", {})
+    if alias in databases:
+        raise HTTPException(status_code=409, detail=f"Database alias '{alias}' already exists")
+
+    entry = body.model_dump(exclude_none=True)
+    entry.pop("alias", None)
+    databases[alias] = entry
+    _save_raw_shared_connections(raw)
+
+    cfg = DatabaseConfig(alias=alias, **entry)
+    return DatabaseAliasResponse(
+        alias=cfg.alias,
+        driver=cfg.driver,
+        host=cfg.host,
+        port=cfg.port,
+        database=cfg.database,
+        user=cfg.user,
+        sid=cfg.sid,
+        managed=True,
+    )
+
+
+@router.put("/databases/{alias}", response_model=DatabaseAliasResponse)
+async def admin_update_database_alias(
+    alias: str,
+    body: DatabaseUpdateRequest,
+    _admin: UserContext = Depends(get_current_admin),
+) -> DatabaseAliasResponse:
+    alias = _validate_alias(alias)
+    raw = _load_raw_shared_connections()
+    databases = raw.setdefault("databases", {})
+    if alias not in databases:
+        raise HTTPException(status_code=404, detail=f"Database alias '{alias}' not found")
+
+    current = dict(databases[alias])
+    updates = body.model_dump(exclude_unset=True)
+    if "password" in updates and updates["password"] is None:
+        updates.pop("password")
+    current.update({k: v for k, v in updates.items() if v is not None})
+    databases[alias] = current
+    _save_raw_shared_connections(raw)
+
+    cfg = DatabaseConfig(alias=alias, **current)
+    return DatabaseAliasResponse(
+        alias=cfg.alias,
+        driver=cfg.driver,
+        host=cfg.host,
+        port=cfg.port,
+        database=cfg.database,
+        user=cfg.user,
+        sid=cfg.sid,
+        managed=True,
+    )
+
+
+@router.delete("/databases/{alias}")
+async def admin_delete_database_alias(
+    alias: str,
+    _admin: UserContext = Depends(get_current_admin),
+) -> dict[str, str]:
+    alias = _validate_alias(alias)
+    raw = _load_raw_shared_connections()
+    databases = raw.get("databases", {})
+    if alias not in databases:
+        raise HTTPException(status_code=404, detail=f"Database alias '{alias}' not found")
+    del raw["databases"][alias]
+    _save_raw_shared_connections(raw)
+    return {"status": "deleted", "alias": alias}
+
+
+@router.post("/llm", response_model=LlmAliasResponse)
+async def admin_create_llm_alias(
+    body: LlmCreateRequest,
+    _admin: UserContext = Depends(get_current_admin),
+) -> LlmAliasResponse:
+    alias = _validate_alias(body.alias)
+    raw = _load_raw_shared_connections()
+    llm = raw.setdefault("llm", {})
+    if alias in llm:
+        raise HTTPException(status_code=409, detail=f"LLM alias '{alias}' already exists")
+
+    entry = body.model_dump(exclude_none=True)
+    entry.pop("alias", None)
+    llm[alias] = entry
+    _save_raw_shared_connections(raw)
+
+    cfg = LLMConfig(alias=alias, **entry)
+    return LlmAliasResponse(
+        alias=cfg.alias,
+        base_url=cfg.base_url,
+        model=cfg.model,
+        timeout=cfg.timeout,
+        managed=True,
+    )
+
+
+@router.put("/llm/{alias}", response_model=LlmAliasResponse)
+async def admin_update_llm_alias(
+    alias: str,
+    body: LlmUpdateRequest,
+    _admin: UserContext = Depends(get_current_admin),
+) -> LlmAliasResponse:
+    alias = _validate_alias(alias)
+    raw = _load_raw_shared_connections()
+    llm = raw.setdefault("llm", {})
+    if alias not in llm:
+        raise HTTPException(status_code=404, detail=f"LLM alias '{alias}' not found")
+
+    current = dict(llm[alias])
+    updates = body.model_dump(exclude_unset=True)
+    if "api_key" in updates and updates["api_key"] is None:
+        updates.pop("api_key")
+    current.update({k: v for k, v in updates.items() if v is not None})
+    llm[alias] = current
+    _save_raw_shared_connections(raw)
+
+    cfg = LLMConfig(alias=alias, **current)
+    return LlmAliasResponse(
+        alias=cfg.alias,
+        base_url=cfg.base_url,
+        model=cfg.model,
+        timeout=cfg.timeout,
+        managed=True,
+    )
+
+
+@router.delete("/llm/{alias}")
+async def admin_delete_llm_alias(
+    alias: str,
+    _admin: UserContext = Depends(get_current_admin),
+) -> dict[str, str]:
+    alias = _validate_alias(alias)
+    raw = _load_raw_shared_connections()
+    llm = raw.get("llm", {})
+    if alias not in llm:
+        raise HTTPException(status_code=404, detail=f"LLM alias '{alias}' not found")
+    llm.pop(alias)
+    _save_raw_shared_connections(raw)
+    return {"status": "deleted", "alias": alias}
+
+
+@router.post("/test-db", response_model=ConnectionTestResponse)
+async def admin_test_db_connection(
+    request: AliasRequest,
+    admin: UserContext = Depends(get_current_admin),
+) -> ConnectionTestResponse:
+    alias = request.alias.strip()
+    if not alias:
+        raise HTTPException(status_code=400, detail="Database alias is required")
+
+    try:
+        message = await DBService(admin).test_connection(alias)
+    except ValueError as exc:
+        logger.warning("Admin database connection test failed [alias=%s]: %s", alias, exc)
+        return ConnectionTestResponse(alias=alias, ok=False, message=str(exc))
+    except Exception as exc:
+        logger.error("Admin database connection test failed [alias=%s]: %s", alias, exc)
+        return ConnectionTestResponse(alias=alias, ok=False, message=str(exc))
+
+    return ConnectionTestResponse(alias=alias, ok=True, message=message)
+
+
+@router.post("/test-llm", response_model=ConnectionTestResponse)
+async def admin_test_llm_connection(
+    request: AliasRequest,
+    admin: UserContext = Depends(get_current_admin),
+) -> ConnectionTestResponse:
+    alias = request.alias.strip()
+    if not alias:
+        raise HTTPException(status_code=400, detail="LLM alias is required")
+
+    try:
+        message = await LLMService(admin, alias=alias).test_connection()
+    except ValueError as exc:
+        logger.warning("Admin LLM connection test failed [alias=%s]: %s", alias, exc)
+        return ConnectionTestResponse(alias=alias, ok=False, message=str(exc))
+    except Exception as exc:
+        logger.error("Admin LLM connection test failed [alias=%s]: %s", alias, exc)
+        return ConnectionTestResponse(alias=alias, ok=False, message=str(exc))
+
+    return ConnectionTestResponse(alias=alias, ok=True, message=message)

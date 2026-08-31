@@ -79,6 +79,101 @@
 
         <section class="admin-section">
           <div class="section-header">
+            <h3>Общие алиасы</h3>
+          </div>
+          <p class="hint section-hint">
+            Подключения БД и LLM для всех пользователей. Пользователи видят их в настройках,
+            но не могут изменить или удалить.
+          </p>
+
+          <div class="shared-aliases-block">
+            <div class="shared-aliases-header">
+              <h4>Алиасы БД</h4>
+              <button
+                v-if="sharedConnections.databases?.length"
+                class="btn-secondary btn-small"
+                @click="openDbForm()"
+              >
+                + Добавить
+              </button>
+            </div>
+            <ul v-if="sharedConnections.databases?.length" class="alias-list">
+              <li v-for="db in sharedConnections.databases" :key="db.alias" class="alias-item">
+                <span class="alias-icon">DB</span>
+                <div class="alias-info">
+                  <span class="alias-name">{{ db.alias }}</span>
+                  <span class="alias-meta">{{ db.driver }} · {{ db.host }}:{{ db.port }}</span>
+                </div>
+                <button
+                  class="btn-secondary btn-small"
+                  :disabled="isDbTesting(db.alias)"
+                  @click="testDb(db.alias)"
+                >
+                  {{ isDbTesting(db.alias) ? 'Проверка…' : 'Проверить' }}
+                </button>
+                <button class="btn-secondary btn-small" @click="openDbForm(db)">Изменить</button>
+                <button class="btn-secondary btn-small danger" @click="removeDb(db.alias)">Удалить</button>
+                <span
+                  v-if="dbStatus(db.alias) && !isDbTesting(db.alias)"
+                  class="status-badge"
+                  :class="dbStatus(db.alias).ok ? 'ok' : 'error'"
+                >
+                  {{ dbStatus(db.alias).ok ? 'OK' : 'Ошибка' }}
+                </span>
+              </li>
+            </ul>
+            <div v-else class="aliases-empty">
+              <p>Общие алиасы БД не заданы</p>
+              <button type="button" class="btn-primary btn-small" @click="openDbForm()">Добавить</button>
+            </div>
+          </div>
+
+          <div class="shared-aliases-block">
+            <div class="shared-aliases-header">
+              <h4>Алиасы LLM</h4>
+              <button
+                v-if="sharedConnections.llm?.length"
+                class="btn-secondary btn-small"
+                @click="openLlmForm()"
+              >
+                + Добавить
+              </button>
+            </div>
+            <ul v-if="sharedConnections.llm?.length" class="alias-list">
+              <li v-for="llm in sharedConnections.llm" :key="llm.alias" class="alias-item">
+                <span class="alias-icon llm">LLM</span>
+                <div class="alias-info">
+                  <span class="alias-name">{{ llm.alias }}</span>
+                  <span class="alias-meta">{{ llm.model }} · {{ llm.base_url }}</span>
+                </div>
+                <button
+                  class="btn-secondary btn-small"
+                  :disabled="isLlmTesting(llm.alias)"
+                  @click="testLlm(llm.alias)"
+                >
+                  {{ isLlmTesting(llm.alias) ? 'Проверка…' : 'Проверить' }}
+                </button>
+                <button class="btn-secondary btn-small" @click="openLlmForm(llm)">Изменить</button>
+                <button class="btn-secondary btn-small danger" @click="removeLlm(llm.alias)">Удалить</button>
+                <span
+                  v-if="llmStatus(llm.alias) && !isLlmTesting(llm.alias)"
+                  class="status-badge"
+                  :class="llmStatus(llm.alias).ok ? 'ok' : 'error'"
+                >
+                  {{ llmStatus(llm.alias).ok ? 'OK' : 'Ошибка' }}
+                </span>
+              </li>
+            </ul>
+            <div v-else class="aliases-empty">
+              <p>Общие алиасы LLM не заданы</p>
+              <button type="button" class="btn-primary btn-small" @click="openLlmForm()">Добавить</button>
+            </div>
+          </div>
+          <p v-if="sharedAliasesError" class="error-msg">{{ sharedAliasesError }}</p>
+        </section>
+
+        <section class="admin-section">
+          <div class="section-header">
             <h3>Пользователи</h3>
             <div class="section-actions">
               <span class="user-count">{{ users.length }} всего</span>
@@ -146,11 +241,71 @@
         </section>
       </template>
     </div>
+
+    <div v-if="dbFormOpen" class="modal-overlay" @click.self="closeDbForm">
+      <div class="card modal">
+        <div class="panel-title">{{ dbForm.alias && dbFormEditing ? 'Изменить общий БД' : 'Новый общий алиас БД' }}</div>
+        <form novalidate @submit.prevent="saveDbForm">
+          <label>Алиас</label>
+          <input v-model="dbForm.alias" :disabled="dbFormEditing" />
+          <label>Драйвер</label>
+          <select v-model="dbForm.driver">
+            <option value="postgresql">postgresql</option>
+            <option value="oracle">oracle</option>
+          </select>
+          <label>Хост</label>
+          <input v-model="dbForm.host" />
+          <label>Порт</label>
+          <input v-model.number="dbForm.port" type="number" />
+          <template v-if="isOracleDriver(dbForm.driver)">
+            <label>SID <span class="label-hint">(опционально)</span></label>
+            <input v-model="dbForm.sid" autocomplete="off" />
+            <label>База / service name</label>
+            <input v-model="dbForm.database" autocomplete="off" />
+          </template>
+          <template v-else>
+            <label>База</label>
+            <input v-model="dbForm.database" />
+          </template>
+          <label>Пользователь</label>
+          <input v-model="dbForm.user" />
+          <label>Пароль{{ dbFormEditing ? ' (оставьте пустым, чтобы не менять)' : '' }}</label>
+          <input v-model="dbForm.password" type="password" />
+          <p v-if="dbFormError" class="error-msg">{{ dbFormError }}</p>
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" @click="closeDbForm">Отмена</button>
+            <button type="submit" class="btn-primary" :disabled="savingAliasForm">Сохранить</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div v-if="llmFormOpen" class="modal-overlay" @click.self="closeLlmForm">
+      <div class="card modal">
+        <div class="panel-title">{{ llmForm.alias && llmFormEditing ? 'Изменить общий LLM' : 'Новый общий алиас LLM' }}</div>
+        <form @submit.prevent="saveLlmForm">
+          <label>Алиас</label>
+          <input v-model="llmForm.alias" :disabled="llmFormEditing" required />
+          <label>Base URL</label>
+          <input v-model="llmForm.base_url" required placeholder="http://localhost:11434/v1" />
+          <label>Модель</label>
+          <input v-model="llmForm.model" required />
+          <label>API key{{ llmFormEditing ? ' (оставьте пустым, чтобы не менять)' : '' }}</label>
+          <input v-model="llmForm.api_key" type="password" />
+          <label>Timeout (сек)</label>
+          <input v-model.number="llmForm.timeout" type="number" min="1" />
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" @click="closeLlmForm">Отмена</button>
+            <button type="submit" class="btn-primary" :disabled="savingAliasForm">Сохранить</button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, reactive } from 'vue'
 import * as adminApi from '../api/admin'
 
 const loading = ref(true)
@@ -167,6 +322,199 @@ const showAddUser = ref(false)
 const newUsername = ref('')
 const creatingUser = ref(false)
 const createError = ref('')
+const sharedConnections = ref({ databases: [], llm: [] })
+const sharedAliasesError = ref('')
+const dbTests = ref({})
+const llmTests = ref({})
+const dbFormOpen = ref(false)
+const llmFormOpen = ref(false)
+const dbFormEditing = ref(false)
+const llmFormEditing = ref(false)
+const savingAliasForm = ref(false)
+const dbFormError = ref('')
+
+const emptyDbForm = () => ({
+  alias: '',
+  driver: 'postgresql',
+  host: 'localhost',
+  port: 5432,
+  database: '',
+  user: '',
+  password: '',
+  sid: '',
+})
+
+const emptyLlmForm = () => ({
+  alias: '',
+  base_url: 'http://localhost:11434/v1',
+  model: 'gpt-4o-mini',
+  api_key: '',
+  timeout: 120,
+})
+
+const dbForm = reactive(emptyDbForm())
+const llmForm = reactive(emptyLlmForm())
+
+function isOracleDriver(driver) {
+  const d = String(driver ?? '').toLowerCase().trim()
+  return d === 'oracle' || d === 'oracledb'
+}
+
+function dbStatus(alias) {
+  return dbTests.value[alias] ?? null
+}
+
+function llmStatus(alias) {
+  return llmTests.value[alias] ?? null
+}
+
+function isDbTesting(alias) {
+  return dbTests.value[alias]?.testing === true
+}
+
+function isLlmTesting(alias) {
+  return llmTests.value[alias]?.testing === true
+}
+
+async function loadSharedConnections() {
+  sharedConnections.value = await adminApi.fetchAdminConnections()
+}
+
+function openDbForm(existing = null) {
+  dbFormEditing.value = !!existing
+  dbFormError.value = ''
+  const next = existing
+    ? { ...emptyDbForm(), ...existing, password: '', sid: existing.sid || '' }
+    : emptyDbForm()
+  Object.assign(dbForm, next)
+  dbFormOpen.value = true
+}
+
+function closeDbForm() {
+  dbFormOpen.value = false
+  dbFormError.value = ''
+}
+
+function openLlmForm(existing = null) {
+  llmFormEditing.value = !!existing
+  const next = existing ? { ...emptyLlmForm(), ...existing, api_key: '' } : emptyLlmForm()
+  Object.assign(llmForm, next)
+  llmFormOpen.value = true
+}
+
+function closeLlmForm() {
+  llmFormOpen.value = false
+}
+
+function validateDbForm() {
+  const sid = String(dbForm.sid ?? '').trim()
+  const database = String(dbForm.database ?? '').trim()
+  if (!dbForm.alias?.trim()) return 'Укажите алиас'
+  if (!dbForm.host?.trim()) return 'Укажите хост'
+  if (!dbForm.port) return 'Укажите порт'
+  if (isOracleDriver(dbForm.driver)) {
+    if (!database && !sid) return 'Укажите базу / service name или SID'
+  } else if (!database) {
+    return 'Укажите базу'
+  }
+  if (!dbForm.user?.trim()) return 'Укажите пользователя'
+  if (!dbFormEditing.value && !dbForm.password) return 'Укажите пароль'
+  return ''
+}
+
+async function saveDbForm() {
+  dbFormError.value = ''
+  const validationError = validateDbForm()
+  if (validationError) {
+    dbFormError.value = validationError
+    return
+  }
+  savingAliasForm.value = true
+  sharedAliasesError.value = ''
+  try {
+    const payload = { ...dbForm }
+    if (!payload.sid?.trim()) payload.sid = null
+    else payload.sid = payload.sid.trim()
+    if (dbFormEditing.value) {
+      const { alias, password, ...rest } = payload
+      const update = { ...rest }
+      if (password) update.password = password
+      await adminApi.updateAdminDatabaseAlias(alias, update)
+    } else {
+      await adminApi.createAdminDatabaseAlias(payload)
+    }
+    await loadSharedConnections()
+    closeDbForm()
+  } catch (err) {
+    sharedAliasesError.value = err.message || 'Не удалось сохранить алиас БД'
+  } finally {
+    savingAliasForm.value = false
+  }
+}
+
+async function saveLlmForm() {
+  savingAliasForm.value = true
+  sharedAliasesError.value = ''
+  try {
+    const payload = { ...llmForm }
+    if (llmFormEditing.value) {
+      const { alias, api_key, ...rest } = payload
+      const update = { ...rest }
+      if (api_key) update.api_key = api_key
+      await adminApi.updateAdminLlmAlias(alias, update)
+    } else {
+      await adminApi.createAdminLlmAlias(payload)
+    }
+    await loadSharedConnections()
+    closeLlmForm()
+  } catch (err) {
+    sharedAliasesError.value = err.message || 'Не удалось сохранить алиас LLM'
+  } finally {
+    savingAliasForm.value = false
+  }
+}
+
+async function removeDb(alias) {
+  if (!confirm(`Удалить общий алиас БД «${alias}»?`)) return
+  sharedAliasesError.value = ''
+  try {
+    await adminApi.deleteAdminDatabaseAlias(alias)
+    await loadSharedConnections()
+  } catch (err) {
+    sharedAliasesError.value = err.message || 'Не удалось удалить алиас БД'
+  }
+}
+
+async function removeLlm(alias) {
+  if (!confirm(`Удалить общий алиас LLM «${alias}»?`)) return
+  sharedAliasesError.value = ''
+  try {
+    await adminApi.deleteAdminLlmAlias(alias)
+    await loadSharedConnections()
+  } catch (err) {
+    sharedAliasesError.value = err.message || 'Не удалось удалить алиас LLM'
+  }
+}
+
+async function testDb(alias) {
+  dbTests.value = { ...dbTests.value, [alias]: { testing: true } }
+  try {
+    const result = await adminApi.testAdminDbConnection(alias)
+    dbTests.value = { ...dbTests.value, [alias]: { ok: result.ok, message: result.message } }
+  } catch (err) {
+    dbTests.value = { ...dbTests.value, [alias]: { ok: false, message: err.message } }
+  }
+}
+
+async function testLlm(alias) {
+  llmTests.value = { ...llmTests.value, [alias]: { testing: true } }
+  try {
+    const result = await adminApi.testAdminLlmConnection(alias)
+    llmTests.value = { ...llmTests.value, [alias]: { ok: result.ok, message: result.message } }
+  } catch (err) {
+    llmTests.value = { ...llmTests.value, [alias]: { ok: false, message: err.message } }
+  }
+}
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B'
@@ -206,6 +554,7 @@ async function loadAll() {
     stats.value = statsData
     users.value = usersData.users
     allowRegistration.value = settingsData.allow_self_registration
+    await loadSharedConnections()
   } finally {
     loading.value = false
   }
@@ -499,5 +848,150 @@ code {
   background: var(--surface2);
   padding: 1px 5px;
   border-radius: 3px;
+}
+
+.shared-aliases-block {
+  margin-bottom: 20px;
+}
+
+.shared-aliases-block:last-of-type {
+  margin-bottom: 0;
+}
+
+.shared-aliases-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.shared-aliases-header h4 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.alias-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.alias-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+.alias-info {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.alias-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.alias-icon {
+  background: var(--accent);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.alias-icon.llm {
+  background: var(--llm-accent);
+}
+
+.status-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.status-badge.ok {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+}
+
+.status-badge.error {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
+}
+
+.aliases-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 12px;
+  background: var(--surface2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+}
+
+.aliases-empty p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+
+.modal {
+  width: 100%;
+  max-width: 440px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal label {
+  display: block;
+  font-size: 13px;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.label-hint {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.modal input,
+.modal select {
+  width: 100%;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 20px;
 }
 </style>

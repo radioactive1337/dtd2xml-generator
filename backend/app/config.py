@@ -29,6 +29,8 @@ APP_CONFIG_FILE = CONFIG_DIR / "app.json"
 APP_CONFIG_EXAMPLE = CONFIG_DIR / "app.json.example"
 USER_CONNECTIONS_TEMPLATE = CONFIG_DIR / "connections.json.example"
 
+MANAGED_ALIAS_DETAIL = "Алиас задан администратором"
+
 DEV_USER_ID = "dev-local"
 
 
@@ -153,6 +155,67 @@ def _save_raw_user_connections(user: "UserContext", raw: dict[str, Any]) -> None
     _connections_cache.pop(str(path), None)
 
 
+def _shared_connections_path() -> Path:
+    return DATA_DIR / "shared_connections.json"
+
+
+def _load_raw_shared_connections() -> dict[str, Any]:
+    path = _shared_connections_path()
+    if not path.is_file():
+        return {}
+    key = str(path)
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return {}
+    entry = _connections_cache.get(key)
+    if entry is not None and entry[0] == mtime:
+        return entry[1]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    _connections_cache[key] = (mtime, data)
+    return data
+
+
+def _save_raw_shared_connections(raw: dict[str, Any]) -> None:
+    path = _shared_connections_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    _connections_cache.pop(str(path), None)
+
+
+def get_shared_db_aliases() -> set[str]:
+    return set(_load_raw_shared_connections().get("databases", {}).keys())
+
+
+def get_shared_llm_aliases() -> set[str]:
+    return set(_load_raw_shared_connections().get("llm", {}).keys())
+
+
+def is_managed_db_alias(alias: str) -> bool:
+    return alias in get_shared_db_aliases()
+
+
+def is_managed_llm_alias(alias: str) -> bool:
+    return alias in get_shared_llm_aliases()
+
+
+def _connections_from_raw(raw: dict[str, Any]) -> ConnectionsConfig:
+    databases: dict[str, DatabaseConfig] = {}
+    for alias, cfg in raw.get("databases", {}).items():
+        databases[alias] = DatabaseConfig(alias=alias, **cfg)
+    llm: dict[str, LLMConfig] = {}
+    for alias, cfg in raw.get("llm", {}).items():
+        llm[alias] = LLMConfig(alias=alias, **cfg)
+    return ConnectionsConfig(databases=databases, llm=llm)
+
+
+def load_shared_connections() -> ConnectionsConfig:
+    return _connections_from_raw(_load_raw_shared_connections())
+
+
 def _invalidate_app_config_cache() -> None:
     global _app_config_cache
     _app_config_cache = None
@@ -253,12 +316,17 @@ def ensure_app_config() -> None:
 
 
 def load_connections(user: "UserContext") -> ConnectionsConfig:
-    raw = _load_raw_user_connections(user)
+    user_raw = _load_raw_user_connections(user)
+    shared_raw = _load_raw_shared_connections()
     databases: dict[str, DatabaseConfig] = {}
-    for alias, cfg in raw.get("databases", {}).items():
+    for alias, cfg in user_raw.get("databases", {}).items():
+        databases[alias] = DatabaseConfig(alias=alias, **cfg)
+    for alias, cfg in shared_raw.get("databases", {}).items():
         databases[alias] = DatabaseConfig(alias=alias, **cfg)
     llm: dict[str, LLMConfig] = {}
-    for alias, cfg in raw.get("llm", {}).items():
+    for alias, cfg in user_raw.get("llm", {}).items():
+        llm[alias] = LLMConfig(alias=alias, **cfg)
+    for alias, cfg in shared_raw.get("llm", {}).items():
         llm[alias] = LLMConfig(alias=alias, **cfg)
     return ConnectionsConfig(databases=databases, llm=llm)
 
@@ -318,11 +386,17 @@ def resolve_llm_alias(user: "UserContext", alias: str | None = None) -> str:
 
 def get_llm_api_key(user: "UserContext", alias: str = "default") -> str:
     resolved = resolve_llm_alias(user, alias)
+    shared_raw = _load_raw_shared_connections()
+    if resolved in shared_raw.get("llm", {}):
+        return shared_raw["llm"][resolved].get("api_key", "")
     raw = _load_raw_user_connections(user)
     return raw.get("llm", {}).get(resolved, {}).get("api_key", "")
 
 
 def get_db_password(user: "UserContext", alias: str) -> str:
+    shared_raw = _load_raw_shared_connections()
+    if alias in shared_raw.get("databases", {}):
+        return shared_raw["databases"][alias].get("password", "")
     raw = _load_raw_user_connections(user)
     return raw.get("databases", {}).get(alias, {}).get("password", "")
 
@@ -381,6 +455,8 @@ def get_ora_tzfile() -> str | None:
 
 def get_connection_aliases(user: "UserContext") -> dict[str, list[str] | str | None]:
     connections = load_connections(user)
+    shared_db = get_shared_db_aliases()
+    shared_llm = get_shared_llm_aliases()
     default_llm: str | None = None
     try:
         default_llm = get_default_llm_alias(user)
@@ -391,6 +467,8 @@ def get_connection_aliases(user: "UserContext") -> dict[str, list[str] | str | N
         "databases": list(connections.databases.keys()),
         "llm": list(connections.llm.keys()),
         "default_llm": default_llm,
+        "managed_databases": sorted(a for a in connections.databases if a in shared_db),
+        "managed_llm": sorted(a for a in connections.llm if a in shared_llm),
     }
 
 
