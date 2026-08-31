@@ -3,7 +3,8 @@
     <div class="card">
       <div class="panel-title">Алиасы подключений</div>
       <p class="hint">
-        Настройте свои подключения к БД и LLM. Секреты хранятся только на сервере и не отображаются в интерфейсе.
+        Алиасы БД и LLM общие — их задаёт администратор. Git-токен остаётся личным.
+        Секреты хранятся только на сервере и не отображаются в интерфейсе.
       </p>
 
       <div v-if="loading" class="loading">Загрузка…</div>
@@ -12,29 +13,17 @@
         <section class="alias-section">
           <div class="section-header">
             <h3>Алиасы БД</h3>
-            <button
-              v-if="connections.databases?.length"
-              class="btn-secondary btn-small"
-              @click="openDbForm()"
-            >
-              + Добавить
-            </button>
           </div>
           <ul v-if="connections.databases?.length" class="alias-list">
             <li v-for="db in connections.databases" :key="db.alias" class="alias-item">
               <span class="alias-icon">DB</span>
               <div class="alias-info">
-                <span class="alias-name">
-                  {{ db.alias }}
-                  <span v-if="db.managed" class="managed-badge">общий</span>
-                </span>
+                <span class="alias-name">{{ db.alias }}</span>
                 <span class="alias-meta">{{ db.driver }} · {{ db.host }}:{{ db.port }}</span>
               </div>
               <button class="btn-secondary btn-test" :disabled="isDbTesting(db.alias)" @click="testDb(db.alias)">
                 {{ isDbTesting(db.alias) ? 'Проверка…' : 'Проверить' }}
               </button>
-              <button v-if="!db.managed" class="btn-secondary btn-test" @click="openDbForm(db)">Изменить</button>
-              <button v-if="!db.managed" class="btn-secondary btn-test danger" @click="removeDb(db.alias)">Удалить</button>
               <span
                 v-if="dbStatus(db.alias) && !isDbTesting(db.alias)"
                 class="status-badge"
@@ -52,21 +41,15 @@
           </ul>
           <div v-else class="settings-empty">
             <span class="alias-icon">DB</span>
-            <p class="settings-empty-text">Алиасы БД не настроены</p>
-            <button type="button" class="btn-primary" @click="openDbForm()">Добавить</button>
+            <p class="settings-empty-text">Общие алиасы БД не заданы</p>
+            <router-link v-if="isAdmin" to="/admin" class="btn-primary">Задать в админке</router-link>
+            <p v-else class="settings-empty-hint">Их задаёт администратор</p>
           </div>
         </section>
 
         <section class="alias-section">
           <div class="section-header">
             <h3>Алиасы LLM</h3>
-            <button
-              v-if="connections.llm?.length"
-              class="btn-secondary btn-small"
-              @click="openLlmForm()"
-            >
-              + Добавить
-            </button>
           </div>
           <div v-if="connections.llm?.length > 1" class="default-llm-field">
             <label for="default-llm-select">LLM по умолчанию</label>
@@ -78,17 +61,12 @@
             <li v-for="llm in connections.llm" :key="llm.alias" class="alias-item">
               <span class="alias-icon llm">LLM</span>
               <div class="alias-info">
-                <span class="alias-name">
-                  {{ llm.alias }}
-                  <span v-if="llm.managed" class="managed-badge">общий</span>
-                </span>
+                <span class="alias-name">{{ llm.alias }}</span>
                 <span class="alias-meta">{{ llm.model }} · {{ llm.base_url }}</span>
               </div>
               <button class="btn-secondary btn-test" :disabled="isLlmTesting(llm.alias)" @click="testLlm(llm.alias)">
                 {{ isLlmTesting(llm.alias) ? 'Проверка…' : 'Проверить' }}
               </button>
-              <button v-if="!llm.managed" class="btn-secondary btn-test" @click="openLlmForm(llm)">Изменить</button>
-              <button v-if="!llm.managed" class="btn-secondary btn-test danger" @click="removeLlm(llm.alias)">Удалить</button>
               <span
                 v-if="llmStatus(llm.alias) && !isLlmTesting(llm.alias)"
                 class="status-badge"
@@ -106,8 +84,9 @@
           </ul>
           <div v-else class="settings-empty">
             <span class="alias-icon llm">LLM</span>
-            <p class="settings-empty-text">Алиасы LLM не настроены</p>
-            <button type="button" class="btn-primary" @click="openLlmForm()">Добавить</button>
+            <p class="settings-empty-text">Общие алиасы LLM не заданы</p>
+            <router-link v-if="isAdmin" to="/admin" class="btn-primary">Задать в админке</router-link>
+            <p v-else class="settings-empty-hint">Их задаёт администратор</p>
           </div>
         </section>
 
@@ -171,47 +150,6 @@
       <p v-if="error" class="error-msg">{{ error }}</p>
     </div>
 
-    <div v-if="dbFormOpen" class="modal-overlay" @click.self="closeDbForm">
-      <div class="card modal">
-        <div class="panel-title">{{ dbForm.alias && dbFormEditing ? 'Изменить БД' : 'Новый алиас БД' }}</div>
-        <form novalidate @submit.prevent="saveDbForm">
-          <label>Алиас</label>
-          <input v-model="dbForm.alias" :disabled="dbFormEditing" />
-          <label>Драйвер</label>
-          <select v-model="dbForm.driver">
-            <option value="postgresql">postgresql</option>
-            <option value="oracle">oracle</option>
-          </select>
-          <label>Хост</label>
-          <input v-model="dbForm.host" />
-          <label>Порт</label>
-          <input v-model.number="dbForm.port" type="number" />
-          <template v-if="isOracleDriver(dbForm.driver)">
-            <label>SID <span class="label-hint">(опционально)</span></label>
-            <input v-model="dbForm.sid" autocomplete="off" />
-            <label>
-              База / service name
-              <span v-if="dbForm.sid?.trim()" class="label-hint">(необязательно при SID)</span>
-            </label>
-            <input v-model="dbForm.database" autocomplete="off" />
-          </template>
-          <template v-else>
-            <label>База</label>
-            <input v-model="dbForm.database" />
-          </template>
-          <label>Пользователь</label>
-          <input v-model="dbForm.user" />
-          <label>Пароль{{ dbFormEditing ? ' (оставьте пустым, чтобы не менять)' : '' }}</label>
-          <input v-model="dbForm.password" type="password" />
-          <p v-if="dbFormError" class="error-msg">{{ dbFormError }}</p>
-          <div class="modal-actions">
-            <button type="button" class="btn-secondary" @click="closeDbForm">Отмена</button>
-            <button type="submit" class="btn-primary" :disabled="savingForm">Сохранить</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
     <div v-if="gitFormOpen" class="modal-overlay" @click.self="closeGitForm">
       <div class="card modal">
         <div class="panel-title">{{ gitSettings.configured ? 'Изменить Git-токен' : 'Git-токен' }}</div>
@@ -246,49 +184,24 @@
         </form>
       </div>
     </div>
-
-    <div v-if="llmFormOpen" class="modal-overlay" @click.self="closeLlmForm">
-      <div class="card modal">
-        <div class="panel-title">{{ llmForm.alias && llmFormEditing ? 'Изменить LLM' : 'Новый алиас LLM' }}</div>
-        <form @submit.prevent="saveLlmForm">
-          <label>Алиас</label>
-          <input v-model="llmForm.alias" :disabled="llmFormEditing" required />
-          <label>Base URL</label>
-          <input v-model="llmForm.base_url" required placeholder="http://localhost:11434/v1" />
-          <label>Модель</label>
-          <input v-model="llmForm.model" required />
-          <label>API key{{ llmFormEditing ? ' (оставьте пустым, чтобы не менять)' : '' }}</label>
-          <input v-model="llmForm.api_key" type="password" />
-          <label>Timeout (сек)</label>
-          <input v-model.number="llmForm.timeout" type="number" min="1" />
-          <div class="modal-actions">
-            <button type="button" class="btn-secondary" @click="closeLlmForm">Отмена</button>
-            <button type="submit" class="btn-primary" :disabled="savingForm">Сохранить</button>
-          </div>
-        </form>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import {
   getConnections,
   setDefaultLlmAlias,
   testDbConnection,
   testLlmConnection,
-  createDatabaseAlias,
-  updateDatabaseAlias,
-  deleteDatabaseAlias,
-  createLlmAlias,
-  updateLlmAlias,
-  deleteLlmAlias,
   getGitSettings,
   updateGitSettings,
   deleteGitSettings,
   testGitConnection,
 } from '../api/config'
+import { useAuth } from '../composables/useAuth'
+
+const { isAdmin } = useAuth()
 
 const GITLAB_PAT_URL =
   'https://<ВАШ_GITLAB_ХОСТ>/-/user_settings/personal_access_tokens?name=xml-generator&scopes=api&description=Token+for+XML+generator'
@@ -308,40 +221,6 @@ const gitHintOpen = ref(false)
 const savingGitForm = ref(false)
 const gitFormError = ref('')
 const gitForm = ref({ token: '', user: 'oauth2', author_name: '', author_email: '' })
-
-const dbFormOpen = ref(false)
-const llmFormOpen = ref(false)
-const dbFormEditing = ref(false)
-const llmFormEditing = ref(false)
-const savingForm = ref(false)
-const dbFormError = ref('')
-
-const emptyDbForm = () => ({
-  alias: '',
-  driver: 'postgresql',
-  host: 'localhost',
-  port: 5432,
-  database: '',
-  user: '',
-  password: '',
-  sid: '',
-})
-
-const emptyLlmForm = () => ({
-  alias: '',
-  base_url: 'http://localhost:11434/v1',
-  model: 'gpt-4o-mini',
-  api_key: '',
-  timeout: 120,
-})
-
-const dbForm = reactive(emptyDbForm())
-const llmForm = ref(emptyLlmForm())
-
-function isOracleDriver(driver) {
-  const d = String(driver ?? '').toLowerCase().trim()
-  return d === 'oracle' || d === 'oracledb'
-}
 
 function dbStatus(alias) {
   return dbTests.value[alias] ?? null
@@ -475,124 +354,6 @@ async function saveDefaultLlm() {
   }
 }
 
-function openDbForm(existing = null) {
-  dbFormEditing.value = !!existing
-  dbFormError.value = ''
-  const next = existing
-    ? { ...emptyDbForm(), ...existing, password: '', sid: existing.sid || '' }
-    : emptyDbForm()
-  Object.assign(dbForm, next)
-  dbFormOpen.value = true
-}
-
-function closeDbForm() {
-  dbFormOpen.value = false
-  dbFormError.value = ''
-}
-
-function openLlmForm(existing = null) {
-  llmFormEditing.value = !!existing
-  llmForm.value = existing
-    ? { ...existing, api_key: '' }
-    : emptyLlmForm()
-  llmFormOpen.value = true
-}
-
-function closeLlmForm() {
-  llmFormOpen.value = false
-}
-
-function validateDbForm() {
-  const sid = String(dbForm.sid ?? '').trim()
-  const database = String(dbForm.database ?? '').trim()
-
-  if (!dbForm.alias?.trim()) return 'Укажите алиас'
-  if (!dbForm.host?.trim()) return 'Укажите хост'
-  if (!dbForm.port) return 'Укажите порт'
-  if (isOracleDriver(dbForm.driver)) {
-    if (!database && !sid) return 'Укажите базу / service name или SID'
-  } else if (!database) {
-    return 'Укажите базу'
-  }
-  if (!dbForm.user?.trim()) return 'Укажите пользователя'
-  if (!dbFormEditing.value && !dbForm.password) return 'Укажите пароль'
-  return ''
-}
-
-async function saveDbForm() {
-  dbFormError.value = ''
-  const validationError = validateDbForm()
-  if (validationError) {
-    dbFormError.value = validationError
-    return
-  }
-  savingForm.value = true
-  error.value = ''
-  try {
-    const payload = { ...dbForm }
-    if (!payload.sid?.trim()) payload.sid = null
-    else payload.sid = payload.sid.trim()
-    if (dbFormEditing.value) {
-      const { alias, password, ...rest } = payload
-      const update = { ...rest }
-      if (password) update.password = password
-      await updateDatabaseAlias(alias, update)
-    } else {
-      await createDatabaseAlias(payload)
-    }
-    await loadConnections()
-    closeDbForm()
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    savingForm.value = false
-  }
-}
-
-async function saveLlmForm() {
-  savingForm.value = true
-  error.value = ''
-  try {
-    const payload = { ...llmForm.value }
-    if (llmFormEditing.value) {
-      const { alias, api_key, ...rest } = payload
-      const update = { ...rest }
-      if (api_key) update.api_key = api_key
-      await updateLlmAlias(alias, update)
-    } else {
-      await createLlmAlias(payload)
-    }
-    await loadConnections()
-    closeLlmForm()
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    savingForm.value = false
-  }
-}
-
-async function removeDb(alias) {
-  if (!confirm(`Удалить алиас БД «${alias}»?`)) return
-  error.value = ''
-  try {
-    await deleteDatabaseAlias(alias)
-    await loadConnections()
-  } catch (e) {
-    error.value = e.message
-  }
-}
-
-async function removeLlm(alias) {
-  if (!confirm(`Удалить алиас LLM «${alias}»?`)) return
-  error.value = ''
-  try {
-    await deleteLlmAlias(alias)
-    await loadConnections()
-  } catch (e) {
-    error.value = e.message
-  }
-}
-
 onMounted(async () => {
   try {
     await loadConnections()
@@ -647,11 +408,6 @@ code {
   color: var(--text-muted);
 }
 
-.btn-small {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
 .default-llm-field {
   display: flex;
   flex-direction: column;
@@ -694,17 +450,6 @@ code {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.managed-badge {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  padding: 2px 6px;
-  border-radius: 4px;
 }
 
 .alias-meta {
@@ -820,6 +565,16 @@ code {
   color: var(--text-muted);
 }
 
+.settings-empty-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.settings-empty :deep(.btn-primary) {
+  text-decoration: none;
+}
+
 .loading {
   color: var(--text-muted);
   font-size: 14px;
@@ -848,11 +603,6 @@ code {
   font-size: 13px;
   margin-top: 10px;
   margin-bottom: 4px;
-}
-
-.label-hint {
-  font-weight: 400;
-  color: var(--text-muted);
 }
 
 .modal input,

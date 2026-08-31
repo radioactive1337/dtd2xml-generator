@@ -30,6 +30,7 @@ APP_CONFIG_EXAMPLE = CONFIG_DIR / "app.json.example"
 USER_CONNECTIONS_TEMPLATE = CONFIG_DIR / "connections.json.example"
 
 MANAGED_ALIAS_DETAIL = "Алиас задан администратором"
+USER_ALIAS_FORBIDDEN_DETAIL = "Алиасы БД и LLM задаёт только администратор"
 
 DEV_USER_ID = "dev-local"
 
@@ -315,20 +316,9 @@ def ensure_app_config() -> None:
         )
 
 
-def load_connections(user: "UserContext") -> ConnectionsConfig:
-    user_raw = _load_raw_user_connections(user)
-    shared_raw = _load_raw_shared_connections()
-    databases: dict[str, DatabaseConfig] = {}
-    for alias, cfg in user_raw.get("databases", {}).items():
-        databases[alias] = DatabaseConfig(alias=alias, **cfg)
-    for alias, cfg in shared_raw.get("databases", {}).items():
-        databases[alias] = DatabaseConfig(alias=alias, **cfg)
-    llm: dict[str, LLMConfig] = {}
-    for alias, cfg in user_raw.get("llm", {}).items():
-        llm[alias] = LLMConfig(alias=alias, **cfg)
-    for alias, cfg in shared_raw.get("llm", {}).items():
-        llm[alias] = LLMConfig(alias=alias, **cfg)
-    return ConnectionsConfig(databases=databases, llm=llm)
+def load_connections(_user: "UserContext") -> ConnectionsConfig:
+    """DB/LLM aliases are shared (admin-managed). Git stays per-user."""
+    return load_shared_connections()
 
 
 def get_default_llm_alias(user: "UserContext") -> str | None:
@@ -387,18 +377,12 @@ def resolve_llm_alias(user: "UserContext", alias: str | None = None) -> str:
 def get_llm_api_key(user: "UserContext", alias: str = "default") -> str:
     resolved = resolve_llm_alias(user, alias)
     shared_raw = _load_raw_shared_connections()
-    if resolved in shared_raw.get("llm", {}):
-        return shared_raw["llm"][resolved].get("api_key", "")
-    raw = _load_raw_user_connections(user)
-    return raw.get("llm", {}).get(resolved, {}).get("api_key", "")
+    return shared_raw.get("llm", {}).get(resolved, {}).get("api_key", "")
 
 
-def get_db_password(user: "UserContext", alias: str) -> str:
+def get_db_password(_user: "UserContext", alias: str) -> str:
     shared_raw = _load_raw_shared_connections()
-    if alias in shared_raw.get("databases", {}):
-        return shared_raw["databases"][alias].get("password", "")
-    raw = _load_raw_user_connections(user)
-    return raw.get("databases", {}).get(alias, {}).get("password", "")
+    return shared_raw.get("databases", {}).get(alias, {}).get("password", "")
 
 
 def has_oracle_databases(user: "UserContext") -> bool:
@@ -455,20 +439,20 @@ def get_ora_tzfile() -> str | None:
 
 def get_connection_aliases(user: "UserContext") -> dict[str, list[str] | str | None]:
     connections = load_connections(user)
-    shared_db = get_shared_db_aliases()
-    shared_llm = get_shared_llm_aliases()
     default_llm: str | None = None
     try:
         default_llm = get_default_llm_alias(user)
     except ValueError:
         default_llm = None
 
+    db_aliases = list(connections.databases.keys())
+    llm_aliases = list(connections.llm.keys())
     return {
-        "databases": list(connections.databases.keys()),
-        "llm": list(connections.llm.keys()),
+        "databases": db_aliases,
+        "llm": llm_aliases,
         "default_llm": default_llm,
-        "managed_databases": sorted(a for a in connections.databases if a in shared_db),
-        "managed_llm": sorted(a for a in connections.llm if a in shared_llm),
+        "managed_databases": sorted(db_aliases),
+        "managed_llm": sorted(llm_aliases),
     }
 
 

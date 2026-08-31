@@ -5,34 +5,27 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.auth.sessions import get_current_user
 from app.config import (
-    DatabaseConfig,
-    LLMConfig,
-    MANAGED_ALIAS_DETAIL,
+    USER_ALIAS_FORBIDDEN_DETAIL,
     clear_user_git_settings,
     get_connection_aliases,
     get_reference_xml_settings,
-    get_shared_db_aliases,
-    get_shared_llm_aliases,
     get_user_git_author_email,
     get_user_git_author_name,
     get_user_git_user,
-    is_managed_db_alias,
-    is_managed_llm_alias,
     load_connections,
     reference_xml_requires_https_token,
     resolve_git_auth,
-    save_user_connections_raw,
     save_user_git_settings,
     set_default_llm_alias,
     user_git_author_configured,
     user_git_configured,
-    _load_raw_user_connections,
 )
 from app.services.db_service import DBService
 from app.services.git_identity_service import fetch_git_author_identity
@@ -149,14 +142,8 @@ def _validate_alias(alias: str) -> str:
     return name
 
 
-def _managed_db_conflict(alias: str) -> None:
-    if is_managed_db_alias(alias):
-        raise HTTPException(status_code=409, detail=MANAGED_ALIAS_DETAIL)
-
-
-def _managed_llm_conflict(alias: str) -> None:
-    if is_managed_llm_alias(alias):
-        raise HTTPException(status_code=409, detail=MANAGED_ALIAS_DETAIL)
+def _forbid_user_alias_write() -> NoReturn:
+    raise HTTPException(status_code=403, detail=USER_ALIAS_FORBIDDEN_DETAIL)
 
 
 @router.get("/connections", response_model=ConnectionsResponse)
@@ -165,8 +152,6 @@ async def get_connections(
 ) -> ConnectionsResponse:
     connections = load_connections(user)
     aliases = get_connection_aliases(user)
-    shared_db = get_shared_db_aliases()
-    shared_llm = get_shared_llm_aliases()
     return ConnectionsResponse(
         databases=[
             DatabaseAliasResponse(
@@ -177,7 +162,7 @@ async def get_connections(
                 database=cfg.database,
                 user=cfg.user,
                 sid=cfg.sid,
-                managed=cfg.alias in shared_db,
+                managed=True,
             )
             for cfg in connections.databases.values()
         ],
@@ -187,7 +172,7 @@ async def get_connections(
                 base_url=cfg.base_url,
                 model=cfg.model,
                 timeout=cfg.timeout,
-                managed=cfg.alias in shared_llm,
+                managed=True,
             )
             for cfg in connections.llm.values()
         ],
@@ -207,28 +192,7 @@ async def create_database_alias(
     body: DatabaseCreateRequest,
     user: UserContext = Depends(get_current_user),
 ) -> DatabaseAliasResponse:
-    alias = _validate_alias(body.alias)
-    _managed_db_conflict(alias)
-    raw = _load_raw_user_connections(user)
-    databases = raw.setdefault("databases", {})
-    if alias in databases:
-        raise HTTPException(status_code=409, detail=f"Database alias '{alias}' already exists")
-
-    entry = body.model_dump(exclude_none=True)
-    entry.pop("alias", None)
-    databases[alias] = entry
-    save_user_connections_raw(user, raw)
-
-    cfg = DatabaseConfig(alias=alias, **entry)
-    return DatabaseAliasResponse(
-        alias=cfg.alias,
-        driver=cfg.driver,
-        host=cfg.host,
-        port=cfg.port,
-        database=cfg.database,
-        user=cfg.user,
-        sid=cfg.sid,
-    )
+    _forbid_user_alias_write()
 
 
 @router.put("/databases/{alias}", response_model=DatabaseAliasResponse)
@@ -237,31 +201,7 @@ async def update_database_alias(
     body: DatabaseUpdateRequest,
     user: UserContext = Depends(get_current_user),
 ) -> DatabaseAliasResponse:
-    alias = _validate_alias(alias)
-    _managed_db_conflict(alias)
-    raw = _load_raw_user_connections(user)
-    databases = raw.setdefault("databases", {})
-    if alias not in databases:
-        raise HTTPException(status_code=404, detail=f"Database alias '{alias}' not found")
-
-    current = dict(databases[alias])
-    updates = body.model_dump(exclude_unset=True)
-    if "password" in updates and updates["password"] is None:
-        updates.pop("password")
-    current.update({k: v for k, v in updates.items() if v is not None})
-    databases[alias] = current
-    save_user_connections_raw(user, raw)
-
-    cfg = DatabaseConfig(alias=alias, **current)
-    return DatabaseAliasResponse(
-        alias=cfg.alias,
-        driver=cfg.driver,
-        host=cfg.host,
-        port=cfg.port,
-        database=cfg.database,
-        user=cfg.user,
-        sid=cfg.sid,
-    )
+    _forbid_user_alias_write()
 
 
 @router.delete("/databases/{alias}")
@@ -269,15 +209,7 @@ async def delete_database_alias(
     alias: str,
     user: UserContext = Depends(get_current_user),
 ) -> dict[str, str]:
-    alias = _validate_alias(alias)
-    _managed_db_conflict(alias)
-    raw = _load_raw_user_connections(user)
-    databases = raw.get("databases", {})
-    if alias not in databases:
-        raise HTTPException(status_code=404, detail=f"Database alias '{alias}' not found")
-    del raw["databases"][alias]
-    save_user_connections_raw(user, raw)
-    return {"status": "deleted", "alias": alias}
+    _forbid_user_alias_write()
 
 
 @router.post("/llm", response_model=LlmAliasResponse)
@@ -285,25 +217,7 @@ async def create_llm_alias(
     body: LlmCreateRequest,
     user: UserContext = Depends(get_current_user),
 ) -> LlmAliasResponse:
-    alias = _validate_alias(body.alias)
-    _managed_llm_conflict(alias)
-    raw = _load_raw_user_connections(user)
-    llm = raw.setdefault("llm", {})
-    if alias in llm:
-        raise HTTPException(status_code=409, detail=f"LLM alias '{alias}' already exists")
-
-    entry = body.model_dump(exclude_none=True)
-    entry.pop("alias", None)
-    llm[alias] = entry
-    save_user_connections_raw(user, raw)
-
-    cfg = LLMConfig(alias=alias, **entry)
-    return LlmAliasResponse(
-        alias=cfg.alias,
-        base_url=cfg.base_url,
-        model=cfg.model,
-        timeout=cfg.timeout,
-    )
+    _forbid_user_alias_write()
 
 
 @router.put("/llm/{alias}", response_model=LlmAliasResponse)
@@ -312,28 +226,7 @@ async def update_llm_alias(
     body: LlmUpdateRequest,
     user: UserContext = Depends(get_current_user),
 ) -> LlmAliasResponse:
-    alias = _validate_alias(alias)
-    _managed_llm_conflict(alias)
-    raw = _load_raw_user_connections(user)
-    llm = raw.setdefault("llm", {})
-    if alias not in llm:
-        raise HTTPException(status_code=404, detail=f"LLM alias '{alias}' not found")
-
-    current = dict(llm[alias])
-    updates = body.model_dump(exclude_unset=True)
-    if "api_key" in updates and updates["api_key"] is None:
-        updates.pop("api_key")
-    current.update({k: v for k, v in updates.items() if v is not None})
-    llm[alias] = current
-    save_user_connections_raw(user, raw)
-
-    cfg = LLMConfig(alias=alias, **current)
-    return LlmAliasResponse(
-        alias=cfg.alias,
-        base_url=cfg.base_url,
-        model=cfg.model,
-        timeout=cfg.timeout,
-    )
+    _forbid_user_alias_write()
 
 
 @router.delete("/llm/{alias}")
@@ -341,15 +234,7 @@ async def delete_llm_alias(
     alias: str,
     user: UserContext = Depends(get_current_user),
 ) -> dict[str, str]:
-    alias = _validate_alias(alias)
-    _managed_llm_conflict(alias)
-    raw = _load_raw_user_connections(user)
-    llm = raw.get("llm", {})
-    if alias not in llm:
-        raise HTTPException(status_code=404, detail=f"LLM alias '{alias}' not found")
-    llm.pop(alias)
-    save_user_connections_raw(user, raw)
-    return {"status": "deleted", "alias": alias}
+    _forbid_user_alias_write()
 
 
 @router.post("/test-db", response_model=ConnectionTestResponse)

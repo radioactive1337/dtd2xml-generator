@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.auth.users import get_admin_user
 from app.config import (
-    MANAGED_ALIAS_DETAIL,
+    USER_ALIAS_FORBIDDEN_DETAIL,
     get_db_password,
     get_llm_api_key,
     _save_raw_shared_connections,
@@ -78,11 +78,11 @@ def test_shared_db_alias_visible_to_all_users(
     assert "SHARED_PG" in aliases_b["managed_databases"]
 
 
-def test_personal_aliases_still_isolated(
+def test_user_cannot_create_personal_db_alias(
     user_a_client: TestClient,
     user_b_client: TestClient,
 ):
-    user_a_client.post(
+    response = user_a_client.post(
         "/api/config/databases",
         json={
             "alias": "PERSONAL_A",
@@ -94,13 +94,13 @@ def test_personal_aliases_still_isolated(
             "password": "p",
         },
     )
+    assert response.status_code == 403
+    assert response.json()["detail"] == USER_ALIAS_FORBIDDEN_DETAIL
 
     aliases_a = user_a_client.get("/api/config/aliases").json()
     aliases_b = user_b_client.get("/api/config/aliases").json()
-
-    assert "PERSONAL_A" in aliases_a["databases"]
+    assert "PERSONAL_A" not in aliases_a["databases"]
     assert "PERSONAL_A" not in aliases_b["databases"]
-    assert "PERSONAL_A" not in aliases_a.get("managed_databases", [])
 
 
 def test_user_cannot_create_conflicting_shared_db_alias(
@@ -121,8 +121,8 @@ def test_user_cannot_create_conflicting_shared_db_alias(
             "password": "p",
         },
     )
-    assert response.status_code == 409
-    assert response.json()["detail"] == MANAGED_ALIAS_DETAIL
+    assert response.status_code == 403
+    assert response.json()["detail"] == USER_ALIAS_FORBIDDEN_DETAIL
 
 
 def test_user_cannot_modify_or_delete_shared_alias(user_a_client: TestClient):
@@ -132,12 +132,12 @@ def test_user_cannot_modify_or_delete_shared_alias(user_a_client: TestClient):
         "/api/config/databases/PROD",
         json={"host": "evil"},
     )
-    assert update.status_code == 409
-    assert update.json()["detail"] == MANAGED_ALIAS_DETAIL
+    assert update.status_code == 403
+    assert update.json()["detail"] == USER_ALIAS_FORBIDDEN_DETAIL
 
     delete = user_a_client.delete("/api/config/databases/PROD")
-    assert delete.status_code == 409
-    assert delete.json()["detail"] == MANAGED_ALIAS_DETAIL
+    assert delete.status_code == 403
+    assert delete.json()["detail"] == USER_ALIAS_FORBIDDEN_DETAIL
 
 
 def test_shared_secrets_resolved_for_user(user_a_client: TestClient):
@@ -176,17 +176,28 @@ def test_shared_secrets_resolved_for_user(user_a_client: TestClient):
     assert get_llm_api_key(ctx, "corp") == "overlay-api-key"
 
 
-def test_shared_overrides_personal_alias_name(user_a_client: TestClient):
-    user_a_client.post(
-        "/api/config/databases",
-        json={
-            "alias": "PROD",
-            "driver": "postgresql",
-            "host": "personal-host",
-            "port": 5432,
-            "database": "db",
-            "user": "u",
-            "password": "personal",
+def test_personal_alias_in_user_file_is_ignored(user_a_client: TestClient):
+    from app.auth.users import get_user_by_id
+    from app.config import _save_raw_user_connections
+    from app.user_context import user_context_from_record
+
+    me = user_a_client.get("/api/auth/me").json()
+    user = get_user_by_id(me["id"])
+    assert user is not None
+    ctx = user_context_from_record(user)
+    _save_raw_user_connections(
+        ctx,
+        {
+            "databases": {
+                "PROD": {
+                    "driver": "postgresql",
+                    "host": "personal-host",
+                    "port": 5432,
+                    "database": "db",
+                    "user": "u",
+                    "password": "personal",
+                }
+            }
         },
     )
     _seed_shared_db("PROD", password="shared-wins")
