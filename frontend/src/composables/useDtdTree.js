@@ -50,13 +50,20 @@ export function useDtdTree(props, emit) {
     }
   }
 
-  function refreshScrollerLayout() {
+  function refreshScrollerLayout({ resetScroll = false } = {}) {
     nextTick(() => {
       const scroller = scrollerRef.value
       if (!scroller) return
-      scroller.scrollToItem?.(0)
+      const el = scroller.$el
+      const savedTop = el?.scrollTop ?? 0
       scroller.updateVisibleItems?.(true)
-      window.dispatchEvent(new Event('resize'))
+      if (resetScroll) {
+        scroller.scrollToItem?.(0)
+        return
+      }
+      if (el && el.scrollTop !== savedTop) {
+        el.scrollTop = savedTop
+      }
     })
   }
 
@@ -181,7 +188,7 @@ export function useDtdTree(props, emit) {
       })
       treeRoot.value.expanded = true
       flatNodes.value = flattenVisible(treeRoot.value)
-      refreshScrollerLayout()
+      refreshScrollerLayout({ resetScroll: true })
       return true
     } catch {
       if (!isStale(seq)) {
@@ -210,7 +217,6 @@ export function useDtdTree(props, emit) {
 
     const seq = loadSeq
     if (!node._loaded && node._refName) {
-      beginLoad('Загрузка ветки…')
       try {
         const data = await getElementTree(props.schemaId, node._refName)
         if (seq !== loadSeq) return
@@ -218,8 +224,6 @@ export function useDtdTree(props, emit) {
         syncCheckedFromPaths(treeRoot.value, checkedPaths.value)
       } catch {
         if (seq === loadSeq) node.hasChildren = false
-      } finally {
-        endLoad(seq)
       }
     }
 

@@ -12,7 +12,7 @@
     <div class="scroller-wrap">
       <RecycleScroller
         ref="scrollerRef"
-        v-show="flatNodes.length && !loading"
+        v-show="flatNodes.length"
         class="scroller"
         :items="flatNodes"
         :item-size="32"
@@ -29,7 +29,7 @@
         />
       </RecycleScroller>
 
-      <div v-if="loading || !flatNodes.length" class="scroller-hint">
+      <div v-if="!flatNodes.length" class="scroller-hint">
         <template v-if="loading">
           <span class="tree-spinner" aria-hidden="true" />
           <span>{{ loadingMessage }}</span>
