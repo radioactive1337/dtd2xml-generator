@@ -130,7 +130,7 @@ defineExpose({ dtdTreeRef })
 .structure-tab {
   min-height: 0;
   min-width: 0;
-  height: 100%;
+  flex: 1 1 0;
   overflow: hidden;
 }
 
@@ -138,6 +138,7 @@ defineExpose({ dtdTreeRef })
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .mode-segment {
@@ -215,8 +216,8 @@ defineExpose({ dtdTreeRef })
 }
 
 .structure-tree-host :deep(.scroller-wrap) {
-  flex: 1 1 auto;
-  min-height: 240px;
+  flex: 1 1 0;
+  min-height: 0;
   min-width: 0;
 }
 </style>

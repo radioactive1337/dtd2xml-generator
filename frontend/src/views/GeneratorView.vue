@@ -397,6 +397,8 @@ function runCompareAndFocusTab() {
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .col-divider {

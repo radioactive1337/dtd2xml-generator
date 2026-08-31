@@ -145,26 +145,31 @@ defineExpose({ applyXmlElementPaths, revealElement })
 }
 
 .scroller-wrap {
-  flex: 1 1 auto;
-  min-height: 360px;
+  flex: 1 1 0;
+  min-height: 0;
   min-width: 0;
   position: relative;
+  overflow: hidden;
 }
 
 .scroller {
-  height: 100%;
-  width: 100%;
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
   min-width: 0;
   min-height: 0;
 }
 
 .scroller :deep(.vue-recycle-scroller__item-wrapper) {
   overflow: hidden;
+  flex: none;
 }
 
 .scroller :deep(.vue-recycle-scroller__item-view) {
   overflow: hidden;
   box-sizing: border-box;
+  height: 32px;
 }
 
 .scroller-hint {

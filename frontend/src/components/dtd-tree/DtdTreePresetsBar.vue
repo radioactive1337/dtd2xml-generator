@@ -57,6 +57,7 @@ function onPresetSelect(event) {
   margin-bottom: 8px;
   flex-wrap: wrap;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .tree-actions {
