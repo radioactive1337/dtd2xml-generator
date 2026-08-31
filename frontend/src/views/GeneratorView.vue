@@ -123,6 +123,7 @@
         </div>
 
         <GeneratorActionFooter
+          :active-tab="activeTab"
           :can-generate="canGenerate"
           :generating="generating"
           :xml-text="xmlText"

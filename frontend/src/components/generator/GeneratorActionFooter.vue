@@ -1,21 +1,23 @@
 <template>
-  <div class="left-sticky-footer">
-    <div class="action-stack">
+  <div v-if="showFooter" class="left-sticky-footer">
+    <div v-if="activeTab === 'structure'" class="action-stack">
       <button class="btn-primary action-primary" :disabled="!canGenerate || generating" @click="$emit('generate')">
         {{ generating ? 'Генерация…' : 'Сгенерировать XML' }}
       </button>
-      <div class="action-secondary">
-        <button
-          class="btn-secondary"
-          :disabled="!xmlText || filling || hasMappingBlockers"
-          @click="$emit('fill')"
-        >
-          {{ filling ? 'Заполнение…' : 'Заполнить данными' }}
-        </button>
-        <button class="btn-secondary" :disabled="!canValidate || validating" @click="$emit('validate')">
-          {{ validating ? 'Проверка…' : 'Проверить по DTD' }}
-        </button>
-      </div>
+    </div>
+    <div v-else-if="activeTab === 'data'" class="action-stack">
+      <button
+        class="btn-primary action-primary"
+        :disabled="!xmlText || filling || hasMappingBlockers"
+        @click="$emit('fill')"
+      >
+        {{ filling ? 'Заполнение…' : 'Заполнить данными' }}
+      </button>
+    </div>
+    <div v-else-if="activeTab === 'results'" class="action-stack">
+      <button class="btn-primary action-primary" :disabled="!canValidate || validating" @click="$emit('validate')">
+        {{ validating ? 'Проверка…' : 'Проверить по DTD' }}
+      </button>
     </div>
 
     <div v-if="filling" class="fill-progress" role="status" aria-live="polite">
@@ -42,7 +44,10 @@
 </template>
 
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
+  activeTab: { type: String, default: 'structure' },
   canGenerate: { type: Boolean, default: false },
   generating: { type: Boolean, default: false },
   xmlText: { type: String, default: '' },
@@ -57,6 +62,12 @@ defineProps({
 })
 
 defineEmits(['generate', 'fill', 'validate', 'cancel-fill'])
+
+const ACTION_TABS = new Set(['structure', 'data', 'results'])
+
+const showFooter = computed(() =>
+  ACTION_TABS.has(props.activeTab) || props.filling || Boolean(props.error),
+)
 </script>
 
 <style scoped>
@@ -78,16 +89,6 @@ defineEmits(['generate', 'fill', 'validate', 'cancel-fill'])
 
 .action-primary {
   width: 100%;
-}
-
-.action-secondary {
-  display: flex;
-  gap: 8px;
-}
-
-.action-secondary > button {
-  flex: 1;
-  min-width: 0;
 }
 
 .fill-progress {
