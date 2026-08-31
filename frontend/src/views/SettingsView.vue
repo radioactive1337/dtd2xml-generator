@@ -221,6 +221,10 @@
           <label>
             Token{{ gitSettings.configured ? ' (оставьте пустым, чтобы не менять)' : '' }}
           </label>
+          <p class="hint inner-hint">
+            <a :href="GITLAB_PAT_URL" target="_blank" rel="noopener noreferrer">Создать токен</a>
+            — нажмите Create token, вставьте сюда.
+          </p>
           <input v-model="gitForm.token" type="password" autocomplete="off" />
           <label>Имя в коммитах</label>
           <input v-model="gitForm.author_name" placeholder="Как в GitLab" />
@@ -285,6 +289,9 @@ import {
   deleteGitSettings,
   testGitConnection,
 } from '../api/config'
+
+const GITLAB_PAT_URL =
+  'https://<ВАШ_GITLAB_ХОСТ>/-/user_settings/personal_access_tokens?name=xml-generator&scopes=api&description=Token+for+XML+generator'
 
 const connections = ref({ databases: [], llm: [], default_llm: null })
 const defaultLlmAlias = ref('')
