@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.core.dtd_exporter import export_flat_dtd
 from app.core.dtd_models import DTDSchema
-from app.core.xml_dtd_normalize import normalize_xml_for_dtd_validation
+from app.core.xml_dtd_normalize import normalize_xml_for_dtd_validation, tree_has_namespaces
 
 _compiled_dtd_cache: dict[int, etree.DTD] = {}
 _dtd_cache_lock = threading.Lock()
@@ -84,9 +84,13 @@ def validate_xml(xml_text: str, schema: DTDSchema) -> ValidationResult:
         )
 
     # Normalization strips sourceline info from elements (lxml sets it read-only during
-    # parsing only). Skip it when no namespace prefixes are present — which covers
-    # virtually all DTD-validated XML — so error_log entries get correct line numbers.
-    validation_root = normalize_xml_for_dtd_validation(root) if root.nsmap else root
+    # parsing only). Skip it when no namespace prefixes are present anywhere in the
+    # tree — which covers virtually all DTD-validated XML — so error_log entries get
+    # correct line numbers. Namespaces can be declared on a descendant rather than the
+    # root (e.g. <PayDoc><cs:add-object xmlns:cs="...">), so check the whole tree.
+    validation_root = (
+        normalize_xml_for_dtd_validation(root) if tree_has_namespaces(root) else root
+    )
 
     try:
         dtd.assertValid(validation_root)

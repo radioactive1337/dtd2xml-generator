@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.config import USER_ALIAS_FORBIDDEN_DETAIL
 from tests.conftest import login_as
 
 
-def test_create_and_list_database_alias(auth_client: TestClient):
+def test_user_cannot_create_database_alias(auth_client: TestClient):
     login_as(auth_client, "config_user", create=True)
 
     create = auth_client.post(
@@ -22,17 +23,12 @@ def test_create_and_list_database_alias(auth_client: TestClient):
             "password": "secret",
         },
     )
-    assert create.status_code == 200
-    data = create.json()
-    assert data["alias"] == "MY_DB"
-    assert "password" not in data
-
-    connections = auth_client.get("/api/config/connections").json()
-    aliases = [db["alias"] for db in connections["databases"]]
-    assert "MY_DB" in aliases
+    assert create.status_code == 403
+    assert create.json()["detail"] == USER_ALIAS_FORBIDDEN_DETAIL
+    assert "MY_DB" not in auth_client.get("/api/config/aliases").json()["databases"]
 
 
-def test_create_llm_alias_without_leaking_secret(auth_client: TestClient):
+def test_user_cannot_create_llm_alias(auth_client: TestClient):
     login_as(auth_client, "llm_user", create=True)
 
     response = auth_client.post(
@@ -45,31 +41,16 @@ def test_create_llm_alias_without_leaking_secret(auth_client: TestClient):
             "timeout": 120,
         },
     )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["alias"] == "OLLAMA"
-    assert "api_key" not in body
-    assert "top-secret" not in str(body)
+    assert response.status_code == 403
+    assert response.json()["detail"] == USER_ALIAS_FORBIDDEN_DETAIL
+    assert "OLLAMA" not in auth_client.get("/api/config/aliases").json()["llm"]
 
 
-def test_delete_database_alias(auth_client: TestClient):
+def test_user_cannot_delete_database_alias(auth_client: TestClient):
     login_as(auth_client, "del_user", create=True)
-    auth_client.post(
-        "/api/config/databases",
-        json={
-            "alias": "TMP",
-            "driver": "postgresql",
-            "host": "localhost",
-            "port": 5432,
-            "database": "db",
-            "user": "u",
-            "password": "p",
-        },
-    )
     delete = auth_client.delete("/api/config/databases/TMP")
-    assert delete.status_code == 200
-    aliases = auth_client.get("/api/config/aliases").json()["databases"]
-    assert "TMP" not in aliases
+    assert delete.status_code == 403
+    assert delete.json()["detail"] == USER_ALIAS_FORBIDDEN_DETAIL
 
 
 def test_git_settings_crud(auth_client: TestClient):

@@ -50,22 +50,28 @@ def test_dtd_schemas_shared_between_users(user_a_client: TestClient, user_b_clie
     assert schema_id in ids_a
 
 
-def test_config_aliases_isolated(user_a_client: TestClient, user_b_client: TestClient):
-    user_a_client.post(
-        "/api/config/databases",
-        json={
-            "alias": "PG_A",
-            "driver": "postgresql",
-            "host": "localhost",
-            "port": 5432,
-            "database": "db",
-            "user": "u",
-            "password": "p",
-        },
+def test_config_aliases_are_shared(user_a_client: TestClient, user_b_client: TestClient):
+    from app.config import _save_raw_shared_connections
+
+    _save_raw_shared_connections(
+        {
+            "databases": {
+                "SHARED_PG": {
+                    "driver": "postgresql",
+                    "host": "localhost",
+                    "port": 5432,
+                    "database": "db",
+                    "user": "u",
+                    "password": "p",
+                }
+            },
+            "llm": {},
+        }
     )
 
     aliases_a = user_a_client.get("/api/config/aliases").json()
     aliases_b = user_b_client.get("/api/config/aliases").json()
 
-    assert "PG_A" in aliases_a["databases"]
-    assert "PG_A" not in aliases_b["databases"]
+    assert "SHARED_PG" in aliases_a["databases"]
+    assert "SHARED_PG" in aliases_b["databases"]
+    assert aliases_a["managed_databases"] == ["SHARED_PG"]

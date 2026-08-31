@@ -347,6 +347,7 @@ def _is_valid_ai_candidate(
     attr_def,
     dot_path: str,
     ruleset,
+    siblings: dict[str, str] | None = None,
 ) -> bool:
     if not candidate:
         return False
@@ -358,6 +359,7 @@ def _is_valid_ai_candidate(
         path=dot_path,
         attr_def=attr_def,
         ruleset=ruleset,
+        siblings=siblings,
     )
     return not any(v.severity == "error" for v in violations)
 
@@ -442,6 +444,7 @@ async def _generate_validated_ai_value(
     attr_def,
     dot_path: str,
     ruleset,
+    siblings: dict[str, str] | None = None,
     cancel_event: asyncio.Event | None = None,
 ) -> str | None:
     """Ask the LLM for a value and validate it, retrying on failure or error."""
@@ -474,6 +477,7 @@ async def _generate_validated_ai_value(
             attr_def=attr_def,
             dot_path=dot_path,
             ruleset=ruleset,
+            siblings=siblings,
         ):
             return candidate
     return None
@@ -515,6 +519,7 @@ def _accept_batch_values(
             attr_def=job.attr_def,
             dot_path=job.dot,
             ruleset=ruleset,
+            siblings=dict(job.element.attrib),
         ):
             accepted.append((job, candidate))
         else:
@@ -606,6 +611,7 @@ async def _run_ai_fill_jobs(
                             attr_def=job.attr_def,
                             dot_path=job.dot,
                             ruleset=ruleset,
+                            siblings=dict(job.element.attrib),
                             cancel_event=cancel_event,
                         )
                     except asyncio.CancelledError:

@@ -11,6 +11,7 @@ import pytest
 from app.config import (
     _find_connections_file,
     _invalidate_app_config_cache,
+    _save_raw_shared_connections,
     ensure_app_config,
     get_app_settings,
     get_connection_aliases,
@@ -25,6 +26,15 @@ from app.config import (
     set_default_llm_alias,
 )
 from app.user_context import UserContext
+
+
+def _write_shared_aliases(config: dict) -> None:
+    _save_raw_shared_connections(
+        {
+            "databases": config.get("databases", {}),
+            "llm": config.get("llm", {}),
+        }
+    )
 
 
 @pytest.fixture
@@ -51,6 +61,7 @@ def connections_file(tmp_path: Path):
     }
     path = tmp_path / "connections.json"
     path.write_text(json.dumps(config), encoding="utf-8")
+    _write_shared_aliases(config)
     return path
 
 
@@ -127,6 +138,7 @@ def test_load_connections_reads_llm_timeout(user_with_connections: UserContext, 
     config = json.loads(path.read_text(encoding="utf-8"))
     config["llm"]["default"]["timeout"] = 600
     path.write_text(json.dumps(config), encoding="utf-8")
+    _write_shared_aliases(config)
 
     connections = load_connections(user_with_connections)
     assert connections.llm["default"].timeout == 600.0
@@ -257,6 +269,7 @@ def test_get_default_llm_alias_uses_only_configured_alias(user_with_connections:
         }
     }
     path.write_text(json.dumps(config), encoding="utf-8")
+    _write_shared_aliases(config)
 
     assert get_default_llm_alias(user_with_connections) == "OLLAMA"
     assert resolve_llm_alias(user_with_connections, "default") == "OLLAMA"
@@ -281,6 +294,7 @@ def test_get_default_llm_alias_honors_app_setting(user_with_connections: UserCon
         },
     }
     path.write_text(json.dumps(config), encoding="utf-8")
+    _write_shared_aliases(config)
 
     assert get_default_llm_alias(user_with_connections) == "PROD_LLM"
     assert resolve_llm_alias(user_with_connections, "default") == "PROD_LLM"
@@ -308,6 +322,7 @@ def test_set_default_llm_alias_persists_in_connections_file(user_with_connection
         },
     }
     path.write_text(json.dumps(config), encoding="utf-8")
+    _write_shared_aliases(config)
 
     assert set_default_llm_alias(user_with_connections, "PROD_LLM") == "PROD_LLM"
     assert get_default_llm_alias(user_with_connections) == "PROD_LLM"

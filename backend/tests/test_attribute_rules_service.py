@@ -180,6 +180,222 @@ def test_deny_copy_patterns():
     assert not rules_svc.is_deny_copy("", ruleset)
 
 
+def test_cross_field_mapped_eq():
+    ruleset = _ruleset(
+        {
+            "rules": [
+                {
+                    "id": "currency-code",
+                    "element": "account",
+                    "attr": "currency-code",
+                    "severity": "error",
+                    "applies_to": ["post_fill"],
+                    "checks": [
+                        {
+                            "type": "cross_field",
+                            "op": "mapped_eq",
+                            "other": "currency",
+                            "map": {"RUB": "643", "USD": "840"},
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    ok = rules_svc.validate_attribute(
+        "account", "currency-code", "643", context="post_fill", ruleset=ruleset,
+        siblings={"currency": "RUB", "currency-code": "643"},
+    )
+    assert ok == []
+
+    bad = rules_svc.validate_attribute(
+        "account", "currency-code", "840", context="post_fill", ruleset=ruleset,
+        siblings={"currency": "RUB", "currency-code": "840"},
+    )
+    assert len(bad) == 1
+
+    # Sibling has no entry in the map: not applicable, must not fail.
+    not_applicable = rules_svc.validate_attribute(
+        "account", "currency-code", "anything", context="post_fill", ruleset=ruleset,
+        siblings={"currency": "CNY", "currency-code": "anything"},
+    )
+    assert not_applicable == []
+
+
+def test_cross_field_regex_if_only_applies_when_sibling_matches():
+    ruleset = _ruleset(
+        {
+            "rules": [
+                {
+                    "id": "contact-value-email",
+                    "element": "contact",
+                    "attr": "value",
+                    "severity": "warning",
+                    "applies_to": ["post_fill"],
+                    "checks": [
+                        {
+                            "type": "cross_field",
+                            "op": "regex_if",
+                            "other": "type",
+                            "when": "email",
+                            "pattern": "^[^@]+@[^@]+$",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    # type=phone: the email regex_if check doesn't apply, no failure even
+    # though "value" isn't an email at all.
+    phone_ok = rules_svc.validate_attribute(
+        "contact", "value", "+79991234567", context="post_fill", ruleset=ruleset,
+        siblings={"type": "phone", "value": "+79991234567"},
+    )
+    assert phone_ok == []
+
+    # type=email with a bad value: must fail.
+    email_bad = rules_svc.validate_attribute(
+        "contact", "value", "not-an-email", context="post_fill", ruleset=ruleset,
+        siblings={"type": "email", "value": "not-an-email"},
+    )
+    assert len(email_bad) == 1
+
+    # type=email with a good value: passes.
+    email_ok = rules_svc.validate_attribute(
+        "contact", "value", "a@b.com", context="post_fill", ruleset=ruleset,
+        siblings={"type": "email", "value": "a@b.com"},
+    )
+    assert email_ok == []
+
+
+def test_cross_field_required_if_and_empty_if():
+    ruleset = _ruleset(
+        {
+            "rules": [
+                {
+                    "id": "raw-required",
+                    "element": "address",
+                    "attr": "raw",
+                    "severity": "warning",
+                    "applies_to": ["post_fill"],
+                    "checks": [
+                        {"type": "cross_field", "op": "required_if", "other": "address-type", "when": "raw"}
+                    ],
+                },
+                {
+                    "id": "raw-empty",
+                    "element": "address",
+                    "attr": "raw",
+                    "severity": "warning",
+                    "applies_to": ["post_fill"],
+                    "checks": [
+                        {"type": "cross_field", "op": "empty_if", "other": "address-type", "when": "structured"}
+                    ],
+                },
+            ]
+        }
+    )
+    assert rules_svc.validate_attribute(
+        "address", "raw", "", context="post_fill", ruleset=ruleset,
+        siblings={"address-type": "raw", "raw": ""},
+    )
+    assert rules_svc.validate_attribute(
+        "address", "raw", "some raw text", context="post_fill", ruleset=ruleset,
+        siblings={"address-type": "structured", "raw": "some raw text"},
+    )
+    assert rules_svc.validate_attribute(
+        "address", "raw", "", context="post_fill", ruleset=ruleset,
+        siblings={"address-type": "structured", "raw": ""},
+    ) == []
+
+
+def test_validate_document_passes_real_sibling_attributes():
+    ruleset = _ruleset(
+        {
+            "rules": [
+                {
+                    "id": "contact-value-email",
+                    "element": "contact",
+                    "attr": "value",
+                    "severity": "error",
+                    "applies_to": ["post_fill"],
+                    "checks": [
+                        {
+                            "type": "cross_field",
+                            "op": "regex_if",
+                            "other": "type",
+                            "when": "email",
+                            "pattern": "^[^@]+@[^@]+$",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    xml = (
+        '<root>'
+        '<contact type="email" value="bad-value"/>'
+        '<contact type="phone" value="also-not-email"/>'
+        "</root>"
+    )
+    report = rules_svc.validate_document(xml, context="post_fill", ruleset=ruleset)
+    assert len(report.errors) == 1
+    assert report.errors[0].value == "bad-value"
+
+
+def test_cross_field_model_validation_requires_op_and_other():
+    with pytest.raises(Exception):
+        AttributeRuleSet.model_validate(
+            {"rules": [{"id": "x", "attr": "value", "checks": [{"type": "cross_field"}]}]}
+        )
+    with pytest.raises(Exception):
+        AttributeRuleSet.model_validate(
+            {
+                "rules": [
+                    {
+                        "id": "x",
+                        "attr": "value",
+                        "checks": [{"type": "cross_field", "op": "eq"}],
+                    }
+                ]
+            }
+        )
+
+
+def test_cross_field_regex_if_requires_pattern_and_when():
+    with pytest.raises(Exception):
+        AttributeRuleSet.model_validate(
+            {
+                "rules": [
+                    {
+                        "id": "x",
+                        "attr": "value",
+                        "checks": [
+                            {"type": "cross_field", "op": "regex_if", "other": "type"}
+                        ],
+                    }
+                ]
+            }
+        )
+
+
+def test_cross_field_mapped_eq_requires_map():
+    with pytest.raises(Exception):
+        AttributeRuleSet.model_validate(
+            {
+                "rules": [
+                    {
+                        "id": "x",
+                        "attr": "value",
+                        "checks": [
+                            {"type": "cross_field", "op": "mapped_eq", "other": "type"}
+                        ],
+                    }
+                ]
+            }
+        )
+
+
 def test_invalid_regex_check_fails_model_validation():
     """A malformed regex must fail fast at rule-parse time, not at validate() time."""
     with pytest.raises(Exception):
