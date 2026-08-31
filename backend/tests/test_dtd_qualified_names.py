@@ -73,43 +73,65 @@ def test_parser_reads_fixed_xmlns_attribute(qualified_dtd_dir: Path):
     assert "http://example.com/cs" in xmlns_attr.default_decl
 
 
-def _cs_schema(qualified_dtd_dir: Path):
-    return DTDParser(base_dir=qualified_dtd_dir).parse_file(qualified_dtd_dir / "cs.dtd")
-
-
-NAMESPACED_ROOT_XML = (
-    '<?xml version="1.0"?>\n'
-    '<cs:add-object xmlns:cs="http://example.com/cs" source="interpay" document_type="d">'
-    "<cs:add-field/>"
-    "</cs:add-object>"
-)
-
-
 def test_validate_namespaced_xml_with_qualified_dtd(qualified_dtd_dir: Path):
-    schema = _cs_schema(qualified_dtd_dir)
-    result = validate_xml(NAMESPACED_ROOT_XML, schema)
+    parser = DTDParser(base_dir=qualified_dtd_dir)
+    root_schema = parser.parse_file(qualified_dtd_dir / "root.dtd")
+    module_schema = parser.parse_file(qualified_dtd_dir / "cs.dtd")
+
+    from app.core.dtd_merge import merge_dtd_schemas
+
+    merged = merge_dtd_schemas([root_schema, module_schema])
+    xml_text = (
+        '<?xml version="1.0"?>\n'
+        '<PayDoc id="doc-1">'
+        '<cs:add-object xmlns:cs="http://example.com/cs" source="interpay" document_type="d">'
+        "<cs:add-field/>"
+        "</cs:add-object>"
+        "</PayDoc>"
+    )
+
+    result = validate_xml(xml_text, merged)
     assert result.valid is True, result.errors
 
 
 def test_validate_rejects_wrong_fixed_xmlns(qualified_dtd_dir: Path):
-    schema = _cs_schema(qualified_dtd_dir)
-    xml_text = NAMESPACED_ROOT_XML.replace(
-        "http://example.com/cs", "http://wrong.example/cs"
+    parser = DTDParser(base_dir=qualified_dtd_dir)
+    root_schema = parser.parse_file(qualified_dtd_dir / "root.dtd")
+    module_schema = parser.parse_file(qualified_dtd_dir / "cs.dtd")
+
+    from app.core.dtd_merge import merge_dtd_schemas
+
+    merged = merge_dtd_schemas([root_schema, module_schema])
+    xml_text = (
+        '<?xml version="1.0"?>\n'
+        '<PayDoc id="doc-1">'
+        '<cs:add-object xmlns:cs="http://wrong.example/cs" source="interpay" document_type="d"/>'
+        "</PayDoc>"
     )
 
-    result = validate_xml(xml_text, schema)
+    result = validate_xml(xml_text, merged)
     assert result.valid is False
     assert any("namespace" in error.message.lower() for error in result.errors)
 
 
 def test_validate_user_xmlns_case(qualified_dtd_dir: Path):
-    schema = _cs_schema(qualified_dtd_dir)
-    invalid_xml = NAMESPACED_ROOT_XML.replace(
-        "http://example.com/cs", "http://evil.example/cs"
-    )
+    parser = DTDParser(base_dir=qualified_dtd_dir)
+    root_schema = parser.parse_file(qualified_dtd_dir / "root.dtd")
+    module_schema = parser.parse_file(qualified_dtd_dir / "cs.dtd")
 
-    assert validate_xml(NAMESPACED_ROOT_XML, schema).valid is True
-    assert validate_xml(invalid_xml, schema).valid is False
+    from app.core.dtd_merge import merge_dtd_schemas
+
+    merged = merge_dtd_schemas([root_schema, module_schema])
+    valid_xml = (
+        '<PayDoc id="doc-1">'
+        '<cs:add-object xmlns:cs="http://example.com/cs" '
+        'source="interpay" document_type="d"><cs:add-field/></cs:add-object>'
+        "</PayDoc>"
+    )
+    invalid_xml = valid_xml.replace("http://example.com/cs", "http://evil.example/cs")
+
+    assert validate_xml(valid_xml, merged).valid is True
+    assert validate_xml(invalid_xml, merged).valid is False
 
 
 def test_dtd_local_name_helper():
@@ -147,13 +169,21 @@ def test_build_xml_qualified_root_element(qualified_dtd_dir: Path):
 
 
 def test_build_xml_qualified_children_under_root(qualified_dtd_dir: Path):
-    schema = _cs_schema(qualified_dtd_dir)
+    from app.core.dtd_merge import merge_dtd_schemas
+
+    parser = DTDParser(base_dir=qualified_dtd_dir)
+    merged = merge_dtd_schemas(
+        [
+            parser.parse_file(qualified_dtd_dir / "root.dtd"),
+            parser.parse_file(qualified_dtd_dir / "cs.dtd"),
+        ]
+    )
 
     result = build_xml(
-        schema,
-        BuildConfig(root_element="cs:add-object", mode="maximal", repeat_count=1),
+        merged,
+        BuildConfig(root_element="PayDoc", mode="maximal", repeat_count=1),
     )
 
     assert "<cs:add-object" in result.xml_text
     assert "<cs:add-field" in result.xml_text
-    assert validate_xml(result.xml_text, schema).valid is True
+    assert validate_xml(result.xml_text, merged).valid is True

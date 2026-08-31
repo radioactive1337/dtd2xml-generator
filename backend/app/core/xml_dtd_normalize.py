@@ -29,6 +29,17 @@ def _own_nsmap(element: etree._Element) -> dict[str | None, str]:
     return own
 
 
+def tree_has_namespaces(root: etree._Element) -> bool:
+    """Detect any namespaced element in the tree, not just the root.
+
+    ``root.nsmap`` only reflects bindings declared on the root itself (or
+    inherited from ancestors), so it misses documents like ``<PayDoc>``
+    where a namespace prefix is only introduced on a descendant element
+    (e.g. ``<cs:add-object xmlns:cs="...">`` nested under a plain root).
+    """
+    return any(isinstance(element.tag, str) and element.tag.startswith("{") for element in root.iter())
+
+
 def normalize_xml_for_dtd_validation(root: etree._Element) -> etree._Element:
     """Return a tree with local element names while preserving declared xmlns bindings."""
 
