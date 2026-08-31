@@ -38,6 +38,14 @@
           >
             Очистить
           </button>
+          <button
+            class="btn-secondary"
+            :disabled="!hasSelection"
+            title="Очистить значения всех атрибутов в выделении (attr=&quot;&quot;)"
+            @click="clearAttributesInSelection"
+          >
+            Очистить значения атрибутов
+          </button>
         </div>
 
         <div class="action-group">
@@ -231,6 +239,7 @@ import { onClickOutside } from '@vueuse/core'
 import loader from '@monaco-editor/loader'
 import { registerXmlFormatter } from '../utils/formatXml'
 import { escapeXmlText, unescapeXmlText } from '../utils/escapeXml'
+import { clearAttributeValues } from '../utils/clearAttributeValues'
 import { readXmlFileAsText } from '../utils/readXmlFile'
 import { peekXmlRootElement } from '../utils/xmlPaths'
 import { formatPushWarningLabel } from '../utils/gitPushWarnings'
@@ -591,6 +600,10 @@ function escapeSelection() {
 
 function unescapeSelection() {
   replaceSelection(unescapeXmlText)
+}
+
+function clearAttributesInSelection() {
+  replaceSelection(clearAttributeValues)
 }
 
 function closeMoreMenu() {

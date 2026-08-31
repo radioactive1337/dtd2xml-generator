@@ -46,6 +46,7 @@ def test_admin_routes_require_admin(auth_client: TestClient):
     assert auth_client.get("/api/admin/stats").status_code == 403
     assert auth_client.get("/api/admin/users").status_code == 403
     assert auth_client.get("/api/admin/backup").status_code == 403
+    assert auth_client.get("/api/admin/connections").status_code == 403
 
 
 def test_admin_stats(auth_client: TestClient):

@@ -19,7 +19,7 @@ from app.auth.users import (
 )
 from app.user_context import UserContext, user_context_from_record
 
-_SAFE_NAME_RE = re.compile(r"^[\w\-. ]+$")
+_SAFE_NAME_RE = re.compile(r"^[\w\-. ()]+$")
 
 
 class SharePresetRequest(BaseModel):

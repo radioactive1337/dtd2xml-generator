@@ -17,6 +17,7 @@ import { useGeneratorSchema } from './useGeneratorSchema'
 import { useGeneratorXml } from './useGeneratorXml'
 import { useGeneratorActions } from './useGeneratorActions'
 import { useGeneratorCompare } from './useGeneratorCompare'
+import { usesDbFill } from '../../utils/fillStrategies'
 
 export function useGenerator() {
   const error = ref('')
@@ -27,9 +28,7 @@ export function useGenerator() {
   const filling = ref(false)
   const validating = ref(false)
 
-  const isHybridStrategy = computed(
-    () => fillStrategy.value === 'hybrid_db_faker' || fillStrategy.value === 'hybrid_db_ai',
-  )
+  const isHybridStrategy = computed(() => usesDbFill(fillStrategy.value))
 
   const { leftWidth, dtdCollapsed, startHResize } = useGeneratorLayout()
   const schema = useGeneratorSchema()

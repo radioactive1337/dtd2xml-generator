@@ -43,12 +43,20 @@ async def generate_xml(
 
     try:
         result = await asyncio.to_thread(build_xml, schema, config)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
         logger.exception(
             "XML generation failed [schema_id=%s root=%s]",
             config.schema_id,
             config.root_element,
         )
+        if isinstance(exc, RecursionError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Не удалось сгенерировать XML: схема DTD слишком глубоко "
+                    "вложена или содержит циклы."
+                ),
+            ) from exc
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     _user_cache(user)[config.schema_id] = result.xml_text

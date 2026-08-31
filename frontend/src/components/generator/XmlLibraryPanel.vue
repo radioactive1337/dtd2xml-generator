@@ -89,13 +89,19 @@
           <button
             type="button"
             class="category-toggle"
+            :class="{ 'category-toggle--current': categoryMatchesCurrentRoot(cat) }"
             :aria-expanded="isCategoryExpanded(cat.name)"
+            :aria-current="categoryMatchesCurrentRoot(cat) ? 'true' : undefined"
             @click="toggleCategory(cat.name)"
           >
             <span class="category-chevron" :class="{ 'category-chevron--open': isCategoryExpanded(cat.name) }">▶</span>
             <span class="category-name" v-html="highlightMatch(cat.name, searchQuery)" />
-            <span v-if="cat.root_element" class="category-root">{{ cat.root_element }}</span>
-            <span class="category-count">({{ cat.document_count }})</span>
+            <span
+              v-if="categoryRootDiffers(cat)"
+              class="category-root"
+              :title="`Корневой элемент: ${cat.root_element}`"
+            >{{ cat.root_element }}</span>
+            <span class="category-count">{{ cat.document_count }}</span>
           </button>
           <ul v-if="isCategoryExpanded(cat.name)" class="doc-list">
             <template v-if="isCategoryLoading(cat.name)">
@@ -105,15 +111,14 @@
               <li
                 v-for="doc in getVisibleDocs(cat.name)"
                 :key="doc.doc_id"
-                class="doc-item"
               >
-                <span class="doc-title" v-html="highlightMatch(doc.title, searchQuery)" />
                 <button
                   type="button"
-                  class="btn-secondary btn-sm"
+                  class="doc-item doc-item--button"
+                  :title="`Открыть «${doc.title}»`"
                   @click="$emit('open-shared', cat.name, doc.doc_id)"
                 >
-                  Открыть
+                  <span class="doc-title" v-html="highlightMatch(doc.title, searchQuery)" />
                 </button>
               </li>
               <li
@@ -199,6 +204,7 @@ const props = defineProps({
   categoryDocuments: { type: Object, default: () => ({}) },
   loadingCategory: { type: String, default: null },
   currentSchemaId: { type: String, default: '' },
+  currentRootElement: { type: String, default: '' },
 })
 
 const emit = defineEmits([
@@ -228,6 +234,25 @@ watch(() => props.activeScope, () => { searchQuery.value = '' })
 
 function normalizeSearch(s) {
   return (s || '').toLowerCase().trim()
+}
+
+function normalizeLabelKey(s) {
+  return (s || '').toLowerCase().replace(/[\s_\-]+/g, '')
+}
+
+function categoryRootDiffers(cat) {
+  const root = cat.root_element
+  if (!root) return false
+  return normalizeLabelKey(cat.name) !== normalizeLabelKey(root)
+}
+
+function categoryMatchesCurrentRoot(cat) {
+  const current = normalizeLabelKey(props.currentRootElement)
+  if (!current) return false
+  return (
+    normalizeLabelKey(cat.name) === current ||
+    normalizeLabelKey(cat.root_element) === current
+  )
 }
 
 function textContains(text, query) {
@@ -279,19 +304,22 @@ watch(
 )
 
 const searchFilteredCategories = computed(() => {
-  const rootFiltered = props.sharedCategories
   const q = normalizeSearch(searchQuery.value)
-  if (!q) return rootFiltered
-
-  return rootFiltered.filter((cat) => {
-    if (textContains(cat.name, q)) return true
-    if (textContains(cat.root_element, q)) return true
-    // Check already-loaded docs for title match
-    const docs = props.categoryDocuments[cat.name]
-    if (docs) return docs.some((d) => textContains(d.title, q))
-    // Category docs not yet loaded — exclude from results by title,
-    // but keep if name/root_element already matched above.
-    return false
+  let list = props.sharedCategories
+  if (q) {
+    list = list.filter((cat) => {
+      if (textContains(cat.name, q)) return true
+      if (textContains(cat.root_element, q)) return true
+      const docs = props.categoryDocuments[cat.name]
+      if (docs) return docs.some((d) => textContains(d.title, q))
+      return false
+    })
+  }
+  if (!normalizeLabelKey(props.currentRootElement)) return list
+  return [...list].sort((a, b) => {
+    const aMatch = categoryMatchesCurrentRoot(a) ? 0 : 1
+    const bMatch = categoryMatchesCurrentRoot(b) ? 0 : 1
+    return aMatch - bMatch
   })
 })
 
@@ -500,7 +528,13 @@ function onSync() {
   text-align: left;
 }
 
+.category-toggle--current {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+}
+
 .category-chevron {
+  flex-shrink: 0;
   font-size: 9px;
   transition: transform 0.15s;
   color: var(--text-muted);
@@ -511,19 +545,27 @@ function onSync() {
 }
 
 .category-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-weight: 500;
 }
 
 .category-root {
+  flex-shrink: 0;
   font-size: 11px;
   color: var(--accent);
   font-family: var(--font-mono);
 }
 
 .category-count {
+  flex-shrink: 0;
+  margin-left: auto;
   color: var(--text-muted);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .doc-list {
@@ -548,6 +590,20 @@ function onSync() {
   background: color-mix(in srgb, var(--surface) 50%, transparent);
 }
 
+.doc-item--button {
+  width: 100%;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.doc-item--button:hover,
+.doc-item--button:focus-visible {
+  background: color-mix(in srgb, var(--surface) 35%, var(--accent) 12%);
+}
+
 .doc-info {
   display: flex;
   flex-direction: column;
@@ -556,6 +612,7 @@ function onSync() {
 }
 
 .doc-title {
+  min-width: 0;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;

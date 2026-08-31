@@ -10,6 +10,7 @@ import pytest
 
 from app.config import (
     _find_connections_file,
+    _invalidate_app_config_cache,
     ensure_app_config,
     get_app_settings,
     get_connection_aliases,
@@ -81,6 +82,7 @@ def app_config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     path.write_text(json.dumps(app_json), encoding="utf-8")
     monkeypatch.setattr("app.config.APP_CONFIG_FILE", path)
     monkeypatch.setattr("app.config.CONFIG_DIR", config_dir)
+    _invalidate_app_config_cache()
     return path
 
 
@@ -162,6 +164,7 @@ def test_oracle_client_lib_dir_treats_json_null_as_unset(
     )
     monkeypatch.setattr("app.config.APP_CONFIG_FILE", path)
     monkeypatch.setattr("app.config.CONFIG_DIR", config_dir)
+    _invalidate_app_config_cache()
 
     assert get_oracle_client_lib_dir() is None
 
@@ -182,6 +185,7 @@ def test_oracle_client_lib_dir_derives_from_linux_oracle_home(
     )
     monkeypatch.setattr("app.config.APP_CONFIG_FILE", path)
     monkeypatch.setattr("app.config.CONFIG_DIR", config_dir)
+    _invalidate_app_config_cache()
 
     assert get_oracle_client_lib_dir() == str(client_dir)
 

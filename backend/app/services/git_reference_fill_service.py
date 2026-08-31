@@ -7,7 +7,7 @@ same root element:
 
 - ``deny_copy`` attributes (PII-ish, e.g. passport/account numbers) are never
   sourced from the corpus at all -- not copied, and not sent to the LLM as
-  few-shot examples either. They're left for the normal Faker/AI stage that
+  few-shot examples either. They're left for the normal AI stage that
   follows, which only ever sees the attribute *name*, never real corpus values.
 - Enum-like / low-cardinality attributes (few distinct values relative to the
   number of reference documents) are copied from the corpus.
@@ -751,7 +751,7 @@ async def populate_from_git(
 
     if skipped_denied:
         warnings.append(
-            "Git fill skipped for privacy-sensitive attributes (left for Faker/AI): "
+            "Git fill skipped for privacy-sensitive attributes (left for AI): "
             + ", ".join(sorted(skipped_denied))
         )
 

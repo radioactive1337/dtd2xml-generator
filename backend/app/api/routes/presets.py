@@ -34,7 +34,7 @@ class PresetData(BaseModel):
 
 
 def _safe_name(name: str) -> str:
-    if not re.match(r"^[\w\-. ]+$", name):
+    if not re.match(r"^[\w\-. ()]+$", name):
         raise HTTPException(status_code=400, detail="Invalid preset name")
     return name
 

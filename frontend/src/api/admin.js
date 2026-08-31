@@ -45,3 +45,48 @@ export async function updateAdminSettings(settings) {
   const { data } = await client.put('/admin/settings', settings)
   return data
 }
+
+export async function fetchAdminConnections() {
+  const { data } = await client.get('/admin/connections')
+  return data
+}
+
+export async function createAdminDatabaseAlias(payload) {
+  const { data } = await client.post('/admin/databases', payload)
+  return data
+}
+
+export async function updateAdminDatabaseAlias(alias, payload) {
+  const { data } = await client.put(`/admin/databases/${encodeURIComponent(alias)}`, payload)
+  return data
+}
+
+export async function deleteAdminDatabaseAlias(alias) {
+  const { data } = await client.delete(`/admin/databases/${encodeURIComponent(alias)}`)
+  return data
+}
+
+export async function createAdminLlmAlias(payload) {
+  const { data } = await client.post('/admin/llm', payload)
+  return data
+}
+
+export async function updateAdminLlmAlias(alias, payload) {
+  const { data } = await client.put(`/admin/llm/${encodeURIComponent(alias)}`, payload)
+  return data
+}
+
+export async function deleteAdminLlmAlias(alias) {
+  const { data } = await client.delete(`/admin/llm/${encodeURIComponent(alias)}`)
+  return data
+}
+
+export async function testAdminDbConnection(alias) {
+  const { data } = await client.post('/admin/test-db', { alias })
+  return data
+}
+
+export async function testAdminLlmConnection(alias) {
+  const { data } = await client.post('/admin/test-llm', { alias })
+  return data
+}

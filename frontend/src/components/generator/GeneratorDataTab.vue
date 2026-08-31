@@ -3,11 +3,10 @@
     <div class="field">
       <label>Стратегия заполнения</label>
       <select :value="fillStrategy" @change="$emit('update:fillStrategy', $event.target.value)">
-        <option value="ai">AI / LLM (контекстная генерация)</option>
-        <option value="hybrid_db_faker">Гибрид: БД + Faker</option>
-        <option value="hybrid_db_ai">Гибрид: БД + AI</option>
-        <option value="hybrid_git_faker">Гибрид: Git-эталоны + Faker</option>
-        <option value="hybrid_git_ai">Гибрид: Git-эталоны + AI</option>
+        <option value="ai">AI</option>
+        <option value="db_ai">БД + AI</option>
+        <option value="git_ai">Git AI</option>
+        <option value="git_ai_db">Git AI + БД</option>
       </select>
     </div>
 
@@ -157,7 +156,7 @@
             </button>
           </span>
         </div>
-        <span class="overrides-hint">Этап 1 — сначала БД, затем Faker/AI</span>
+        <span class="overrides-hint">{{ dbStageHint }}</span>
       </div>
 
       <div v-for="(mapping, mi) in sqlMappings" :key="mi" class="mapping-card">
@@ -228,6 +227,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { formatMappings } from '../../utils/ruPlural'
+import { usesLlmFill, FILL_STRATEGIES } from '../../utils/fillStrategies'
 import { shareMappingPreset } from '../../api/mappingPresets'
 import { translateApiError } from '../../utils/apiErrors'
 import ShareDocumentDialog from './ShareDocumentDialog.vue'
@@ -251,11 +251,12 @@ const props = defineProps({
   fillWarnings: { type: Array, default: () => [] },
 })
 
-const usesLlmStrategy = computed(
-  () =>
-    props.fillStrategy === 'ai' ||
-    props.fillStrategy === 'hybrid_db_ai' ||
-    props.fillStrategy === 'hybrid_git_ai',
+const usesLlmStrategy = computed(() => usesLlmFill(props.fillStrategy))
+
+const dbStageHint = computed(() =>
+  props.fillStrategy === FILL_STRATEGIES.GIT_AI_DB
+    ? 'Сначала БД, затем Git AI, затем AI'
+    : 'Сначала БД, затем AI',
 )
 
 const provenanceEntries = computed(() => Object.entries(props.fillProvenance || {}))

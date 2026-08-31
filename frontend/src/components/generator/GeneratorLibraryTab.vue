@@ -11,6 +11,7 @@
       :category-documents="categoryDocuments"
       :loading-category="loadingCategory"
       :current-schema-id="schemaId"
+      :current-root-element="rootElement"
       @update:active-scope="$emit('update:library-active-scope', $event)"
       @sync="$emit('library-sync')"
       @expand-category="(cat) => $emit('library-expand-category', cat)"
@@ -36,6 +37,7 @@ defineProps({
   categoryDocuments: { type: Object, default: () => ({}) },
   loadingCategory: { type: String, default: null },
   schemaId: { type: String, default: '' },
+  rootElement: { type: String, default: '' },
 })
 
 defineEmits([

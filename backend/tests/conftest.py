@@ -10,9 +10,16 @@ from fastapi.testclient import TestClient
 from app.api.routes import dtd as dtd_routes
 from app.api.routes import generate as generate_routes
 from app.auth.users import _reset_db_connections, init_user_db
-from app.config import is_auth_disabled
+from app.config import _invalidate_app_config_cache, is_auth_disabled
 from app.main import app
 from app.user_context import UserContext
+
+
+@pytest.fixture(autouse=True)
+def _reset_app_config_cache():
+    _invalidate_app_config_cache()
+    yield
+    _invalidate_app_config_cache()
 
 
 @pytest.fixture(autouse=True)

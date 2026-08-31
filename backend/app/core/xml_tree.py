@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import random
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from lxml import etree
 
+from app.core.dtd_models import DTDSchema
+
 if TYPE_CHECKING:
-    from app.core.dtd_models import AttributeDef, DTDSchema
+    from app.core.dtd_models import AttributeDef
 
 ElementPath = tuple[tuple[str, int], ...]
 ProtectedAttrs = frozenset[tuple[ElementPath, str]]
@@ -129,6 +132,36 @@ def is_fillable_attribute_value(
     if constrained := attr_def.dtd_default_value():
         return stripped == constrained
     return False
+
+
+def prefill_empty_enums(xml_text: str, schema: DTDSchema | None) -> tuple[str, int]:
+    """Assign a random allowed value to every empty/placeholder ENUM attribute.
+
+    Runs once before any fill strategy (DB / Git reference / LLM) so none of them
+    have to special-case ENUM attributes that can only hold one of a fixed set of
+    values — by the time they see the XML, ENUM attributes are already valid.
+    """
+    if schema is None:
+        return xml_text, 0
+
+    root = etree.fromstring(xml_text.encode("utf-8"))
+    filled = 0
+    for el in root.iter():
+        elem_def = schema.elements.get(el.tag)
+        if not elem_def:
+            continue
+        for attr_name, attr_value in list(el.attrib.items()):
+            attr_def = elem_def.attributes.get(attr_name)
+            if not attr_def or attr_def.attr_type != "ENUM" or not attr_def.allowed_values:
+                continue
+            if not is_fillable_attribute_value(attr_value, attr_def=attr_def):
+                continue  # already has a valid in-pool value
+            el.set(attr_name, random.choice(attr_def.allowed_values))
+            filled += 1
+
+    if filled == 0:
+        return xml_text, 0
+    return etree.tostring(root, encoding="unicode"), filled
 
 
 MIN_GIT_PUSH_ATTRIBUTE_FILL_RATE = 0.15

@@ -24,14 +24,17 @@
             <li v-for="db in connections.databases" :key="db.alias" class="alias-item">
               <span class="alias-icon">DB</span>
               <div class="alias-info">
-                <span class="alias-name">{{ db.alias }}</span>
+                <span class="alias-name">
+                  {{ db.alias }}
+                  <span v-if="db.managed" class="managed-badge">общий</span>
+                </span>
                 <span class="alias-meta">{{ db.driver }} · {{ db.host }}:{{ db.port }}</span>
               </div>
               <button class="btn-secondary btn-test" :disabled="isDbTesting(db.alias)" @click="testDb(db.alias)">
                 {{ isDbTesting(db.alias) ? 'Проверка…' : 'Проверить' }}
               </button>
-              <button class="btn-secondary btn-test" @click="openDbForm(db)">Изменить</button>
-              <button class="btn-secondary btn-test danger" @click="removeDb(db.alias)">Удалить</button>
+              <button v-if="!db.managed" class="btn-secondary btn-test" @click="openDbForm(db)">Изменить</button>
+              <button v-if="!db.managed" class="btn-secondary btn-test danger" @click="removeDb(db.alias)">Удалить</button>
               <span
                 v-if="dbStatus(db.alias) && !isDbTesting(db.alias)"
                 class="status-badge"
@@ -75,14 +78,17 @@
             <li v-for="llm in connections.llm" :key="llm.alias" class="alias-item">
               <span class="alias-icon llm">LLM</span>
               <div class="alias-info">
-                <span class="alias-name">{{ llm.alias }}</span>
+                <span class="alias-name">
+                  {{ llm.alias }}
+                  <span v-if="llm.managed" class="managed-badge">общий</span>
+                </span>
                 <span class="alias-meta">{{ llm.model }} · {{ llm.base_url }}</span>
               </div>
               <button class="btn-secondary btn-test" :disabled="isLlmTesting(llm.alias)" @click="testLlm(llm.alias)">
                 {{ isLlmTesting(llm.alias) ? 'Проверка…' : 'Проверить' }}
               </button>
-              <button class="btn-secondary btn-test" @click="openLlmForm(llm)">Изменить</button>
-              <button class="btn-secondary btn-test danger" @click="removeLlm(llm.alias)">Удалить</button>
+              <button v-if="!llm.managed" class="btn-secondary btn-test" @click="openLlmForm(llm)">Изменить</button>
+              <button v-if="!llm.managed" class="btn-secondary btn-test danger" @click="removeLlm(llm.alias)">Удалить</button>
               <span
                 v-if="llmStatus(llm.alias) && !isLlmTesting(llm.alias)"
                 class="status-badge"
@@ -215,6 +221,10 @@
           <label>
             Token{{ gitSettings.configured ? ' (оставьте пустым, чтобы не менять)' : '' }}
           </label>
+          <p class="hint inner-hint">
+            <a :href="GITLAB_PAT_URL" target="_blank" rel="noopener noreferrer">Создать токен</a>
+            — нажмите Create token, вставьте сюда.
+          </p>
           <input v-model="gitForm.token" type="password" autocomplete="off" />
           <label>Имя в коммитах</label>
           <input v-model="gitForm.author_name" placeholder="Как в GitLab" />
@@ -279,6 +289,9 @@ import {
   deleteGitSettings,
   testGitConnection,
 } from '../api/config'
+
+const GITLAB_PAT_URL =
+  'https://<ВАШ_GITLAB_ХОСТ>/-/user_settings/personal_access_tokens?name=xml-generator&scopes=api&description=Token+for+XML+generator'
 
 const connections = ref({ databases: [], llm: [], default_llm: null })
 const defaultLlmAlias = ref('')
@@ -675,6 +688,23 @@ code {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.alias-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.managed-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .alias-meta {

@@ -575,7 +575,7 @@ async def apply_db_overrides(
     fill_empty_only: bool = False,
     schema: DTDSchema | None = None,
 ) -> tuple[str, ProtectedAttrs, list[str]]:
-    """Stage-1 of the hybrid pipeline: targeted DB injections before faker/LLM fallback."""
+    """Stage-1 of the fill pipeline: targeted DB injections before Git/LLM."""
     return await DBService(user).apply_overrides(
         xml_text,
         sql_mappings,

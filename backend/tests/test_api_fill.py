@@ -3,12 +3,20 @@
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from lxml import etree
 from pytest import MonkeyPatch
 
 from app.api.routes import dtd as dtd_routes
 from app.core.xml_builder import BuildConfig, build_xml
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+_DB_MAPPING = {
+    "query": "SELECT 1 AS id FROM dual",
+    "target_element": "PayDoc",
+    "fields": {"id": "id"},
+    "db_alias": "TEST_DB",
+}
 
 
 def _dev_user():
@@ -43,83 +51,24 @@ def _skeleton_xml(schema_id: str) -> str:
     return build_xml(schema, BuildConfig(root_element="PayDoc", mode="minimal")).xml_text
 
 
-def test_faker_fill_works_without_llm_aliases(
-    client: TestClient,
-    monkeypatch: MonkeyPatch,
-):
-    _use_empty_user_connections(monkeypatch)
-    schema_id = _upload_fixture(client)
-    xml_text = _skeleton_xml(schema_id)
+def _mock_llm_alias(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.api.routes.fill.resolve_llm_alias",
+        lambda user, alias="default": "MOCK",
+    )
 
+
+def test_legacy_faker_strategy_rejected(client: TestClient):
+    schema_id = _upload_fixture(client)
     response = client.post(
         "/api/fill",
         json={
             "schema_id": schema_id,
-            "xml_text": xml_text,
+            "xml_text": _skeleton_xml(schema_id),
             "strategy": "faker",
         },
     )
-
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["strategy"] == "faker"
-    assert "<PayDoc" in data["xml_text"]
-    assert 'id="' in data["xml_text"]
-
-
-def test_faker_fill_preserves_existing_values_by_default(
-    client: TestClient,
-    monkeypatch: MonkeyPatch,
-):
-    from lxml import etree
-
-    _use_empty_user_connections(monkeypatch)
-    schema_id = _upload_fixture(client)
-    xml_text = _skeleton_xml(schema_id)
-    root = etree.fromstring(xml_text.encode("utf-8"))
-    root.set("id", "keep-me")
-    xml_text = etree.tostring(root, encoding="unicode")
-
-    response = client.post(
-        "/api/fill",
-        json={
-            "schema_id": schema_id,
-            "xml_text": xml_text,
-            "strategy": "faker",
-        },
-    )
-
-    assert response.status_code == 200, response.text
-    filled = etree.fromstring(response.json()["xml_text"].encode("utf-8"))
-    assert filled.attrib.get("id") == "keep-me"
-
-
-def test_faker_fill_overwrites_existing_values_when_preserve_disabled(
-    client: TestClient,
-    monkeypatch: MonkeyPatch,
-):
-    from lxml import etree
-
-    _use_empty_user_connections(monkeypatch)
-    schema_id = _upload_fixture(client)
-    xml_text = _skeleton_xml(schema_id)
-    root = etree.fromstring(xml_text.encode("utf-8"))
-    root.set("id", "keep-me")
-    xml_text = etree.tostring(root, encoding="unicode")
-
-    response = client.post(
-        "/api/fill",
-        json={
-            "schema_id": schema_id,
-            "xml_text": xml_text,
-            "strategy": "faker",
-            "preserve_filled": False,
-        },
-    )
-
-    assert response.status_code == 200, response.text
-    filled = etree.fromstring(response.json()["xml_text"].encode("utf-8"))
-    assert filled.attrib.get("id") != "keep-me"
+    assert response.status_code == 422
 
 
 def test_ai_fill_requires_llm_aliases(client: TestClient, monkeypatch: MonkeyPatch):
@@ -138,3 +87,143 @@ def test_ai_fill_requires_llm_aliases(client: TestClient, monkeypatch: MonkeyPat
 
     assert response.status_code == 400
     assert response.json()["detail"] == "No LLM aliases configured"
+
+
+def test_git_ai_db_requires_sql_mappings(
+    client: TestClient,
+    monkeypatch: MonkeyPatch,
+):
+    _mock_llm_alias(monkeypatch)
+    schema_id = _upload_fixture(client)
+
+    response = client.post(
+        "/api/fill",
+        json={
+            "schema_id": schema_id,
+            "xml_text": _skeleton_xml(schema_id),
+            "strategy": "git_ai_db",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "sql_mappings" in response.json()["detail"]
+
+
+def test_git_ai_db_runs_db_then_git_then_llm(
+    client: TestClient,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+):
+    schema_id = _upload_fixture(client)
+    xml_text = _skeleton_xml(schema_id)
+    stages: list[str] = []
+
+    _mock_llm_alias(monkeypatch)
+
+    async def fake_db(user, xml, mappings, fill_empty_only=False, schema=None):
+        stages.append("db")
+        assert mappings
+        return xml, frozenset(), []
+
+    async def fake_git(xml, schema, **kwargs):
+        stages.append("git")
+        return xml, frozenset(), [], {"PayDoc@id": "git:ref.xml"}
+
+    async def fake_llm(xml, schema, user, alias="default", **kwargs):
+        stages.append("llm")
+        return xml
+
+    monkeypatch.setattr("app.api.routes.fill.apply_db_overrides", fake_db)
+    monkeypatch.setattr("app.api.routes.fill.populate_from_git", fake_git)
+    monkeypatch.setattr("app.api.routes.fill.populate_with_llm", fake_llm)
+    monkeypatch.setattr("app.api.routes.fill.reference_xml_root", lambda: tmp_path)
+
+    response = client.post(
+        "/api/fill",
+        json={
+            "schema_id": schema_id,
+            "xml_text": xml_text,
+            "strategy": "git_ai_db",
+            "sql_mappings": [_DB_MAPPING],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert stages == ["db", "git", "llm"]
+    data = response.json()
+    assert data["strategy"] == "git_ai_db"
+    assert data["provenance"] == {"PayDoc@id": "git:ref.xml"}
+
+
+def test_git_ai_skips_db_stage(
+    client: TestClient,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+):
+    schema_id = _upload_fixture(client)
+    xml_text = _skeleton_xml(schema_id)
+
+    _mock_llm_alias(monkeypatch)
+
+    async def fake_db(*args, **kwargs):
+        raise AssertionError("DB stage should not run for git_ai")
+
+    async def fake_git(xml, schema, **kwargs):
+        return xml, frozenset(), [], {}
+
+    async def fake_llm(xml, schema, user, alias="default", **kwargs):
+        return xml
+
+    monkeypatch.setattr("app.api.routes.fill.apply_db_overrides", fake_db)
+    monkeypatch.setattr("app.api.routes.fill.populate_from_git", fake_git)
+    monkeypatch.setattr("app.api.routes.fill.populate_with_llm", fake_llm)
+    monkeypatch.setattr("app.api.routes.fill.reference_xml_root", lambda: tmp_path)
+
+    response = client.post(
+        "/api/fill",
+        json={
+            "schema_id": schema_id,
+            "xml_text": xml_text,
+            "strategy": "git_ai",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["strategy"] == "git_ai"
+
+
+def test_ai_fill_prefills_empty_enum_before_llm_runs(
+    client: TestClient,
+    monkeypatch: MonkeyPatch,
+):
+    schema_id = _upload_fixture(client)
+    _mock_llm_alias(monkeypatch)
+
+    # status is an ENUM (%Status; = active|inactive|pending); cleared to "" here
+    # to simulate the editor's "clear attribute values" action on a selection.
+    xml_text = (
+        '<PayDoc id="doc-1" kladr="7700000000000" active="true" status="">'
+        '<Header version="1.0"><Title>t</Title></Header>'
+        '<Body><Record><Field name="amount" type="number">1</Field></Record></Body>'
+        "</PayDoc>"
+    )
+
+    async def fake_llm(xml, schema, user, alias="default", **kwargs):
+        # Echo back unchanged — the enum must already be valid by this point,
+        # proving the pre-fill step ran before the LLM stage.
+        return xml
+
+    monkeypatch.setattr("app.api.routes.fill.populate_with_llm", fake_llm)
+
+    response = client.post(
+        "/api/fill",
+        json={
+            "schema_id": schema_id,
+            "xml_text": xml_text,
+            "strategy": "ai",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    result_root = etree.fromstring(response.json()["xml_text"].encode("utf-8"))
+    assert result_root.get("status") in {"active", "inactive", "pending"}
