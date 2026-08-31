@@ -19,6 +19,7 @@ CheckType = Literal[
     "charset",
     "cross_field",
 ]
+CrossFieldOp = Literal["eq", "ne", "mapped_eq", "regex_if", "required_if", "empty_if"]
 
 
 class RuleCheck(BaseModel):
@@ -36,6 +37,14 @@ class RuleCheck(BaseModel):
     values: list[str] = Field(default_factory=list)
     charset: str | None = None
     expr: str | None = None
+
+    # cross_field only: compare this attribute's value against a sibling
+    # attribute (``other``) on the same element. No expression evaluation --
+    # deliberately a fixed, safe set of ops instead of an eval'd ``expr``.
+    op: CrossFieldOp | None = None
+    other: str | None = None
+    when: str | None = None
+    map: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_type_fields(self) -> RuleCheck:
@@ -63,6 +72,24 @@ class RuleCheck(BaseModel):
             and self.min_length > self.max_length
         ):
             raise ValueError("length check: min_length cannot exceed max_length")
+        if self.type == "cross_field":
+            if not self.op:
+                raise ValueError("cross_field check requires 'op'")
+            if not self.other:
+                raise ValueError("cross_field check requires 'other'")
+            if self.op == "regex_if":
+                if not self.pattern:
+                    raise ValueError("cross_field op 'regex_if' requires 'pattern'")
+                try:
+                    re.compile(self.pattern)
+                except re.error as exc:
+                    raise ValueError(f"invalid regex pattern {self.pattern!r}: {exc}") from exc
+                if self.when is None:
+                    raise ValueError("cross_field op 'regex_if' requires 'when'")
+            if self.op == "mapped_eq" and not self.map:
+                raise ValueError("cross_field op 'mapped_eq' requires 'map'")
+            if self.op in {"required_if", "empty_if"} and self.when is None:
+                raise ValueError(f"cross_field op '{self.op}' requires 'when'")
         return self
 
 

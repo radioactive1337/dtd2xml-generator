@@ -203,7 +203,41 @@ def _compiled_regex(pattern: str) -> re.Pattern[str]:
     return re.compile(pattern)
 
 
-def _check_fails(check: RuleCheck, value: str, *, attr_def=None) -> bool:
+def _cross_field_fails(check: RuleCheck, value: str, siblings: dict[str, str]) -> bool:
+    """Compare *value* against a sibling attribute on the same element.
+
+    Deliberately a fixed set of ops instead of an eval'd expression -- see
+    ``RuleCheck.op`` for the supported comparisons.
+    """
+    this_val = value.strip()
+    other_val = (siblings.get(check.other or "") or "").strip()
+
+    if check.op == "eq":
+        return this_val != other_val
+    if check.op == "ne":
+        return this_val == other_val
+    if check.op == "mapped_eq":
+        expected = check.map.get(other_val)
+        return expected is not None and this_val != expected
+    if check.op == "regex_if":
+        if other_val != check.when:
+            return False
+        assert check.pattern is not None
+        return _compiled_regex(check.pattern).fullmatch(this_val) is None
+    if check.op == "required_if":
+        if other_val != check.when:
+            return False
+        return not this_val
+    if check.op == "empty_if":
+        if other_val != check.when:
+            return False
+        return bool(this_val)
+    return False
+
+
+def _check_fails(
+    check: RuleCheck, value: str, *, attr_def=None, siblings: dict[str, str] | None = None
+) -> bool:
     stripped = value.strip()
     if check.type == "regex":
         assert check.pattern is not None
@@ -230,8 +264,7 @@ def _check_fails(check: RuleCheck, value: str, *, attr_def=None) -> bool:
             return True
         return False
     if check.type == "cross_field":
-        # Reserved for a later iteration; never fails on its own today.
-        return False
+        return _cross_field_fails(check, value, siblings or {})
     return False
 
 
@@ -254,13 +287,18 @@ def validate_attribute(
     path: str = "",
     attr_def=None,
     ruleset: AttributeRuleSet | None = None,
+    siblings: dict[str, str] | None = None,
 ) -> list[RuleViolation]:
-    """Validate a single attribute value against applicable rules for *context*."""
+    """Validate a single attribute value against applicable rules for *context*.
+
+    ``siblings`` are the other attributes on the same element (for
+    ``cross_field`` checks); pass the element's own current ``attrib`` dict.
+    """
     ruleset = ruleset if ruleset is not None else load_attribute_rules()
     violations: list[RuleViolation] = []
     for rule in rules_for(element, attr, ruleset=ruleset, context=context):
         for check in rule.checks:
-            if not _check_fails(check, value, attr_def=attr_def):
+            if not _check_fails(check, value, attr_def=attr_def, siblings=siblings):
                 continue
             violations.append(
                 RuleViolation(
@@ -318,6 +356,7 @@ def validate_document(
             continue
         elem_def = schema.elements.get(el.tag) if schema else None
         path = element_dot_path(el)
+        siblings = dict(el.attrib)
         for attr_name, attr_value in el.attrib.items():
             if attr_name == "xmlns" or attr_name.startswith("xmlns:"):
                 continue
@@ -330,6 +369,7 @@ def validate_document(
                 path=path,
                 attr_def=attr_def,
                 ruleset=ruleset,
+                siblings=siblings,
             ):
                 if violation.severity == "error":
                     report.errors.append(violation)

@@ -38,6 +38,46 @@
         { "type": "min_length", "min_length": 2 }
       ],
       "message": "id не должен быть пустым или placeholder"
+    },
+    {
+      "id": "currency-code-matches-currency",
+      "element": "account",
+      "attr": "currency-code",
+      "severity": "error",
+      "applies_to": ["post_fill", "git_push", "git_ai_fill"],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "mapped_eq",
+          "other": "currency",
+          "map": { "RUB": "643", "USD": "840", "EUR": "978", "CNY": "156" }
+        }
+      ],
+      "message": "currency-code должен соответствовать currency (RUB→643, USD→840, EUR→978, CNY→156)"
+    },
+    {
+      "id": "contact-value-by-type",
+      "element": "contact",
+      "attr": "value",
+      "severity": "warning",
+      "applies_to": ["post_fill", "git_push"],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "type",
+          "when": "email",
+          "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+        },
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "type",
+          "when": "phone",
+          "pattern": "^\\+?[0-9]{10,15}$"
+        }
+      ],
+      "message": "contact@value должен соответствовать формату для contact@type (email / phone)"
     }
   ]
 }
