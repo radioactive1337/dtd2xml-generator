@@ -10,6 +10,31 @@
           <router-link to="/" class="nav-link">Генератор</router-link>
           <router-link to="/settings" class="nav-link">Настройки</router-link>
           <router-link v-if="isAdmin" to="/admin" class="nav-link">Админ</router-link>
+          <span class="nav-sep" aria-hidden="true"></span>
+          <a href="/tools/util1.html" target="_blank" rel="noopener noreferrer" class="nav-link nav-link-external">
+            Утилита 1
+            <svg class="external-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <path d="M15 3h6v6" />
+              <path d="M10 14 21 3" />
+            </svg>
+          </a>
+          <a href="/tools/util2.html" target="_blank" rel="noopener noreferrer" class="nav-link nav-link-external">
+            Утилита 2
+            <svg class="external-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <path d="M15 3h6v6" />
+              <path d="M10 14 21 3" />
+            </svg>
+          </a>
+          <a :href="DTD_DOC_URL" target="_blank" rel="noopener noreferrer" class="nav-link nav-link-external">
+            DTD документация
+            <svg class="external-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <path d="M15 3h6v6" />
+              <path d="M10 14 21 3" />
+            </svg>
+          </a>
         </div>
         <div class="nav-meta">
           <span v-if="user" class="nav-user" :title="user.display_name">{{ user.display_name }}</span>
@@ -88,6 +113,9 @@ import { useAuth } from './composables/useAuth'
 const { isDark, toggleTheme } = useTheme()
 const { user, isAdmin, refresh, logout } = useAuth()
 const router = useRouter()
+
+// TODO: paste the real DTD documentation URL here
+const DTD_DOC_URL = 'https://TODO-paste-dtd-doc-link-here'
 
 onMounted(() => {
   refresh()
@@ -178,6 +206,23 @@ async function handleLogout() {
 .nav-link.router-link-active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+.nav-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.nav-link-external {
+  gap: 4px;
+}
+
+.external-icon {
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
 }
 
 .nav-icon-btn,
