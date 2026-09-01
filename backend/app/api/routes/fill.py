@@ -277,6 +277,8 @@ async def execute_fill(
         )
 
         async def llm_progress(step: str, message: str, percent: int) -> None:
+            if step == "llm_fallback":
+                fill_warnings.append(message)
             await on_progress(step, message, percent)
 
         async with _llm_semaphore:

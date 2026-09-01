@@ -6,7 +6,9 @@ import asyncio
 import contextlib
 import json
 import logging
+import random
 import re
+import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -33,7 +35,7 @@ _LLM_BATCH_MAX = 48
 _LLM_MAX_CONCURRENT = 4
 # Extra corrective passes for attributes the model still left empty after the
 # main fill — see LLMService._retry_stubborn_fields.
-_LLM_RETRY_ROUNDS = 2
+_LLM_RETRY_ROUNDS = 3
 
 LlmProgressCallback = Callable[[str, str, int], Awaitable[None]]
 
@@ -79,10 +81,18 @@ _FILL_XML_NOTE = (
 _FILL_RETRY_NOTE = (
     "RETRY: the fields below were still empty after a previous pass. Do not "
     "leave any of them empty again — this is synthetic QA data, so a "
-    "real-world address or document that might omit a field (wing, door, "
-    "area-code, place, patronymic, etc.) is not a reason to leave it blank "
-    "here. Invent a plausible, internally-consistent value for every single "
-    "attribute below.\n\n"
+    "real-world record that might omit a field is not a reason to leave it "
+    "blank here. Invent a plausible, internally-consistent value for every "
+    "single attribute below.\n\n"
+)
+
+_FILL_LAST_RESORT_NOTE = (
+    "FINAL ATTEMPT: treat this as filling blanks on a data-entry form, not "
+    "as describing one coherent real-world record. Whether a field would "
+    "realistically apply to this particular record does NOT matter here — "
+    "every attribute below still needs a short, syntactically plausible "
+    "value; generic filler is fine. Leaving any attribute empty counts as a "
+    "validation error and is not acceptable in this round.\n\n"
 )
 
 _FIELD_MAPPING_SYSTEM_PROMPT = (
@@ -269,7 +279,7 @@ class LLMService:
             protected_attrs=protected_attrs,
         )
 
-        return await self._retry_stubborn_fields(
+        result_xml = await self._retry_stubborn_fields(
             result_xml,
             schema,
             protected_attrs=protected_attrs,
@@ -277,6 +287,47 @@ class LLMService:
             progress_percent=min(progress_base + progress_span, 95),
             cancel_event=cancel_event,
         )
+
+        result_xml, defaulted_paths = await asyncio.to_thread(
+            apply_schema_default_fill,
+            result_xml,
+            schema,
+            protected_attrs=protected_attrs,
+        )
+        if defaulted_paths:
+            logger.info(
+                "Filled %d attribute(s) from DTD-declared defaults: %s",
+                len(defaulted_paths),
+                ", ".join(defaulted_paths[:20]),
+            )
+
+        result_xml, fallback_paths = await asyncio.to_thread(
+            apply_generic_placeholder_fill,
+            result_xml,
+            schema,
+            protected_attrs=protected_attrs,
+        )
+        if fallback_paths:
+            logger.warning(
+                "LLM refused %d attribute(s) across %d retries; "
+                "filled with a generic placeholder: %s",
+                len(fallback_paths),
+                _LLM_RETRY_ROUNDS,
+                ", ".join(fallback_paths[:20])
+                + ("…" if len(fallback_paths) > 20 else ""),
+            )
+            if on_progress:
+                preview = ", ".join(fallback_paths[:8])
+                if len(fallback_paths) > 8:
+                    preview += f" и ещё {len(fallback_paths) - 8}"
+                await on_progress(
+                    "llm_fallback",
+                    f"ИИ отказался заполнить {len(fallback_paths)} атрибут(ов) — "
+                    f"поставлена заглушка test-…, проверьте вручную: {preview}",
+                    min(progress_base + progress_span, 99),
+                )
+
+        return result_xml
 
     async def _retry_stubborn_fields(
         self,
@@ -290,16 +341,33 @@ class LLMService:
     ) -> str:
         """Re-ask the LLM for any attribute it left empty, up to a few rounds.
 
-        The model sometimes treats optional-looking attributes (e.g. address
-        sub-fields like wing/door/area-code) as fine to leave blank. Without
-        this pass those fields never get filled, even across repeated manual
-        fill requests, because each attempt re-offers the same empty fields
-        with the same non-forceful prompt. Each round is stricter than a plain
-        re-fill and asks the model to invent a value rather than skip it.
+        The model sometimes treats optional-looking attributes as fine to
+        leave blank because it reasons about whether they'd realistically
+        apply to this specific record. Without this pass those fields never
+        get filled, even across repeated manual fill requests, because each
+        attempt re-offers the same empty fields with the same prompt. Each
+        round first applies any DTD-declared default (no LLM call needed),
+        then asks the model again with a progressively more insistent
+        framing — the final round drops the "realistic record" framing
+        entirely and asks for form-filler values instead.
         """
         result = xml_text
         for round_index in range(_LLM_RETRY_ROUNDS):
             _raise_if_cancelled(cancel_event)
+
+            result, defaulted_paths = await asyncio.to_thread(
+                apply_schema_default_fill,
+                result,
+                schema,
+                protected_attrs=protected_attrs,
+            )
+            if defaulted_paths:
+                logger.info(
+                    "Retry round %d: filled %d attribute(s) from DTD defaults",
+                    round_index + 1,
+                    len(defaulted_paths),
+                )
+
             leftover = await asyncio.to_thread(
                 collect_fill_tasks,
                 result,
@@ -313,12 +381,14 @@ class LLMService:
             annotate_repeat_counts(leftover)
             metadata = self._extract_metadata_for_tasks(schema, leftover)
             batches = group_tasks_into_batches(leftover)
+            is_last_round = round_index == _LLM_RETRY_ROUNDS - 1
             logger.info(
-                "LLM retry round %d/%d [leftover=%d batches=%d]",
+                "LLM retry round %d/%d [leftover=%d batches=%d last_resort=%s]",
                 round_index + 1,
                 _LLM_RETRY_ROUNDS,
                 len(leftover),
                 len(batches),
+                is_last_round,
             )
 
             if on_progress:
@@ -340,6 +410,7 @@ class LLMService:
                         fill_empty_only=True,
                         cancel_event=cancel_event,
                         retry=True,
+                        last_resort=is_last_round,
                     )
 
             batch_results = await asyncio.gather(
@@ -377,6 +448,7 @@ class LLMService:
         fill_empty_only: bool,
         cancel_event: asyncio.Event | None = None,
         retry: bool = False,
+        last_resort: bool = False,
     ) -> list[dict[str, Any]]:
         skeleton = build_batch_xml_skeleton(batch)
         prefix = (
@@ -385,7 +457,9 @@ class LLMService:
             if fill_empty_only
             else ""
         )
-        if retry:
+        if last_resort:
+            prefix += _FILL_LAST_RESORT_NOTE
+        elif retry:
             prefix += _FILL_RETRY_NOTE
         diversity_note = build_diversity_note(batch)
         user_message = (
@@ -409,7 +483,7 @@ class LLMService:
                 content = await self._chat_completion(
                     system_prompt=_FILL_SYSTEM_PROMPT,
                     user_message=user_message,
-                    temperature=0.7 if retry else (0.5 if attempt else 0.6),
+                    temperature=0.9 if last_resort else (0.7 if retry else (0.5 if attempt else 0.6)),
                     cancel_event=cancel_event,
                 )
                 return parse_batch_xml_response(content, batch)
@@ -1071,6 +1145,87 @@ def apply_llm_values(
         encoding="UTF-8",
         xml_declaration=False,
     ).decode("UTF-8")
+
+
+def apply_schema_default_fill(
+    xml_text: str,
+    schema: DTDSchema,
+    *,
+    protected_attrs: ProtectedAttrs = frozenset(),
+) -> tuple[str, list[str]]:
+    """Fill still-empty attributes using the DTD's own declared default.
+
+    Fully schema-driven — uses whatever default *that specific DTD* declares
+    for the attribute (#FIXED, a literal default, or a single-value enum).
+    No attribute-name guesswork, so it applies equally to any schema.
+    """
+    root = etree.fromstring(xml_text.encode("utf-8"))
+    filled_paths: list[str] = []
+
+    for el in root.iter():
+        elem_def = schema.elements.get(el.tag)
+        if elem_def is None:
+            continue
+        tree_path = element_path(el)
+        for attr_name, attr_value in list(el.attrib.items()):
+            if (tree_path, attr_name) in protected_attrs:
+                continue
+            if not is_fillable_attribute_value(attr_value):
+                continue
+            attr_def = elem_def.attributes.get(attr_name)
+            default = attr_def.dtd_default_value() if attr_def else None
+            if not default:
+                continue
+            el.set(attr_name, default)
+            filled_paths.append(f"{element_dot_path(el)}@{attr_name}")
+
+    if not filled_paths:
+        return xml_text, []
+    new_xml = etree.tostring(
+        root, pretty_print=True, encoding="UTF-8", xml_declaration=False
+    ).decode("UTF-8")
+    return new_xml, filled_paths
+
+
+def apply_generic_placeholder_fill(
+    xml_text: str,
+    schema: DTDSchema,
+    *,
+    protected_attrs: ProtectedAttrs = frozenset(),
+) -> tuple[str, list[str]]:
+    """Absolute last resort so no attribute is ever left blank.
+
+    Reached only when the DTD has no declared default *and* the LLM refused
+    the field across every retry round, including the blunt final-round
+    prompt. Applies one uniform strategy to whatever remains — not tailored
+    per attribute name — and returns the touched paths so the caller can
+    surface them to the user for manual review.
+    """
+    root = etree.fromstring(xml_text.encode("utf-8"))
+    filled_paths: list[str] = []
+
+    for el in root.iter():
+        elem_def = schema.elements.get(el.tag)
+        tree_path = element_path(el)
+        for attr_name, attr_value in list(el.attrib.items()):
+            if (tree_path, attr_name) in protected_attrs:
+                continue
+            attr_def = elem_def.attributes.get(attr_name) if elem_def else None
+            if not is_fillable_attribute_value(attr_value, attr_def=attr_def):
+                continue
+            if attr_def and attr_def.allowed_values:
+                value = random.choice(attr_def.allowed_values)
+            else:
+                value = f"test-{uuid.uuid4().hex[:6]}"
+            el.set(attr_name, value)
+            filled_paths.append(f"{element_dot_path(el)}@{attr_name}")
+
+    if not filled_paths:
+        return xml_text, []
+    new_xml = etree.tostring(
+        root, pretty_print=True, encoding="UTF-8", xml_declaration=False
+    ).decode("UTF-8")
+    return new_xml, filled_paths
 
 
 def _build_path_map(root: etree._Element) -> dict[tuple[tuple[str, int], ...], etree._Element]:
