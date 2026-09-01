@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 _LLM_BATCH_SIZE = 36
 _LLM_BATCH_MAX = 48
 _LLM_MAX_CONCURRENT = 4
+# Extra corrective passes for attributes the model still left empty after the
+# main fill — see LLMService._retry_stubborn_fields.
+_LLM_RETRY_ROUNDS = 2
 
 LlmProgressCallback = Callable[[str, str, int], Awaitable[None]]
 
@@ -38,6 +41,16 @@ _FILL_SYSTEM_PROMPT = (
     "You are a test data generator for QA automation. "
     "Fill the provided XML skeleton with realistic Russian business test data. "
     "Preserve the exact element structure, indices, paths, and attribute names. "
+    "Every attribute listed on an <f> element is REQUIRED and MUST end up with "
+    "a non-empty value in your response — including attributes that a real "
+    "record might sometimes leave blank, such as a building wing/section, "
+    "apartment or door number, micro-district or area code, secondary address "
+    "lines, or middle names. This is synthetic test data, not a real record: "
+    "inventing a plausible value for every such field is always correct. "
+    "Never return an attribute as an empty string and never drop an attribute "
+    "from your response — if you are unsure what belongs there, make up a "
+    "realistic value consistent with the rest of the element rather than "
+    "leaving it out. "
     "When the same element type appears more than once (n='k/m' on <f>, "
     "and [index] in p), each instance MUST use different identifying values: "
     "different organizations/banks, people, INNs, BICs, account numbers, "
@@ -57,7 +70,19 @@ _FILL_SYSTEM_PROMPT = (
 _FILL_XML_NOTE = (
     "Each <f> element has i (index) and p (path). "
     "When present, n is instance k of m of that element type in the document. "
-    "Fill empty attributes and text. Do not add or remove elements.\n\n"
+    "Fill every empty attribute listed and any required text — an attribute "
+    "left empty or missing from your response is a mistake, even if it looks "
+    "optional (e.g. wing, door, area-code, place). Do not add or remove "
+    "elements.\n\n"
+)
+
+_FILL_RETRY_NOTE = (
+    "RETRY: the fields below were still empty after a previous pass. Do not "
+    "leave any of them empty again — this is synthetic QA data, so a "
+    "real-world address or document that might omit a field (wing, door, "
+    "area-code, place, patronymic, etc.) is not a reason to leave it blank "
+    "here. Invent a plausible, internally-consistent value for every single "
+    "attribute below.\n\n"
 )
 
 _FIELD_MAPPING_SYSTEM_PROMPT = (
@@ -236,13 +261,113 @@ class LLMService:
                 raise ValueError(f"LLM batch {index + 1} failed: {result}") from result
             all_values.extend(result)
 
-        return apply_llm_values(
+        result_xml = apply_llm_values(
             xml_text,
             all_values,
             tasks=tasks,
             fill_empty_only=fill_empty_only,
             protected_attrs=protected_attrs,
         )
+
+        return await self._retry_stubborn_fields(
+            result_xml,
+            schema,
+            protected_attrs=protected_attrs,
+            on_progress=on_progress,
+            progress_percent=min(progress_base + progress_span, 95),
+            cancel_event=cancel_event,
+        )
+
+    async def _retry_stubborn_fields(
+        self,
+        xml_text: str,
+        schema: DTDSchema,
+        *,
+        protected_attrs: ProtectedAttrs,
+        on_progress: LlmProgressCallback | None,
+        progress_percent: int,
+        cancel_event: asyncio.Event | None,
+    ) -> str:
+        """Re-ask the LLM for any attribute it left empty, up to a few rounds.
+
+        The model sometimes treats optional-looking attributes (e.g. address
+        sub-fields like wing/door/area-code) as fine to leave blank. Without
+        this pass those fields never get filled, even across repeated manual
+        fill requests, because each attempt re-offers the same empty fields
+        with the same non-forceful prompt. Each round is stricter than a plain
+        re-fill and asks the model to invent a value rather than skip it.
+        """
+        result = xml_text
+        for round_index in range(_LLM_RETRY_ROUNDS):
+            _raise_if_cancelled(cancel_event)
+            leftover = await asyncio.to_thread(
+                collect_fill_tasks,
+                result,
+                schema,
+                fill_empty_only=True,
+                protected_attrs=protected_attrs,
+            )
+            if not leftover:
+                break
+
+            annotate_repeat_counts(leftover)
+            metadata = self._extract_metadata_for_tasks(schema, leftover)
+            batches = group_tasks_into_batches(leftover)
+            logger.info(
+                "LLM retry round %d/%d [leftover=%d batches=%d]",
+                round_index + 1,
+                _LLM_RETRY_ROUNDS,
+                len(leftover),
+                len(batches),
+            )
+
+            if on_progress:
+                await on_progress(
+                    "llm_retry",
+                    f"Retrying {len(leftover)} still-empty field(s) "
+                    f"(round {round_index + 1}/{_LLM_RETRY_ROUNDS})",
+                    progress_percent,
+                )
+
+            semaphore = asyncio.Semaphore(_LLM_MAX_CONCURRENT)
+
+            async def fill_batch(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                _raise_if_cancelled(cancel_event)
+                async with semaphore:
+                    return await self._fill_tasks_batch(
+                        batch,
+                        metadata=metadata,
+                        fill_empty_only=True,
+                        cancel_event=cancel_event,
+                        retry=True,
+                    )
+
+            batch_results = await asyncio.gather(
+                *(fill_batch(batch) for batch in batches),
+                return_exceptions=True,
+            )
+
+            round_values: list[dict[str, Any]] = []
+            for index, batch_result in enumerate(batch_results):
+                if isinstance(batch_result, asyncio.CancelledError):
+                    raise batch_result
+                if isinstance(batch_result, BaseException):
+                    logger.warning("LLM retry batch %d failed: %s", index, batch_result)
+                    continue
+                round_values.extend(batch_result)
+
+            if not round_values:
+                break
+
+            result = apply_llm_values(
+                result,
+                round_values,
+                tasks=leftover,
+                fill_empty_only=True,
+                protected_attrs=protected_attrs,
+            )
+
+        return result
 
     async def _fill_tasks_batch(
         self,
@@ -251,6 +376,7 @@ class LLMService:
         metadata: str,
         fill_empty_only: bool,
         cancel_event: asyncio.Event | None = None,
+        retry: bool = False,
     ) -> list[dict[str, Any]]:
         skeleton = build_batch_xml_skeleton(batch)
         prefix = (
@@ -259,6 +385,8 @@ class LLMService:
             if fill_empty_only
             else ""
         )
+        if retry:
+            prefix += _FILL_RETRY_NOTE
         diversity_note = build_diversity_note(batch)
         user_message = (
             f"{prefix}{_FILL_XML_NOTE}"
@@ -268,9 +396,10 @@ class LLMService:
         )
 
         logger.debug(
-            "LLM batch request [tasks=%d prompt_chars=%d]",
+            "LLM batch request [tasks=%d prompt_chars=%d retry=%s]",
             len(batch),
             len(user_message),
+            retry,
         )
 
         last_error: Exception | None = None
@@ -280,7 +409,7 @@ class LLMService:
                 content = await self._chat_completion(
                     system_prompt=_FILL_SYSTEM_PROMPT,
                     user_message=user_message,
-                    temperature=0.5 if attempt else 0.6,
+                    temperature=0.7 if retry else (0.5 if attempt else 0.6),
                     cancel_event=cancel_event,
                 )
                 return parse_batch_xml_response(content, batch)
