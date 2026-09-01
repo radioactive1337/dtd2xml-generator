@@ -72,17 +72,17 @@
     "repo_url": "git@github.com:org/xml-library.git",
     "branch": "main",
     "subdir": "xml-library",
-    "cache_dir": "data/reference-xml"
+    "cache_dir": "reference-xml"
   }
 }
 ```
 
-- **`cache_dir`** — путь относительно корня проекта; клон Git хранится здесь.
+- **`cache_dir`** — имя каталога клона Git. Фактически лежит в `/tmp/xml-generator/` (в контейнере) или в системном temp, **не** на volume `data/`. Нужно, потому что git делает `chmod` на `.git`, а PVC/MinIO это часто запрещают. Старые значения вроде `data/reference-xml` автоматически уезжают в temp. Абсолютный путь вне `data/` остаётся как есть.
 - **`subdir`** — подпапка внутри клона с категориями эталонов.
 - Для private HTTPS-репозиториев каждый пользователь задаёт **Git-токен** на странице **Настройки** (хранится в per-user `connections.json` на сервере). Для GitLab укажите пользователя `oauth2` (по умолчанию). Администратор может задать fallback **`REFERENCE_XML_GIT_TOKEN`** / **`REFERENCE_XML_GIT_USER`** в окружении.
 - Для SSH используйте deploy key в контейнере/на сервере.
 
-При первом запуске нажмите «Обновить из Git» в UI или выполните `git clone` в `data/reference-xml/` вручную.
+При первом запуске нажмите «Обновить из Git» в UI. Клон создаётся во временном каталоге (`/tmp/xml-generator/` в Linux-контейнере) и после рестарта пода его нужно обновить снова.
 
 ## Установка
 
@@ -144,10 +144,11 @@ copy config\connections.json.example config\connections.json
 | **`AUTH_DISABLED`** | `1` — режим для разработки: один локальный пользователь без логина, без страницы **Админ** |
 | **`LLM_CONCURRENCY`** | Максимум одновременных запросов к LLM для всех пользователей (по умолчанию `5`) |
 | **`REFERENCE_XML_GIT_TOKEN`** / **`REFERENCE_XML_GIT_USER`** | Fallback-токен для эталонной библиотеки, если у пользователя не задан свой |
+| **`XML_GENERATOR_GIT_CACHE_ROOT`** | Каталог для git-клонов эталонов (по умолчанию `/tmp/xml-generator` в Linux). Не кладите на volume `data/` |
 
 Опциональные блоки в `app.json` (полный пример — `config/app.json.example`):
 
-- **`reference_xml.push_enabled`**, **`push_cache_dir`**, **`push_author_name`**, **`push_author_email`** — отдельный клон репозитория и автор коммитов по умолчанию для кнопки «Отправить в Git» (см. [Библиотека XML](#7-библиотека-xml)).
+- **`reference_xml.push_enabled`**, **`push_cache_dir`**, **`push_author_name`**, **`push_author_email`** — отдельный git-клон (тоже в temp, не в `data/`) и автор коммитов по умолчанию для кнопки «Отправить в Git» (см. [Библиотека XML](#7-библиотека-xml)).
 - **`nexus_dtd`** — координаты Maven-артефакта с DTD-схемами в Nexus (`base_url`, `repository`, `group_id`, `artifact_id`, `version`, `inner_path`) и настройки автообновления (`auto_update`, `check_interval_minutes`, `on_startup`); см. [DTD-схемы](#dtd-схемы).
 
 **`config/connections.json`** — алиасы БД и LLM. Секция `app` здесь хранит только `default_llm_alias` (какой LLM использовать по умолчанию при нескольких алиасах). Для локального запуска используйте `localhost`; для Docker — `host.docker.internal` (см. [Docker](#docker)).

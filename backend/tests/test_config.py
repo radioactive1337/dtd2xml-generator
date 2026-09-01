@@ -21,7 +21,9 @@ from app.config import (
     get_ora_tzfile,
     get_oracle_client_lib_dir,
     get_session_secret,
+    git_cache_root,
     load_connections,
+    resolve_git_workdir,
     resolve_llm_alias,
     set_default_llm_alias,
 )
@@ -334,3 +336,27 @@ def test_set_default_llm_alias_persists_in_connections_file(user_with_connection
 def test_set_default_llm_alias_requires_multiple_aliases(user_with_connections: UserContext):
     with pytest.raises(ValueError, match="multiple LLM aliases"):
         set_default_llm_alias(user_with_connections, "default")
+
+
+def test_resolve_git_workdir_sends_relative_and_data_paths_to_temp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr("app.config.DATA_DIR", tmp_path / "data")
+    monkeypatch.delenv("XML_GENERATOR_GIT_CACHE_ROOT", raising=False)
+    root = git_cache_root()
+
+    assert resolve_git_workdir("data/reference-xml") == root / "reference-xml"
+    assert resolve_git_workdir("reference-xml-push") == root / "reference-xml-push"
+    assert resolve_git_workdir(str(tmp_path / "data" / "reference-xml")) == root / "reference-xml"
+
+
+def test_resolve_git_workdir_keeps_explicit_absolute_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("app.config.DATA_DIR", tmp_path / "data")
+    outside = tmp_path / "pytest-git-cache"
+    assert resolve_git_workdir(str(outside)) == outside
+
+
+def test_git_cache_root_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("XML_GENERATOR_GIT_CACHE_ROOT", str(tmp_path / "git-root"))
+    assert git_cache_root() == tmp_path / "git-root"
+    assert resolve_git_workdir("data/reference-xml") == tmp_path / "git-root" / "reference-xml"

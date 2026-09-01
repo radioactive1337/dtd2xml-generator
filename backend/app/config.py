@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -70,9 +71,9 @@ class ReferenceXmlSettings(BaseModel):
     repo_url: str = ""
     branch: str = "main"
     subdir: str = "xml-library"
-    cache_dir: str = "data/reference-xml"
+    cache_dir: str = "reference-xml"
     push_enabled: bool = False
-    push_cache_dir: str = "data/reference-xml-push"
+    push_cache_dir: str = "reference-xml-push"
     push_author_name: str = "XML Generator"
     push_author_email: str = "xmlgenerator@noreply"
 
@@ -601,34 +602,47 @@ def get_nexus_dtd_config() -> NexusDtdConfig | None:
     return NexusDtdConfig(**nexus)
 
 
+def git_cache_root() -> Path:
+    """Local disk for git clones. Avoids data/ volumes that reject chmod (NFS/MinIO)."""
+    override = os.getenv("XML_GENERATOR_GIT_CACHE_ROOT", "").strip()
+    if override:
+        return Path(override)
+    return Path(tempfile.gettempdir()) / "xml-generator"
+
+
+def resolve_git_workdir(configured: str) -> Path:
+    """Map a configured git cache path onto local temp unless it is an explicit absolute path outside data/."""
+    raw = Path(configured)
+    name = raw.name or "git-cache"
+    if raw.is_absolute():
+        try:
+            if raw.resolve().is_relative_to(DATA_DIR.resolve()):
+                return git_cache_root() / name
+        except (OSError, ValueError):
+            pass
+        return raw
+    return git_cache_root() / name
+
+
 def reference_xml_root() -> Path | None:
     settings = get_reference_xml_settings()
     if settings is None:
         return None
-    cache = Path(settings.cache_dir)
-    if not cache.is_absolute():
-        cache = PROJECT_ROOT / cache
-    return cache / settings.subdir
+    return resolve_git_workdir(settings.cache_dir) / settings.subdir
 
 
 def reference_xml_cache_dir() -> Path | None:
     settings = get_reference_xml_settings()
     if settings is None:
         return None
-    cache = Path(settings.cache_dir)
-    if not cache.is_absolute():
-        cache = PROJECT_ROOT / cache
-    return cache
+    return resolve_git_workdir(settings.cache_dir)
 
 
 def reference_xml_push_cache_dir() -> Path | None:
     settings = get_reference_xml_settings()
     if settings is None:
         return None
-    cache = Path(settings.push_cache_dir)
-    if not cache.is_absolute():
-        cache = PROJECT_ROOT / cache
-    return cache
+    return resolve_git_workdir(settings.push_cache_dir)
 
 
 # Legacy helpers for tests that patch _find_connections_file
