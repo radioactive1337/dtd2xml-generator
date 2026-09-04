@@ -532,6 +532,14 @@ class DBService:
                     attr_name = xml_attr.lstrip("@")
                     if not attr_name:
                         continue
+                    if attr_name not in el.attrib:
+                        warn = (
+                            f"Skipped XML attribute '{attr_name}' on "
+                            f"{mapping.target_element}: not present on the original element"
+                        )
+                        if warn not in warnings:
+                            warnings.append(warn)
+                        continue
                     if fill_empty_only:
                         existing = el.get(attr_name)
                         if existing is not None:

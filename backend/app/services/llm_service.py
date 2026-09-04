@@ -21,10 +21,12 @@ from app.core.dtd_models import DTDSchema
 from app.core.logging_config import truncate
 from app.core.xml_tree import (
     ProtectedAttrs,
+    element_allows_pcdata_fill,
     element_dot_path,
     element_path,
     find_elements_by_dot_path,
     is_fillable_attribute_value,
+    schema_element_def,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,8 @@ _FILL_SYSTEM_PROMPT = (
     "#FIXED and single-value enums stay unchanged. "
     "Keep values internally consistent within one element "
     "(bank name matches its BIC and city). "
+    "Self-closing <f .../> elements must stay empty: fill attributes only, "
+    "never add inner text or child elements. "
     "Return only valid XML without markdown fences or explanations."
 )
 
@@ -75,7 +79,8 @@ _FILL_XML_NOTE = (
     "Fill every empty attribute listed and any required text — an attribute "
     "left empty or missing from your response is a mistake, even if it looks "
     "optional (e.g. wing, door, area-code, place). Do not add or remove "
-    "elements.\n\n"
+    "elements or attributes. Put inner text only on pair tags (<f ...></f>); "
+    "self-closing <f .../> must stay self-closing with attributes only.\n\n"
 )
 
 _FILL_RETRY_NOTE = (
@@ -277,6 +282,7 @@ class LLMService:
             tasks=tasks,
             fill_empty_only=fill_empty_only,
             protected_attrs=protected_attrs,
+            schema=schema,
         )
 
         result_xml = await self._retry_stubborn_fields(
@@ -436,6 +442,7 @@ class LLMService:
                 tasks=leftover,
                 fill_empty_only=True,
                 protected_attrs=protected_attrs,
+                schema=schema,
             )
 
         return result
@@ -981,6 +988,7 @@ def parse_batch_xml_response(content: str, batch: list[dict[str, Any]]) -> list[
         task["i"]: set(task.get("a", []))
         for task in batch
     }
+    text_requested = {task["i"] for task in batch if task.get("t")}
     values: list[dict[str, Any]] = []
 
     for node in root.iter("f"):
@@ -1003,7 +1011,7 @@ def parse_batch_xml_response(content: str, batch: list[dict[str, Any]]) -> list[
         }
         if filled_attrs:
             item["a"] = filled_attrs
-        if (node.text or "").strip():
+        if index in text_requested and (node.text or "").strip():
             item["t"] = node.text.strip()
         if len(item) > 1:
             values.append(item)
@@ -1025,7 +1033,7 @@ def collect_fill_tasks(
     tasks: list[dict[str, Any]] = []
 
     for el in root.iter():
-        elem_def = schema.elements.get(el.tag)
+        elem_def = schema_element_def(el, schema)
         dot_path = element_dot_path(el)
         tree_path = element_path(el)
 
@@ -1041,7 +1049,7 @@ def collect_fill_tasks(
                 attr_names.append(attr_name)
 
         needs_text = False
-        if not attr_names and elem_def and elem_def.content_model.kind == "PCDATA" and len(el) == 0:
+        if not attr_names and element_allows_pcdata_fill(el, schema):
             if fill_empty_only:
                 needs_text = not (el.text or "").strip()
             else:
@@ -1100,10 +1108,12 @@ def apply_llm_values(
     tasks: list[dict[str, Any]] | None = None,
     fill_empty_only: bool = False,
     protected_attrs: ProtectedAttrs = frozenset(),
+    schema: DTDSchema | None = None,
 ) -> str:
     """Apply LLM JSON field values onto the original XML tree."""
     original_root = etree.fromstring(original_xml.encode("utf-8"))
     by_dot_path = {element_dot_path(el): el for el in original_root.iter()}
+    tasks_by_index = {task["i"]: task for task in tasks} if tasks else {}
 
     for item in values:
         normalized = _normalize_llm_value_item(item, tasks=tasks)
@@ -1119,6 +1129,13 @@ def apply_llm_values(
             continue
 
         tree_path = element_path(el)
+        matching_task = None
+        raw_index = item.get("i")
+        if raw_index is not None:
+            try:
+                matching_task = tasks_by_index.get(int(raw_index))
+            except (TypeError, ValueError):
+                matching_task = None
 
         attrs = normalized.get("attrs")
         if isinstance(attrs, dict):
@@ -1132,12 +1149,20 @@ def apply_llm_values(
                 if new_value is not None and str(new_value).strip():
                     el.set(attr_name, str(new_value))
 
-        if "text" in normalized:
-            new_text = normalized["text"]
-            if new_text is not None and str(new_text).strip():
-                if fill_empty_only and (el.text or "").strip():
-                    continue
-                el.text = str(new_text)
+        if "text" not in normalized:
+            continue
+        new_text = normalized["text"]
+        if new_text is None or not str(new_text).strip():
+            continue
+        if fill_empty_only and (el.text or "").strip():
+            continue
+        requested_text = bool(matching_task and matching_task.get("t"))
+        if schema is not None:
+            if not element_allows_pcdata_fill(el, schema):
+                continue
+        elif not requested_text:
+            continue
+        el.text = str(new_text)
 
     return etree.tostring(
         original_root,
@@ -1237,6 +1262,7 @@ def merge_fill_empty_only(
     filled_xml: str,
     *,
     protected_attrs: ProtectedAttrs = frozenset(),
+    schema: DTDSchema | None = None,
 ) -> str:
     """Keep the original tree; copy values from *filled_xml* for non-DB attributes."""
     original_root = etree.fromstring(original_xml.encode("utf-8"))
@@ -1257,6 +1283,8 @@ def merge_fill_empty_only(
             filled_value = filled_el.attrib.get(attr_name)
             if filled_value is not None and filled_value.strip():
                 el.set(attr_name, filled_value)
+        if not element_allows_pcdata_fill(el, schema):
+            continue
         if not (el.text or "").strip() and (filled_el.text or "").strip():
             el.text = filled_el.text
 

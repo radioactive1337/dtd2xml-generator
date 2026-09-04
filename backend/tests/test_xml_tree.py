@@ -6,9 +6,11 @@ from app.core.dtd_models import AttributeDef, ContentNode, DTDSchema, ElementDef
 from app.core.xml_tree import (
     AttributeFillStats,
     compute_attribute_fill_stats,
+    element_allows_pcdata_fill,
     element_dot_path,
     git_push_attribute_fill_error,
     is_fillable_attribute_value,
+    overlay_values_preserving_structure,
     prefill_empty_enums,
     prefixed_element_name,
 )
@@ -219,3 +221,83 @@ def test_prefill_empty_enums_fills_single_value_enum():
     assert count == 1
     root = etree.fromstring(new_xml.encode("utf-8"))
     assert root.get("kind") == "fixed-value"
+
+
+def _saldo_schema() -> DTDSchema:
+    return DTDSchema(
+        elements={
+            "saldo-incoming": ElementDef(
+                name="saldo-incoming",
+                content_raw="EMPTY",
+                content_model=ContentNode(kind="EMPTY"),
+                attributes={
+                    "currency": AttributeDef(name="currency", attr_type="CDATA", default_decl="#IMPLIED"),
+                    "currency-code": AttributeDef(
+                        name="currency-code", attr_type="CDATA", default_decl="#IMPLIED"
+                    ),
+                    "type": AttributeDef(name="type", attr_type="CDATA", default_decl="#IMPLIED"),
+                    "value": AttributeDef(name="value", attr_type="CDATA", default_decl="#IMPLIED"),
+                    "value-spelled": AttributeDef(
+                        name="value-spelled", attr_type="CDATA", default_decl="#IMPLIED"
+                    ),
+                },
+            ),
+            "Title": ElementDef(
+                name="Title",
+                content_raw="#PCDATA",
+                content_model=ContentNode(kind="PCDATA"),
+                attributes={},
+            ),
+        }
+    )
+
+
+def test_overlay_does_not_add_text_or_attributes_to_empty_element():
+    original = (
+        '<saldo-incoming currency="" currency-code="" type="" value="" value-spelled=""/>'
+    )
+    filled = (
+        '<saldo-incoming currency="RUB" currency-code="643" type="passive" '
+        'value="150000.00" value-spelled="Сто пятьдесят тысяч рублей 00 копеек" extra="x">'
+        "850000.00"
+        "</saldo-incoming>"
+    )
+
+    result = overlay_values_preserving_structure(original, filled, _saldo_schema())
+    root = etree.fromstring(result.encode("utf-8"))
+
+    assert root.get("currency") == "RUB"
+    assert root.get("currency-code") == "643"
+    assert root.get("type") == "passive"
+    assert root.get("value") == "150000.00"
+    assert root.get("value-spelled") == "Сто пятьдесят тысяч рублей 00 копеек"
+    assert "extra" not in root.attrib
+    assert not (root.text or "").strip()
+    assert len(root) == 0
+
+
+def test_overlay_does_not_add_child_elements():
+    original = "<PayDoc><Body/></PayDoc>"
+    filled = "<PayDoc><Body><Record/></Body><Extra/></PayDoc>"
+    result = overlay_values_preserving_structure(original, filled, _paydoc_schema())
+    root = etree.fromstring(result.encode("utf-8"))
+
+    assert root.find("Extra") is None
+    assert root.find("Body") is not None
+    assert list(root.find("Body")) == []
+
+
+def test_overlay_fills_pcdata_text():
+    original = "<Title/>"
+    filled = "<Title>Hello</Title>"
+    result = overlay_values_preserving_structure(original, filled, _saldo_schema())
+    root = etree.fromstring(result.encode("utf-8"))
+    assert (root.text or "").strip() == "Hello"
+
+
+def test_element_allows_pcdata_fill_rejects_empty_content():
+    xml = '<saldo-incoming currency="" value=""/>'
+    el = etree.fromstring(xml.encode("utf-8"))
+    assert element_allows_pcdata_fill(el, _saldo_schema()) is False
+    title = etree.fromstring(b"<Title/>")
+    assert element_allows_pcdata_fill(title, _saldo_schema()) is True

@@ -2,6 +2,7 @@
 
 from lxml import etree
 
+from app.core.dtd_models import AttributeDef, ContentNode, DTDSchema, ElementDef
 from app.services.llm_service import merge_fill_empty_only
 
 
@@ -42,6 +43,29 @@ def test_merge_does_not_add_attributes_from_llm():
 
     assert "status" not in root.attrib
     assert root.attrib.get("id") == "ai-id"
+
+
+def test_merge_does_not_copy_text_onto_empty_element():
+    schema = DTDSchema(
+        elements={
+            "saldo-incoming": ElementDef(
+                name="saldo-incoming",
+                content_raw="EMPTY",
+                content_model=ContentNode(kind="EMPTY"),
+                attributes={
+                    "value": AttributeDef(name="value", attr_type="CDATA", default_decl="#IMPLIED"),
+                },
+            )
+        }
+    )
+    original = '<saldo-incoming value=""/>'
+    llm_output = '<saldo-incoming value="150000.00">850000.00</saldo-incoming>'
+
+    result = merge_fill_empty_only(original, llm_output, schema=schema)
+    root = etree.fromstring(result.encode("utf-8"))
+
+    assert root.attrib.get("value") == "150000.00"
+    assert not (root.text or "").strip()
 
 
 def test_merge_preserves_already_filled_values():
