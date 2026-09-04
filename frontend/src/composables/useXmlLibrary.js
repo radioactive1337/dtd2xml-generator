@@ -13,7 +13,6 @@ import {
   syncSharedLibrary,
 } from '../api/xmlLibrary'
 import { translateApiError } from '../utils/apiErrors'
-import { extractPushWarnings } from '../utils/gitPushWarnings'
 
 export function useXmlLibrary({ onLoadDocument } = {}) {
   const activeScope = ref('shared')
@@ -122,13 +121,6 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
         }
       }
       return result
-    } catch (err) {
-      if (!extractPushWarnings(err)) {
-        libraryError.value = translateApiError(
-          err?.response?.data?.detail || err?.message || String(err),
-        )
-      }
-      throw err
     } finally {
       gitPushing.value = false
     }
