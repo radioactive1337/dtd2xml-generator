@@ -29,7 +29,11 @@ from app.core.attribute_rules_models import (
     RuleContext,
 )
 from app.core.dtd_models import DTDSchema
-from app.core.xml_tree import element_dot_path, is_fillable_attribute_value
+from app.core.xml_tree import (
+    element_dot_path,
+    is_fillable_attribute_value,
+    prefixed_element_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -181,30 +185,13 @@ def _element_matches_rule(rule_element: str, actual: str) -> bool:
     return bool(rule_local) and rule_local == actual_local
 
 
-def _element_name_for_rules(el: etree._Element) -> str:
-    """Prefer ``cs:attribute`` over Clark ``{uri}attribute`` when a prefix is known."""
-    tag = el.tag
-    if not isinstance(tag, str):
-        return ""
-    if not tag.startswith("{"):
-        return tag
-    qname = etree.QName(tag)
-    for prefix, uri in (el.nsmap or {}).items():
-        if uri != qname.namespace:
-            continue
-        if prefix:
-            return f"{prefix}:{qname.localname}"
-        return qname.localname
-    return qname.localname
-
-
 def attribute_sibling_context(el: etree._Element) -> dict[str, str]:
     """Own attributes plus ``parent.*`` so checks can see the parent ``cs:attribute``."""
     ctx = dict(el.attrib)
     parent = el.getparent()
     if parent is None or not isinstance(parent.tag, str):
         return ctx
-    ctx["parent.__element__"] = _element_name_for_rules(parent)
+    ctx["parent.__element__"] = prefixed_element_name(parent)
     for key, val in parent.attrib.items():
         if key == "xmlns" or key.startswith("xmlns:"):
             continue
@@ -430,7 +417,7 @@ def validate_document(
     for el in root.iter():
         if not isinstance(el.tag, str):
             continue
-        elem_name = _element_name_for_rules(el)
+        elem_name = prefixed_element_name(el)
         elem_def = schema.elements.get(el.tag) if schema else None
         if schema and elem_def is None:
             elem_def = schema.elements.get(elem_name)

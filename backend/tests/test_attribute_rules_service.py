@@ -707,6 +707,8 @@ def test_cs_attribute_nested_leaf_names_on_sample_person():
     assert len(inn_errors) == 1
     assert inn_errors[0].value == "2700001989072700"
     assert inn_errors[0].element == "cs:attribute"
+    assert "{" not in inn_errors[0].path
+    assert "cs:attribute" in inn_errors[0].path
 
     assert not any(v.value == "123456789189" for v in report.errors)
     assert not any(v.value == "Россия" for v in report.errors + report.warnings)

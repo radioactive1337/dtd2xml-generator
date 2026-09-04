@@ -78,6 +78,23 @@ def find_elements_by_dot_path(
     return [current]
 
 
+def prefixed_element_name(el: etree._Element) -> str:
+    """XML-style name: ``cs:attribute``, not Clark ``{http://…}attribute``."""
+    tag = el.tag
+    if not isinstance(tag, str):
+        return ""
+    if not tag.startswith("{"):
+        return tag
+    qname = etree.QName(tag)
+    for prefix, uri in (el.nsmap or {}).items():
+        if uri != qname.namespace:
+            continue
+        if prefix:
+            return f"{prefix}:{qname.localname}"
+        return qname.localname
+    return qname.localname
+
+
 def element_dot_path(el: etree._Element) -> str:
     """Dot-separated path from document root, with ``[index]`` for duplicate siblings."""
     chain: list[etree._Element] = []
@@ -89,13 +106,13 @@ def element_dot_path(el: etree._Element) -> str:
 
     segments: list[str] = []
     for index, node in enumerate(chain):
-        tag = node.tag
+        display = prefixed_element_name(node)
         if index > 0:
             parent = chain[index - 1]
-            siblings = [child for child in parent if child.tag == tag]
+            siblings = [child for child in parent if child.tag == node.tag]
             if len(siblings) > 1:
-                tag = f"{tag}[{siblings.index(node)}]"
-        segments.append(tag)
+                display = f"{display}[{siblings.index(node)}]"
+        segments.append(display)
     return ".".join(segments)
 
 

@@ -10,6 +10,7 @@ from app.core.xml_tree import (
     git_push_attribute_fill_error,
     is_fillable_attribute_value,
     prefill_empty_enums,
+    prefixed_element_name,
 )
 
 
@@ -57,6 +58,37 @@ def test_element_dot_path_uses_sibling_index():
 
     assert element_dot_path(records[0]) == "PayDoc.Body.Record[0]"
     assert element_dot_path(records[1]) == "PayDoc.Body.Record[1]"
+
+
+def test_element_dot_path_uses_xml_prefixes_not_clark_notation():
+    ns = "http://www.faktura.ru/cs"
+    xml = (
+        f'<manage-bank-customer-objects xmlns:cs="{ns}">'
+        "<cs:update-object>"
+        '<cs:object type="person">'
+        '<cs:attribute name="Passport">'
+        '<cs:attribute name="CardSeries" value="a"/>'
+        "</cs:attribute></cs:object></cs:update-object>"
+        "</manage-bank-customer-objects>"
+    )
+    root = etree.fromstring(xml.encode("utf-8"))
+    leaf = root.find(f".//{{{ns}}}attribute[@name='CardSeries']")
+    assert prefixed_element_name(leaf) == "cs:attribute"
+def test_element_dot_path_indexes_prefixed_siblings():
+    ns = "http://www.faktura.ru/cs"
+    xml = (
+        f'<root xmlns:cs="{ns}">'
+        '<cs:attribute name="FirstName" value="A"/>'
+        '<cs:attribute name="Passport">'
+        '<cs:attribute name="CardSeries" value="a"/>'
+        "</cs:attribute>"
+        "</root>"
+    )
+    root = etree.fromstring(xml.encode("utf-8"))
+    series = root.find(f".//{{{ns}}}attribute[@name='CardSeries']")
+    assert (
+        element_dot_path(series) == "root.cs:attribute[1].cs:attribute"
+    )
 
 
 def test_empty_and_id_placeholder_are_fillable():
