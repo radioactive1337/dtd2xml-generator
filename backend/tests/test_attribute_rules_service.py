@@ -562,6 +562,48 @@ def test_validate_with_schema_attr_def_for_placeholder():
     assert not report_ok.has_errors
 
 
+def test_parent_name_gates_check():
+    ruleset = _ruleset(
+        {
+            "rules": [
+                {
+                    "id": "series",
+                    "element": "cs:attribute",
+                    "attr": "value",
+                    "severity": "error",
+                    "applies_to": ["git_push"],
+                    "checks": [
+                        {
+                            "type": "cross_field",
+                            "op": "regex_if",
+                            "other": "name",
+                            "when": "CardSeries",
+                            "parent_name": "Passport",
+                            "pattern": "^[0-9]{4}$",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    xml_bad = (
+        '<root xmlns:cs="http://example.com/cs">'
+        '<cs:attribute name="Passport">'
+        '<cs:attribute name="CardSeries" value="a"/>'
+        "</cs:attribute></root>"
+    )
+    xml_elsewhere = (
+        '<root xmlns:cs="http://example.com/cs">'
+        '<cs:attribute name="Other">'
+        '<cs:attribute name="CardSeries" value="a"/>'
+        "</cs:attribute></root>"
+    )
+    bad = rules_svc.validate_document(xml_bad, context="git_push", ruleset=ruleset)
+    assert len(bad.errors) == 1
+    skipped = rules_svc.validate_document(xml_elsewhere, context="git_push", ruleset=ruleset)
+    assert not skipped.has_errors
+
+
 def test_rules_for_matches_clark_notation_to_prefixed_element():
     ruleset = _ruleset(
         {
@@ -661,7 +703,7 @@ def test_cs_attribute_nested_leaf_names_on_sample_person():
     ruleset = rules_svc._load_ruleset_from_path(rules_svc.ATTRIBUTE_RULES_FILE)
     report = rules_svc.validate_document(_CS_PERSON_XML, context="post_fill", ruleset=ruleset)
 
-    inn_errors = [v for v in report.errors if v.rule_id == "cs-attribute-inn"]
+    inn_errors = [v for v in report.errors if v.rule_id == "cs-inn-org"]
     assert len(inn_errors) == 1
     assert inn_errors[0].value == "2700001989072700"
     assert inn_errors[0].element == "cs:attribute"
@@ -671,9 +713,24 @@ def test_cs_attribute_nested_leaf_names_on_sample_person():
     assert not any(v.value == "full" for v in report.errors + report.warnings)
     assert not any(v.value == "Legal" for v in report.errors + report.warnings)
     assert not any(v.value == "Phone" for v in report.errors + report.warnings)
-    assert not any(
-        v.rule_id == "cs-attribute-dn" for v in report.errors + report.warnings
-    )
+
+    contact_warn = [v for v in report.warnings if v.rule_id == "cs-contact-info"]
+    assert len(contact_warn) == 1
+    assert contact_warn[0].value == "56765"
+
+
+def test_cs_passport_series_rejects_single_letter_on_git_push():
+    ruleset = rules_svc._load_ruleset_from_path(rules_svc.ATTRIBUTE_RULES_FILE)
+    for series in ("a", "A"):
+        xml = (
+            '<root xmlns:cs="http://example.com/cs">'
+            '<cs:object type="person">'
+            f'<cs:attribute name="Passport">'
+            f'<cs:attribute name="CardSeries" value="{series}"/>'
+            "</cs:attribute></cs:object></root>"
+        )
+        report = rules_svc.validate_document(xml, context="git_push", ruleset=ruleset)
+        assert any(v.rule_id == "cs-passport-rf" and v.value == series for v in report.errors), series
 
 
 def test_cs_attribute_leaf_name_not_dotted_path():

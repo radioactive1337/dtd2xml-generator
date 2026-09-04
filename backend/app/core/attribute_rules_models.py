@@ -46,6 +46,12 @@ class RuleCheck(BaseModel):
     when: str | None = None
     map: dict[str, str] = Field(default_factory=dict)
 
+    # Optional parent-element gate (cs:attribute trees). If set, the check
+    # does not apply unless the parent matches — not a failure, just skipped.
+    parent_element: str | None = None
+    parent_name: str | None = None
+    parent_value: str | None = None
+
     @model_validator(mode="after")
     def _validate_type_fields(self) -> RuleCheck:
         if self.type == "regex":

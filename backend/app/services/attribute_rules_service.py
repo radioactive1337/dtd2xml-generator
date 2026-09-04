@@ -198,6 +198,36 @@ def _element_name_for_rules(el: etree._Element) -> str:
     return qname.localname
 
 
+def attribute_sibling_context(el: etree._Element) -> dict[str, str]:
+    """Own attributes plus ``parent.*`` so checks can see the parent ``cs:attribute``."""
+    ctx = dict(el.attrib)
+    parent = el.getparent()
+    if parent is None or not isinstance(parent.tag, str):
+        return ctx
+    ctx["parent.__element__"] = _element_name_for_rules(parent)
+    for key, val in parent.attrib.items():
+        if key == "xmlns" or key.startswith("xmlns:"):
+            continue
+        ctx[f"parent.{key}"] = val
+    return ctx
+
+
+def _parent_context_mismatch(check: RuleCheck, siblings: dict[str, str] | None) -> bool:
+    """True when a parent_* constraint is set and the parent does not match."""
+    ctx = siblings or {}
+    if check.parent_element is not None:
+        actual = (ctx.get("parent.__element__") or "").strip()
+        if not _element_matches_rule(check.parent_element, actual):
+            return True
+    if check.parent_name is not None:
+        if (ctx.get("parent.name") or "").strip() != check.parent_name:
+            return True
+    if check.parent_value is not None:
+        if (ctx.get("parent.value") or "").strip() != check.parent_value:
+            return True
+    return False
+
+
 def is_deny_copy(attr: str, ruleset: AttributeRuleSet | None = None) -> bool:
     """Return True when *attr* must never be copied as-is from Git references."""
     ruleset = ruleset if ruleset is not None else load_attribute_rules()
@@ -282,6 +312,8 @@ def _cross_field_fails(check: RuleCheck, value: str, siblings: dict[str, str]) -
 def _check_fails(
     check: RuleCheck, value: str, *, attr_def=None, siblings: dict[str, str] | None = None
 ) -> bool:
+    if _parent_context_mismatch(check, siblings):
+        return False
     stripped = value.strip()
     if check.type == "regex":
         assert check.pattern is not None
@@ -403,7 +435,7 @@ def validate_document(
         if schema and elem_def is None:
             elem_def = schema.elements.get(elem_name)
         path = element_dot_path(el)
-        siblings = dict(el.attrib)
+        siblings = attribute_sibling_context(el)
         for attr_name, attr_value in el.attrib.items():
             if attr_name == "xmlns" or attr_name.startswith("xmlns:"):
                 continue

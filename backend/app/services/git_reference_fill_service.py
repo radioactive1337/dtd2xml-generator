@@ -519,7 +519,7 @@ def _accept_batch_values(
             attr_def=job.attr_def,
             dot_path=job.dot,
             ruleset=ruleset,
-            siblings=dict(job.element.attrib),
+            siblings=rules_svc.attribute_sibling_context(job.element),
         ):
             accepted.append((job, candidate))
         else:
@@ -611,7 +611,7 @@ async def _run_ai_fill_jobs(
                             attr_def=job.attr_def,
                             dot_path=job.dot,
                             ruleset=ruleset,
-                            siblings=dict(job.element.attrib),
+                            siblings=rules_svc.attribute_sibling_context(job.element),
                             cancel_event=cancel_event,
                         )
                     except asyncio.CancelledError:
