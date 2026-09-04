@@ -190,7 +190,16 @@
             <span>Я ознакомился с предупреждениями и всё равно хочу отправить</span>
           </label>
         </div>
-        <p v-if="gitPushError" class="push-feedback push-feedback-error">{{ gitPushError }}</p>
+        <div v-if="gitPushError" class="push-feedback push-feedback-error">
+          <p v-if="pushErrorParsed.heading" class="push-feedback-heading">{{ pushErrorParsed.heading }}</p>
+          <ul v-if="pushErrorParsed.items.length" class="push-feedback-list">
+            <li v-for="(item, index) in pushErrorParsed.items" :key="index">
+              <code v-if="item.location" class="push-feedback-loc">{{ item.location }}</code>
+              <span>{{ item.message }}</span>
+            </li>
+          </ul>
+          <p v-if="pushErrorParsed.more" class="push-feedback-more">{{ pushErrorParsed.more }}</p>
+        </div>
         <p v-else-if="gitPushMessage" class="push-feedback push-feedback-success">{{ gitPushMessage }}</p>
         <div class="save-dialog-actions">
           <button
@@ -242,7 +251,7 @@ import { escapeXmlText, unescapeXmlText } from '../utils/escapeXml'
 import { clearAttributeValues } from '../utils/clearAttributeValues'
 import { readXmlFileAsText } from '../utils/readXmlFile'
 import { peekXmlRootElement } from '../utils/xmlPaths'
-import { formatPushWarningLabel } from '../utils/gitPushWarnings'
+import { formatPushWarningLabel, parsePushFeedback } from '../utils/gitPushWarnings'
 import { formatWarnings } from '../utils/ruPlural'
 import { useTheme } from '../composables/useTheme'
 
@@ -311,6 +320,8 @@ const pushWarningsHeading = computed(() => {
   const count = props.gitPushWarningCount || props.gitPushWarnings.length
   return `Перед отправкой в Git: ${formatWarnings(count)}`
 })
+
+const pushErrorParsed = computed(() => parsePushFeedback(props.gitPushError))
 
 const pushSubmitDisabled = computed(() => {
   if (!pushFilename.value.trim() || props.gitPushSubmitting) return true
@@ -943,11 +954,52 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
 .push-feedback {
   margin: 0;
   font-size: 12px;
+  line-height: 1.4;
 }
 
 .push-feedback-error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 40%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger, #ef4444) 12%, transparent);
   color: var(--danger, #ef4444);
-  white-space: pre-wrap;
+}
+
+.push-feedback-heading {
+  margin: 0;
+  font-weight: 600;
+}
+
+.push-feedback-list {
+  margin: 0;
+  padding: 0 0 0 1.15em;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.push-feedback-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.push-feedback-loc {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  opacity: 0.85;
+}
+
+.push-feedback-more {
+  margin: 0;
+  color: var(--text-muted);
 }
 
 .push-feedback-success {

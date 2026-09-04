@@ -21,3 +21,46 @@ export function formatPushWarningLabel(warning) {
   if (location && warning.message) return `${location} — ${warning.message}`
   return warning.message || location || ''
 }
+
+const LOCATION_ITEM = /^(.+@\S+):\s+(.+)$/
+
+export function parsePushFeedbackItem(line) {
+  const text = (line || '').trim()
+  const match = text.match(LOCATION_ITEM)
+  if (match) return { location: match[1], message: match[2] }
+  return { location: '', message: text }
+}
+
+export function parsePushFeedback(text) {
+  const raw = String(text || '')
+    .replace(/\r\n/g, '\n')
+    .trim()
+  if (!raw) return { heading: '', items: [], more: '' }
+
+  const lines = raw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const items = []
+  const headingParts = []
+  let more = ''
+
+  for (const line of lines) {
+    if (line.startsWith('…') || line.startsWith('...')) {
+      more = line
+      continue
+    }
+    if (line.startsWith('- ')) {
+      items.push(parsePushFeedbackItem(line.slice(2)))
+      continue
+    }
+    headingParts.push(line)
+  }
+
+  return {
+    heading: headingParts.join(' '),
+    items,
+    more,
+  }
+}
+

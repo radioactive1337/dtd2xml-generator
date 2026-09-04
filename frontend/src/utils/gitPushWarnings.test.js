@@ -3,6 +3,8 @@ import {
   PUSH_WARNINGS_REQUIRE_ACK,
   extractPushWarnings,
   formatPushWarningLabel,
+  parsePushFeedback,
+  parsePushFeedbackItem,
 } from './gitPushWarnings'
 
 describe('extractPushWarnings', () => {
@@ -31,6 +33,43 @@ describe('extractPushWarnings', () => {
     expect(
       extractPushWarnings({ response: { data: { detail: 'Документ не прошёл проверку' } } }),
     ).toBeNull()
+  })
+})
+
+describe('parsePushFeedback', () => {
+  it('splits a rule-check error into a heading and list items', () => {
+    const text = [
+      'Документ не прошёл проверку правил атрибутов для отправки в Git:',
+      '- PayDoc.attribute[0]@value: ИНН организации (CorpSender): 10 цифр',
+      '- PayDoc.attribute[1]@value: Паспорт РФ: серия 4 цифры, номер 6 цифр, код подразделения XXX-XXX, дата YYYY-MM-DD',
+      '… и ещё 3',
+    ].join('\n')
+    expect(parsePushFeedback(text)).toEqual({
+      heading: 'Документ не прошёл проверку правил атрибутов для отправки в Git:',
+      items: [
+        {
+          location: 'PayDoc.attribute[0]@value',
+          message: 'ИНН организации (CorpSender): 10 цифр',
+        },
+        {
+          location: 'PayDoc.attribute[1]@value',
+          message:
+            'Паспорт РФ: серия 4 цифры, номер 6 цифр, код подразделения XXX-XXX, дата YYYY-MM-DD',
+        },
+      ],
+      more: '… и ещё 3',
+    })
+  })
+
+  it('keeps a namespaced path together when splitting location and message', () => {
+    expect(
+      parsePushFeedbackItem(
+        '{http://example.com/cs}attribute[0]@value: ИНН организации (CorpSender): 10 цифр',
+      ),
+    ).toEqual({
+      location: '{http://example.com/cs}attribute[0]@value',
+      message: 'ИНН организации (CorpSender): 10 цифр',
+    })
   })
 })
 
