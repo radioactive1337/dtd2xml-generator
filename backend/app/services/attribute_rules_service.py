@@ -156,6 +156,48 @@ def _matches_pattern(name: str, pattern: str) -> bool:
     return fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(name.lower(), pattern.lower())
 
 
+def _local_element_name(name: str) -> str:
+    """Strip Clark ``{uri}local`` or DTD ``prefix:local`` down to the local name."""
+    text = (name or "").strip()
+    if text.startswith("{") and "}" in text:
+        return text.split("}", 1)[1]
+    if ":" in text:
+        return text.split(":", 1)[1]
+    return text
+
+
+def _element_matches_rule(rule_element: str, actual: str) -> bool:
+    """Match a rule's ``element`` against a parsed tag, including namespaces.
+
+    ``cs:attribute`` must apply to ``{http://…}attribute`` (lxml Clark notation)
+    and to a reconstructed prefixed name from the element's ``nsmap``.
+    """
+    if not rule_element or not actual:
+        return False
+    if rule_element == actual:
+        return True
+    rule_local = _local_element_name(rule_element)
+    actual_local = _local_element_name(actual)
+    return bool(rule_local) and rule_local == actual_local
+
+
+def _element_name_for_rules(el: etree._Element) -> str:
+    """Prefer ``cs:attribute`` over Clark ``{uri}attribute`` when a prefix is known."""
+    tag = el.tag
+    if not isinstance(tag, str):
+        return ""
+    if not tag.startswith("{"):
+        return tag
+    qname = etree.QName(tag)
+    for prefix, uri in (el.nsmap or {}).items():
+        if uri != qname.namespace:
+            continue
+        if prefix:
+            return f"{prefix}:{qname.localname}"
+        return qname.localname
+    return qname.localname
+
+
 def is_deny_copy(attr: str, ruleset: AttributeRuleSet | None = None) -> bool:
     """Return True when *attr* must never be copied as-is from Git references."""
     ruleset = ruleset if ruleset is not None else load_attribute_rules()
@@ -175,6 +217,8 @@ def rules_for(
     """Return matching rules: scoped (element+attr) first, then global by attr name.
 
     ``attr`` on a rule may be a glob pattern (e.g. ``"passport*"``).
+    ``element`` matches the DTD name (``cs:attribute``), the local name, or
+    lxml Clark notation ``{uri}attribute``.
     """
     ruleset = ruleset if ruleset is not None else load_attribute_rules()
     elem = (element or "").strip()
@@ -190,7 +234,7 @@ def rules_for(
         if context is not None and context not in rule.applies_to:
             continue
         if rule.element:
-            if rule.element == elem:
+            if _element_matches_rule(rule.element, elem):
                 scoped.append(rule)
         else:
             fallback.append(rule)
@@ -354,7 +398,10 @@ def validate_document(
     for el in root.iter():
         if not isinstance(el.tag, str):
             continue
+        elem_name = _element_name_for_rules(el)
         elem_def = schema.elements.get(el.tag) if schema else None
+        if schema and elem_def is None:
+            elem_def = schema.elements.get(elem_name)
         path = element_dot_path(el)
         siblings = dict(el.attrib)
         for attr_name, attr_value in el.attrib.items():
@@ -362,7 +409,7 @@ def validate_document(
                 continue
             attr_def = elem_def.attributes.get(attr_name) if elem_def else None
             for violation in validate_attribute(
-                el.tag,
+                elem_name,
                 attr_name,
                 attr_value,
                 context=context,

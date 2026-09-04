@@ -560,3 +560,149 @@ def test_validate_with_schema_attr_def_for_placeholder():
 
     report_ok = rules_svc.validate_document('<PayDoc active="true"/>', schema, context="git_push", ruleset=ruleset)
     assert not report_ok.has_errors
+
+
+def test_rules_for_matches_clark_notation_to_prefixed_element():
+    ruleset = _ruleset(
+        {
+            "rules": [
+                {
+                    "id": "cs-val",
+                    "element": "cs:attribute",
+                    "attr": "value",
+                    "severity": "error",
+                    "applies_to": ["post_fill"],
+                    "checks": [
+                        {
+                            "type": "cross_field",
+                            "op": "regex_if",
+                            "other": "name",
+                            "when": "Inn",
+                            "pattern": "^[0-9]{12}$",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    clark = "{http://example.com/cs}attribute"
+    matched = rules_svc.rules_for(clark, "value", ruleset=ruleset, context="post_fill")
+    assert [r.id for r in matched] == ["cs-val"]
+
+    ok = rules_svc.validate_attribute(
+        clark,
+        "value",
+        "123456789189",
+        context="post_fill",
+        ruleset=ruleset,
+        siblings={"name": "Inn", "value": "123456789189"},
+    )
+    assert ok == []
+
+    bad = rules_svc.validate_attribute(
+        clark,
+        "value",
+        "2700001989072700",
+        context="post_fill",
+        ruleset=ruleset,
+        siblings={"name": "Inn", "value": "2700001989072700"},
+    )
+    assert len(bad) == 1
+
+
+_CS_PERSON_XML = """
+<root xmlns:cs="http://example.com/cs">
+  <cs:object type="person">
+    <cs:attribute name="NotAddContract" value="true"/>
+    <cs:attribute name="SystemRegNumber" value="213787"/>
+    <cs:attribute name="Inn" value="123456789189"/>
+    <cs:attribute name="LastName" value="Зайцев"/>
+    <cs:attribute name="FirstName" value="Никита"/>
+    <cs:attribute name="MiddleName" value="Иванович"/>
+    <cs:attribute name="birth-date" value="1986-12-16"/>
+    <cs:attribute name="citizenship" value="Россия"/>
+    <cs:attribute name="Key">
+      <cs:attribute name="SubjectDn" value="CN=zaytsev_ni, OU=lite client 724811, O=faktura.lite, L=Novosibirsk, C=RU"/>
+      <cs:attribute name="IssuerDn" value="CN=Class 2 CA, OU=CAs, O=FTC, C=RU"/>
+    </cs:attribute>
+    <cs:attribute name="Addresses">
+      <cs:attribute name="Address" value="Legal">
+        <cs:attribute name="Index" value="408845"/>
+        <cs:attribute name="Area" value=""/>
+        <cs:attribute name="City" value=""/>
+        <cs:attribute name="Street" value="проспект30"/>
+      </cs:attribute>
+    </cs:attribute>
+    <cs:attribute name="Passport">
+      <cs:attribute name="CardSeries" value="5009"/>
+      <cs:attribute name="CardNumber" value="345543"/>
+      <cs:attribute name="CardIssueDate" value="2003-08-20"/>
+      <cs:attribute name="CardIssuer" value="УФМС Ельцовка"/>
+      <cs:attribute name="UnitCode" value="777-888"/>
+      <cs:attribute name="CardType" value="Паспорт"/>
+    </cs:attribute>
+    <cs:attribute name="IdentStage" value="full"/>
+    <cs:attribute name="Contacts">
+      <cs:attribute name="Contact" value="Phone">
+        <cs:attribute name="ContactInfo" value="56765"/>
+      </cs:attribute>
+    </cs:attribute>
+    <cs:attribute name="CorpSender">
+      <cs:attribute name="Name" value="РКЦ ЛУЗА"/>
+      <cs:attribute name="Inn" value="2700001989072700"/>
+      <cs:attribute name="Bic" value="043388000"/>
+    </cs:attribute>
+  </cs:object>
+</root>
+"""
+
+
+def test_cs_attribute_nested_leaf_names_on_sample_person():
+    ruleset = rules_svc._load_ruleset_from_path(rules_svc.ATTRIBUTE_RULES_FILE)
+    report = rules_svc.validate_document(_CS_PERSON_XML, context="post_fill", ruleset=ruleset)
+
+    inn_errors = [v for v in report.errors if v.rule_id == "cs-attribute-inn"]
+    assert len(inn_errors) == 1
+    assert inn_errors[0].value == "2700001989072700"
+    assert inn_errors[0].element == "cs:attribute"
+
+    assert not any(v.value == "123456789189" for v in report.errors)
+    assert not any(v.value == "Россия" for v in report.errors + report.warnings)
+    assert not any(v.value == "full" for v in report.errors + report.warnings)
+    assert not any(v.value == "Legal" for v in report.errors + report.warnings)
+    assert not any(v.value == "Phone" for v in report.errors + report.warnings)
+    assert not any(
+        v.rule_id == "cs-attribute-dn" for v in report.errors + report.warnings
+    )
+
+
+def test_cs_attribute_leaf_name_not_dotted_path():
+    ruleset = _ruleset(
+        {
+            "rules": [
+                {
+                    "id": "dotted",
+                    "element": "cs:attribute",
+                    "attr": "value",
+                    "severity": "error",
+                    "applies_to": ["post_fill"],
+                    "checks": [
+                        {
+                            "type": "cross_field",
+                            "op": "regex_if",
+                            "other": "name",
+                            "when": "Key.SubjectDn",
+                            "pattern": "^FAIL$",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    xml = (
+        '<root xmlns:cs="http://example.com/cs">'
+        '<cs:attribute name="SubjectDn" value="CN=zaytsev_ni, C=RU"/>'
+        "</root>"
+    )
+    report = rules_svc.validate_document(xml, context="post_fill", ruleset=ruleset)
+    assert not report.has_errors
