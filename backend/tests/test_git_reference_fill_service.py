@@ -96,6 +96,9 @@ def test_choose_fill_mode_is_pure_and_ignores_global_config():
     assert git_fill.choose_fill_mode(enum_def, stats, deny_copy=True) == "skip"
     assert git_fill.choose_fill_mode(None, None) == "skip"
 
+    declared = AttributeDef(name="document_type", attr_type="CDATA", default_decl='"d"')
+    assert git_fill.choose_fill_mode(declared, stats) == "skip"
+
 
 def test_choose_fill_mode_uses_diversity_ratio_not_absolute_count():
     # Small corpus (2 docs) -> not enough data to trust a ratio, always copy.

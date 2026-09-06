@@ -21,6 +21,7 @@ from app.core.dtd_models import DTDSchema
 from app.core.logging_config import truncate
 from app.core.xml_tree import (
     ProtectedAttrs,
+    apply_declared_dtd_defaults,
     element_allows_pcdata_fill,
     element_dot_path,
     element_path,
@@ -1042,6 +1043,8 @@ def collect_fill_tasks(
             if (tree_path, attr_name) in protected_attrs:
                 continue
             attr_def = elem_def.attributes.get(attr_name) if elem_def else None
+            if attr_def is not None and attr_def.is_declared_default():
+                continue
             if fill_empty_only:
                 if is_fillable_attribute_value(attr_value, attr_def=attr_def):
                     attr_names.append(attr_name)
@@ -1184,32 +1187,9 @@ def apply_schema_default_fill(
     for the attribute (#FIXED, a literal default, or a single-value enum).
     No attribute-name guesswork, so it applies equally to any schema.
     """
-    root = etree.fromstring(xml_text.encode("utf-8"))
-    filled_paths: list[str] = []
-
-    for el in root.iter():
-        elem_def = schema_element_def(el, schema)
-        if elem_def is None:
-            continue
-        tree_path = element_path(el)
-        for attr_name, attr_value in list(el.attrib.items()):
-            if (tree_path, attr_name) in protected_attrs:
-                continue
-            if not is_fillable_attribute_value(attr_value):
-                continue
-            attr_def = elem_def.attributes.get(attr_name)
-            default = attr_def.dtd_default_value() if attr_def else None
-            if not default:
-                continue
-            el.set(attr_name, default)
-            filled_paths.append(f"{element_dot_path(el)}@{attr_name}")
-
-    if not filled_paths:
-        return xml_text, []
-    new_xml = etree.tostring(
-        root, pretty_print=True, encoding="UTF-8", xml_declaration=False
-    ).decode("UTF-8")
-    return new_xml, filled_paths
+    return apply_declared_dtd_defaults(
+        xml_text, schema, protected_attrs=protected_attrs
+    )
 
 
 def apply_generic_placeholder_fill(

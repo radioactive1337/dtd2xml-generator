@@ -5,6 +5,7 @@ from lxml import etree
 from app.core.dtd_models import AttributeDef, ContentNode, DTDSchema, ElementDef
 from app.core.xml_tree import (
     AttributeFillStats,
+    apply_declared_dtd_defaults,
     compute_attribute_fill_stats,
     element_allows_pcdata_fill,
     element_dot_path,
@@ -113,6 +114,70 @@ def test_enum_pool_values_are_not_placeholders():
     assert not is_fillable_attribute_value("string", attr_def=attr_def)
     assert not is_fillable_attribute_value("number", attr_def=attr_def)
     assert is_fillable_attribute_value("", attr_def=attr_def)
+
+
+def test_dtd_literal_default_is_not_a_placeholder():
+    attr_def = AttributeDef(
+        name="document_type",
+        attr_type="CDATA",
+        default_decl='"d"',
+    )
+    assert is_fillable_attribute_value("", attr_def=attr_def)
+    assert not is_fillable_attribute_value("d", attr_def=attr_def)
+    assert not is_fillable_attribute_value("other", attr_def=attr_def)
+
+
+def test_apply_declared_dtd_defaults_fills_empty_literal():
+    schema = DTDSchema(
+        elements={
+            "manage-bank-customer-objects": ElementDef(
+                name="manage-bank-customer-objects",
+                content_raw="ANY",
+                content_model=ContentNode(kind="ANY"),
+                attributes={
+                    "document_type": AttributeDef(
+                        name="document_type",
+                        attr_type="CDATA",
+                        default_decl='"d"',
+                    ),
+                    "source": AttributeDef(
+                        name="source",
+                        attr_type="CDATA",
+                        default_decl="#IMPLIED",
+                    ),
+                },
+            ),
+        }
+    )
+    xml = '<manage-bank-customer-objects document_type="" source=""/>'
+    new_xml, paths = apply_declared_dtd_defaults(xml, schema)
+    root = etree.fromstring(new_xml.encode("utf-8"))
+    assert root.get("document_type") == "d"
+    assert root.get("source") == ""
+    assert paths == ["manage-bank-customer-objects@document_type"]
+
+
+def test_apply_declared_dtd_defaults_does_not_overwrite_other_value():
+    schema = DTDSchema(
+        elements={
+            "manage-bank-customer-objects": ElementDef(
+                name="manage-bank-customer-objects",
+                content_raw="ANY",
+                content_model=ContentNode(kind="ANY"),
+                attributes={
+                    "document_type": AttributeDef(
+                        name="document_type",
+                        attr_type="CDATA",
+                        default_decl='"d"',
+                    ),
+                },
+            ),
+        }
+    )
+    xml = '<manage-bank-customer-objects document_type="payment"/>'
+    new_xml, paths = apply_declared_dtd_defaults(xml, schema)
+    assert new_xml == xml
+    assert paths == []
 
 
 def test_compute_attribute_fill_stats_counts_placeholders_as_unfilled():

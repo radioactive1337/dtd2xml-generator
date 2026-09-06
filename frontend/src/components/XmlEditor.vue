@@ -277,7 +277,6 @@ const props = defineProps({
   gitPushWarningCount: { type: Number, default: 0 },
   showCompareButton: { type: Boolean, default: false },
   comparing: { type: Boolean, default: false },
-  attributeDefaults: { type: Object, default: () => ({}) },
 })
 
 const emit = defineEmits([
@@ -330,8 +329,8 @@ watch(keepCsName, (val) => {
 
 const clearAttributesTitle = computed(() =>
   keepCsName.value
-    ? 'Очистить значения атрибутов в выделении. name у тегов cs:* не трогается. Значения по умолчанию из DTD восстанавливаются.'
-    : 'Очистить значения атрибутов в выделении. Значения по умолчанию из DTD восстанавливаются.',
+    ? 'Очистить значения атрибутов в выделении. name у тегов cs:* не трогается. Значения из DTD подставятся при заполнении.'
+    : 'Очистить значения всех атрибутов в выделении (attr=""). Значения из DTD подставятся при заполнении.',
 )
 
 const pushFolderName = computed(
@@ -657,11 +656,7 @@ function clearAttributesInSelection() {
   const prefix = openTagPrefix(model.getValue().slice(0, startOffset))
   editor.executeEdits('xml-text-transform', [{
     range: selection,
-    text: clearAttributeValues(text, {
-      keepCsName: keepCsName.value,
-      prefix,
-      attributeDefaults: props.attributeDefaults,
-    }),
+    text: clearAttributeValues(text, { keepCsName: keepCsName.value, prefix }),
     forceMoveMarkers: true,
   }])
   notifyContentChange()

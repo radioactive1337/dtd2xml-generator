@@ -206,20 +206,64 @@ def is_fillable_attribute_value(
     *,
     attr_def: AttributeDef | None = None,
 ) -> bool:
-    """True when a value is empty or still a builder placeholder worth replacing."""
+    """True when a value is empty or still a builder placeholder worth replacing.
+
+    DTD-declared defaults such as ``document_type CDATA "d"`` are real values,
+    not placeholders. Fill restores them from the schema and must not overwrite
+    them with Git/AI data. ``attr_def`` is accepted so callers can pass the
+    schema definition without a separate code path.
+    """
     stripped = value.strip()
     if not stripped:
         return True
     if stripped == "id-1":
         return True
-    if attr_def is None:
-        return False
-    if attr_def.attr_type == "ENUM" and len(attr_def.allowed_values) > 1:
+    if attr_def is not None and attr_def.attr_type == "ENUM" and len(attr_def.allowed_values) > 1:
         # Builder already sampled from the pool; any in-pool value is final.
         return False
-    if constrained := attr_def.dtd_default_value():
-        return stripped == constrained
     return False
+
+
+def apply_declared_dtd_defaults(
+    xml_text: str,
+    schema: DTDSchema | None,
+    *,
+    protected_attrs: ProtectedAttrs = frozenset(),
+) -> tuple[str, list[str]]:
+    """Write DTD-declared defaults into empty attributes.
+
+    Used before Git/AI fill so attributes like ``document_type CDATA "d"``
+    get the schema value and are not treated as free-form fields.
+    """
+    if schema is None:
+        return xml_text, []
+
+    root = etree.fromstring(xml_text.encode("utf-8"))
+    filled_paths: list[str] = []
+
+    for el in root.iter():
+        elem_def = schema_element_def(el, schema)
+        if elem_def is None:
+            continue
+        tree_path = element_path(el)
+        for attr_name, attr_value in list(el.attrib.items()):
+            if (tree_path, attr_name) in protected_attrs:
+                continue
+            if not is_fillable_attribute_value(attr_value):
+                continue
+            attr_def = elem_def.attributes.get(attr_name)
+            default = attr_def.dtd_default_value() if attr_def else None
+            if not default:
+                continue
+            el.set(attr_name, default)
+            filled_paths.append(f"{element_dot_path(el)}@{attr_name}")
+
+    if not filled_paths:
+        return xml_text, []
+    new_xml = etree.tostring(
+        root, pretty_print=True, encoding="UTF-8", xml_declaration=False
+    ).decode("UTF-8")
+    return new_xml, filled_paths
 
 
 def prefill_empty_enums(xml_text: str, schema: DTDSchema | None) -> tuple[str, int]:

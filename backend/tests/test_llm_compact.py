@@ -167,6 +167,35 @@ def test_apply_llm_values_fills_requested_pcdata():
     assert (root.text or "").strip() == "hello"
 
 
+def test_collect_fill_tasks_skips_dtd_declared_defaults():
+    schema = DTDSchema(
+        elements={
+            "manage-bank-customer-objects": ElementDef(
+                name="manage-bank-customer-objects",
+                content_raw="ANY",
+                content_model=ContentNode(kind="ANY"),
+                attributes={
+                    "document_type": AttributeDef(
+                        name="document_type",
+                        attr_type="CDATA",
+                        default_decl='"d"',
+                    ),
+                    "source": AttributeDef(
+                        name="source",
+                        attr_type="CDATA",
+                        default_decl="#IMPLIED",
+                    ),
+                },
+            ),
+        }
+    )
+    xml = '<manage-bank-customer-objects document_type="" source=""/>'
+    tasks = collect_fill_tasks(xml, schema, fill_empty_only=False)
+    assert tasks == [
+        {"i": 0, "p": "manage-bank-customer-objects", "a": ["source"]},
+    ]
+
+
 def test_collect_fill_tasks_full_mode_includes_all_attributes():
     xml = '<PayDoc id="existing" kladr="" active="false"/>'
 

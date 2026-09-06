@@ -214,9 +214,9 @@ def choose_fill_mode(
         return "skip"
 
     if attr_def is not None:
+        if attr_def.is_declared_default():
+            return "skip"
         if attr_def.attr_type == "ENUM" and attr_def.allowed_values:
-            return "copy"
-        if attr_def.dtd_default_value() is not None and len(attr_def.allowed_values) <= 1:
             return "copy"
 
     if stats.doc_count < _MIN_DOCS_FOR_AI_POLICY:

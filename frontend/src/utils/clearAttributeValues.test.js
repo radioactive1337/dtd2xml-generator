@@ -120,54 +120,12 @@ describe('clearAttributeValues', () => {
     expect(result).not.toContain('value="Legal"')
   })
 
-  it('restores a DTD literal default instead of leaving the attribute empty', () => {
-    expect(
-      clearAttributeValues('<amount currency="USD" value="100">', {
-        attributeDefaults: { amount: { currency: 'RUB' } },
-      }),
-    ).toBe('<amount currency="RUB" value="">')
-  })
-
-  it('restores #FIXED and single-value enum defaults', () => {
-    expect(
-      clearAttributeValues('<Header version="2.0" kind="x">', {
-        attributeDefaults: { Header: { version: '1.0', kind: 'a' } },
-      }),
-    ).toBe('<Header version="1.0" kind="a">')
-  })
-
-  it('looks up defaults by local tag name', () => {
-    expect(
-      clearAttributeValues('<cs:amount currency="USD">', {
-        attributeDefaults: { amount: { currency: 'RUB' } },
-      }),
-    ).toBe('<cs:amount currency="RUB">')
-  })
-
-  it('uses prefix lookbehind so a mid-tag selection still restores DTD defaults', () => {
-    expect(
-      clearAttributeValues('currency="USD" value="100">', {
-        prefix: '<amount ',
-        attributeDefaults: { amount: { currency: 'RUB' } },
-      }),
-    ).toBe('currency="RUB" value="">')
-  })
-
-  it('keeps xmlns even when a DTD default exists for another attr', () => {
+  it('blanks a DTD literal default such as document_type="d"', () => {
     expect(
       clearAttributeValues(
-        '<amount xmlns:cs="http://example" currency="USD">',
-        { attributeDefaults: { amount: { currency: 'RUB' } } },
+        '<manage-bank-customer-objects document_type="d" source="interpay">',
       ),
-    ).toBe('<amount xmlns:cs="http://example" currency="RUB">')
-  })
-
-  it('still blanks when no DTD default is known', () => {
-    expect(
-      clearAttributeValues('<amount currency="USD">', {
-        attributeDefaults: {},
-      }),
-    ).toBe('<amount currency="">')
+    ).toBe('<manage-bank-customer-objects document_type="" source="">')
   })
 })
 

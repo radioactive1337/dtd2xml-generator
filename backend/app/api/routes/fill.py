@@ -20,6 +20,7 @@ from app.auth.sessions import get_current_user
 from app.config import reference_xml_root, resolve_llm_alias
 from app.core.xml_tree import (
     ProtectedAttrs,
+    apply_declared_dtd_defaults,
     overlay_values_preserving_structure,
     prefill_empty_enums,
 )
@@ -222,6 +223,14 @@ async def execute_fill(
             "enum_prefill",
             f"Заполнено {enum_prefill_count} enum-атрибут(ов) случайным допустимым значением",
             5,
+        )
+
+    xml, defaulted_paths = apply_declared_dtd_defaults(xml, schema)
+    if defaulted_paths:
+        await on_progress(
+            "dtd_default_prefill",
+            f"Заполнено {len(defaulted_paths)} атрибут(ов) значением по умолчанию из DTD",
+            8,
         )
 
     protected_attrs: ProtectedAttrs = frozenset()

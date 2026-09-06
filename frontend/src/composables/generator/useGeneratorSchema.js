@@ -18,7 +18,6 @@ export function useGeneratorSchema() {
   const elementAttributes = ref({})
   const elementDocs = ref({})
   const elementAttributeDocs = ref({})
-  const elementAttributeDefaults = ref({})
   const rootElement = ref('')
   const mode = ref('minimal')
   const repeatCount = ref(1)
@@ -94,16 +93,10 @@ export function useGeneratorSchema() {
           .filter((s) => s.attribute_docs && Object.keys(s.attribute_docs).length)
           .map((s) => [s.name, s.attribute_docs]),
       )
-      elementAttributeDefaults.value = Object.fromEntries(
-        summaries
-          .filter((s) => s.attribute_defaults && Object.keys(s.attribute_defaults).length)
-          .map((s) => [s.name, s.attribute_defaults]),
-      )
     } catch {
       elementAttributes.value = {}
       elementDocs.value = {}
       elementAttributeDocs.value = {}
-      elementAttributeDefaults.value = {}
     }
   }
 
@@ -114,7 +107,6 @@ export function useGeneratorSchema() {
     elementAttributes,
     elementDocs,
     elementAttributeDocs,
-    elementAttributeDefaults,
     rootElement,
     mode,
     repeatCount,

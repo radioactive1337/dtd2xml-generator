@@ -61,6 +61,7 @@ def test_literal_default_attribute(schema):
     assert attr.attr_type == "CDATA"
     assert attr.default_decl == '"a"'
     assert attr.dtd_default_value() == "a"
+    assert attr.is_declared_default() is True
 
 
 def test_single_value_enum_default():
@@ -77,6 +78,7 @@ def test_single_value_enum_default():
     assert attr.allowed_values == ["payment-order"]
     assert attr.dtd_default_value() == "payment-order"
     assert attr.locked_value() == "payment-order"
+    assert attr.is_declared_default() is True
 
 
 def test_multi_value_enum_literal_default_is_not_locked():
@@ -89,3 +91,4 @@ def test_multi_value_enum_literal_default_is_not_locked():
     attr = schema.elements["contact"].attributes["type"]
     assert attr.dtd_default_value() == "email"
     assert attr.locked_value() is None
+    assert attr.is_declared_default() is False
