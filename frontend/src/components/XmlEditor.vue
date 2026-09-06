@@ -41,11 +41,18 @@
           <button
             class="btn-secondary"
             :disabled="!hasSelection"
-            title="Очистить значения всех атрибутов в выделении (attr=&quot;&quot;)"
+            :title="clearAttributesTitle"
             @click="clearAttributesInSelection"
           >
             Очистить значения атрибутов
           </button>
+          <label
+            class="keep-cs-name"
+            title="name у тегов cs:* — ключи полей (LastName, Inn), не данные. Стратегии заполнения их не восстановят."
+          >
+            <input v-model="keepCsName" type="checkbox" />
+            Сохранить name (cs:*)
+          </label>
         </div>
 
         <div class="action-group">
@@ -248,7 +255,7 @@ import { onClickOutside } from '@vueuse/core'
 import loader from '@monaco-editor/loader'
 import { registerXmlFormatter } from '../utils/formatXml'
 import { escapeXmlText, unescapeXmlText } from '../utils/escapeXml'
-import { clearAttributeValues } from '../utils/clearAttributeValues'
+import { clearAttributeValues, openTagPrefix } from '../utils/clearAttributeValues'
 import { readXmlFileAsText } from '../utils/readXmlFile'
 import { peekXmlRootElement } from '../utils/xmlPaths'
 import { formatPushWarningLabel, parsePushFeedback } from '../utils/gitPushWarnings'
@@ -299,6 +306,32 @@ const pushCommitMessage = ref('')
 const hasSelection = ref(false)
 const moreOpen = ref(false)
 const moreRef = ref(null)
+const KEEP_CS_NAME_KEY = 'xml-gen-keep-cs-name'
+const keepCsName = ref(readKeepCsNamePreference())
+
+function readKeepCsNamePreference() {
+  try {
+    const stored = localStorage.getItem(KEEP_CS_NAME_KEY)
+    if (stored === null) return true
+    return stored === 'true'
+  } catch {
+    return true
+  }
+}
+
+watch(keepCsName, (val) => {
+  try {
+    localStorage.setItem(KEEP_CS_NAME_KEY, String(val))
+  } catch {
+    // ignore storage errors
+  }
+})
+
+const clearAttributesTitle = computed(() =>
+  keepCsName.value
+    ? 'Очистить значения атрибутов в выделении. name у тегов cs:* не трогается.'
+    : 'Очистить значения всех атрибутов в выделении (attr="")',
+)
 
 const pushFolderName = computed(
   () => peekXmlRootElement(props.modelValue) || props.rootElement || '',
@@ -614,7 +647,19 @@ function unescapeSelection() {
 }
 
 function clearAttributesInSelection() {
-  replaceSelection(clearAttributeValues)
+  if (!editor) return
+  const selection = editor.getSelection()
+  const model = editor.getModel()
+  if (selection?.isEmpty() || !model) return
+  const text = model.getValueInRange(selection)
+  const startOffset = model.getOffsetAt(selection.getStartPosition())
+  const prefix = openTagPrefix(model.getValue().slice(0, startOffset))
+  editor.executeEdits('xml-text-transform', [{
+    range: selection,
+    text: clearAttributeValues(text, { keepCsName: keepCsName.value, prefix }),
+    forceMoveMarkers: true,
+  }])
+  notifyContentChange()
 }
 
 function closeMoreMenu() {
@@ -765,6 +810,21 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   margin-left: 8px;
   padding-left: 8px;
   border-left: 1px solid var(--border);
+}
+
+.keep-cs-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  user-select: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.keep-cs-name input {
+  margin: 0;
 }
 
 .editor-actions .btn-tint {
