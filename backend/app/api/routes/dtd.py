@@ -450,6 +450,7 @@ class ElementSummary(BaseModel):
     attributes: list[str]
     required_attributes: list[str]
     attribute_docs: dict[str, str] = {}
+    attribute_defaults: dict[str, str] = {}
 
 
 class SchemaResponse(BaseModel):
@@ -566,6 +567,11 @@ def _element_to_summary(elem: ElementDef) -> ElementSummary:
         for name, attr in elem.attributes.items()
         if attr.default_decl == "#REQUIRED"
     ]
+    defaults = {
+        name: value
+        for name, attr in elem.attributes.items()
+        if (value := attr.dtd_default_value()) is not None
+    }
     return ElementSummary(
         name=elem.name,
         doc=elem.doc,
@@ -575,6 +581,7 @@ def _element_to_summary(elem: ElementDef) -> ElementSummary:
         attribute_docs={
             name: attr.doc for name, attr in elem.attributes.items() if attr.doc
         },
+        attribute_defaults=defaults,
     )
 
 

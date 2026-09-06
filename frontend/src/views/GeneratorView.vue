@@ -178,6 +178,7 @@
         :git-push-warning-count="gitPushWarningCount"
         :show-compare-button="!!schemaId"
         :comparing="comparing"
+        :attribute-defaults="elementAttributeDefaults"
         @content-change="onEditorContentChange"
         @clear="onEditorClear"
         @import="onXmlFileImported"
@@ -238,6 +239,7 @@ const {
   elementDocs,
   elementAttributeDocs,
   elementAttributes,
+  elementAttributeDefaults,
   rootElement,
   mode,
   repeatCount,

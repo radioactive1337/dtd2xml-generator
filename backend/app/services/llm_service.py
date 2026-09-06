@@ -1188,7 +1188,7 @@ def apply_schema_default_fill(
     filled_paths: list[str] = []
 
     for el in root.iter():
-        elem_def = schema.elements.get(el.tag)
+        elem_def = schema_element_def(el, schema)
         if elem_def is None:
             continue
         tree_path = element_path(el)
