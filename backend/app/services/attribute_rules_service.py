@@ -430,11 +430,17 @@ def _cross_field_hint_applicable(check: RuleCheck, siblings: dict[str, str]) -> 
 
     Used only for prompt-hint generation (never for real validation). Many
     schemas use generic name/value pair elements (e.g. ``<cs:attribute
-    name="citizenship" value=""/>``) where a rule scoped to ``attr="value"``
-    only really concerns *one* specific ``name``. Without this check we'd
-    surface the same hint for every sibling instance sharing that element+attr
-    (e.g. also for ``name="firstName"``), which is actively misleading.
+    name="CardSeries" value=""/>`` nested under ``<cs:attribute
+    name="Passport">``), where a rule scoped to ``attr="value"`` only concerns
+    one specific ``name`` -- and sometimes only under one specific parent.
+    Without checking both the sibling condition AND any ``parent_*`` gate
+    (via ``_parent_context_mismatch``), we'd surface the hint for every
+    sibling instance sharing that element+attr, which is actively misleading
+    (e.g. showing an INN-for-individuals hint on an INN-for-organization
+    field, or vice versa).
     """
+    if _parent_context_mismatch(check, siblings):
+        return False
     other_val = (siblings.get(check.other or "") or "").strip()
     if check.when is not None:
         # regex_if / required_if / empty_if are gated by a specific sibling value.
@@ -457,30 +463,48 @@ def rule_constraint_hint(
     """Return a compact constraint description for *element*@*attr* for LLM prompts.
 
     Prefers each rule's own ``message`` (already human-readable, often in
-    Russian) and falls back to a generated phrase per check type. Returns an
-    empty string when no rules apply -- callers should skip the attribute
-    entirely rather than emit an empty hint line.
+    Russian) -- UNLESS the rule bundles more than one ``cross_field`` check.
+    Rules like a Passport validator often combine several unrelated sibling
+    scenarios (CardSeries, CardNumber, UnitCode, CardIssueDate, ...) under one
+    shared ``message`` describing all of them in one sentence ("series 4
+    digits, number 6 digits, unit code XXX-XXX, date YYYY-MM-DD"). Showing
+    that combined sentence for just the CardSeries field has been observed to
+    make the model weave every mentioned piece into one value instead of just
+    the series. When a rule has more than one ``cross_field`` check, we
+    instead render a fallback phrase from only the check(s) that actually
+    match this element's siblings, ignoring the shared message.
 
-    ``siblings`` should be the element's own currently-set attributes (e.g.
-    from ``attribute_sibling_context``). Rules with a ``cross_field`` check
-    are only surfaced when ``siblings`` shows the check's condition actually
-    matches this instance -- see ``_cross_field_hint_applicable``. Without
-    ``siblings``, cross-field-gated rules are skipped entirely rather than
-    risk showing a hint that doesn't apply to this element.
+    Returns an empty string when no rule applies -- callers should skip the
+    attribute entirely rather than emit an empty hint line.
+
+    ``siblings`` should be the element's own currently-set attributes plus
+    ``parent.*`` context (see ``attribute_sibling_context``). Rules with a
+    ``cross_field`` check are only surfaced when ``siblings`` shows the
+    check's condition (sibling value AND any ``parent_*`` gate) actually
+    matches this instance. Without ``siblings``, cross-field-gated rules are
+    skipped entirely rather than risk showing a hint that doesn't apply.
     """
     ruleset = ruleset if ruleset is not None else load_attribute_rules()
     fragments: list[str] = []
     for rule in rules_for(element, attr, ruleset=ruleset, context=context):
         cross_checks = [c for c in rule.checks if c.type == "cross_field"]
+        matched_cross_checks: list[RuleCheck] = []
         if cross_checks:
-            if siblings is None or not any(
-                _cross_field_hint_applicable(c, siblings) for c in cross_checks
-            ):
+            if siblings is None:
                 continue
-        if rule.message:
+            matched_cross_checks = [
+                c for c in cross_checks if _cross_field_hint_applicable(c, siblings)
+            ]
+            if not matched_cross_checks:
+                continue
+
+        is_bundle = len(cross_checks) > 1
+        if rule.message and not is_bundle:
             fragments.append(rule.message)
             continue
-        for check in rule.checks:
+
+        checks_to_render = matched_cross_checks if cross_checks else rule.checks
+        for check in checks_to_render:
             text = _check_constraint_text(check)
             if text:
                 fragments.append(text)

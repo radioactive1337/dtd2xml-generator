@@ -38,6 +38,704 @@
         { "type": "min_length", "min_length": 2 }
       ],
       "message": "id не должен быть пустым или placeholder"
+    },
+    {
+      "id": "abt-account-priority",
+      "element": "abt-account",
+      "attr": "priority",
+      "severity": "warning",
+      "applies_to": [
+        "post_fill",
+        "git_push"
+      ],
+      "checks": [
+        {
+          "type": "regex",
+          "pattern": "^[1-5]$"
+        }
+      ],
+      "message": "priority должен быть от 1 до 5"
+    },
+    {
+      "id": "account-number-format",
+      "element": "account",
+      "attr": "number",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "regex",
+          "pattern": "^[0-9]{20}$"
+        },
+        {
+          "type": "not_placeholder"
+        }
+      ],
+      "message": "номер счёта (account@number) — ровно 20 цифр"
+    },
+    {
+      "id": "account-currency",
+      "element": "account",
+      "attr": "currency",
+      "severity": "warning",
+      "applies_to": [
+        "post_fill",
+        "git_push"
+      ],
+      "checks": [
+        {
+          "type": "enum",
+          "values": [
+            "RUB",
+            "USD",
+            "EUR",
+            "CNY"
+          ]
+        }
+      ],
+      "message": "currency: RUB, USD, EUR или CNY"
+    },
+    {
+      "id": "account-currency-code",
+      "element": "account",
+      "attr": "currency-code",
+      "severity": "warning",
+      "applies_to": [
+        "post_fill",
+        "git_push"
+      ],
+      "checks": [
+        {
+          "type": "enum",
+          "values": [
+            "643",
+            "840",
+            "978",
+            "156"
+          ]
+        }
+      ],
+      "message": "currency-code: 643 (RUB), 840 (USD), 978 (EUR), 156 (CNY)"
+    },
+    {
+      "id": "bank-bic-ru",
+      "element": "bank",
+      "attr": "bic",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "regex",
+          "pattern": "^[0-9]{9}$"
+        },
+        {
+          "type": "not_placeholder"
+        }
+      ],
+      "message": "БИК банка — 9 цифр"
+    },
+    {
+      "id": "bank-bic-type",
+      "element": "bank",
+      "attr": "bic-type",
+      "severity": "warning",
+      "applies_to": [
+        "post_fill",
+        "git_push"
+      ],
+      "checks": [
+        {
+          "type": "enum",
+          "values": [
+            "ru",
+            "swift",
+            "other"
+          ]
+        }
+      ],
+      "message": "bic-type: ru, swift или other"
+    },
+    {
+      "id": "inn-format",
+      "attr": "inn",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "regex",
+          "pattern": "^([0-9]{10}|[0-9]{12})$"
+        },
+        {
+          "type": "not_placeholder"
+        }
+      ],
+      "message": "ИНН — 10 или 12 цифр"
+    },
+    {
+      "id": "bank-account-number",
+      "element": "bank",
+      "attr": "account-number",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill"
+      ],
+      "checks": [
+        {
+          "type": "regex",
+          "pattern": "^[0-9]{20}$"
+        },
+        {
+          "type": "not_placeholder"
+        }
+      ],
+      "message": "bank@account-number — 20 цифр"
+    },
+    {
+      "id": "address-country-code",
+      "element": "address",
+      "attr": "country-code",
+      "severity": "warning",
+      "applies_to": [
+        "post_fill",
+        "git_push"
+      ],
+      "checks": [
+        {
+          "type": "regex",
+          "pattern": "^[0-9]{3}$"
+        }
+      ],
+      "message": "country-code — три цифры (643 для РФ)"
+    },
+    {
+      "id": "address-postcode",
+      "element": "address",
+      "attr": "postcode",
+      "severity": "warning",
+      "applies_to": [
+        "post_fill",
+        "git_push"
+      ],
+      "checks": [
+        {
+          "type": "regex",
+          "pattern": "^[0-9]{6}$"
+        }
+      ],
+      "message": "postcode — 6 цифр"
+    },
+    {
+      "id": "contact-type",
+      "element": "contact",
+      "attr": "type",
+      "severity": "warning",
+      "applies_to": [
+        "post_fill",
+        "git_push"
+      ],
+      "checks": [
+        {
+          "type": "enum",
+          "values": [
+            "email",
+            "phone",
+            "fax"
+          ]
+        }
+      ],
+      "message": "contact@type: email, phone, fax или mobile"
+    },
+    {
+      "id": "identity-card-series",
+      "element": "identity-card",
+      "attr": "series",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill"
+      ],
+      "checks": [
+        {
+          "type": "regex",
+          "pattern": "^[0-9]{4}$"
+        },
+        {
+          "type": "not_placeholder"
+        }
+      ],
+      "message": "серия паспорта — 4 цифры"
+    },
+    {
+      "id": "identity-card-number",
+      "element": "identity-card",
+      "attr": "number",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill"
+      ],
+      "checks": [
+        {
+          "type": "regex",
+          "pattern": "^[0-9]{6,10}$"
+        },
+        {
+          "type": "not_placeholder"
+        }
+      ],
+      "message": "номер паспорта — 6–10 цифр"
+    },
+    {
+      "id": "identity-card-issue-date",
+      "element": "identity-card",
+      "attr": "issue-date",
+      "severity": "warning",
+      "applies_to": [
+        "post_fill",
+        "git_push"
+      ],
+      "checks": [
+        {
+          "type": "regex",
+          "pattern": "^(0[1-9]|[12][0-9]|3[01])\\.(0[1-9]|1[0-2])\\.[0-9]{4}$"
+        }
+      ],
+      "message": "issue-date в формате ДД.ММ.ГГГГ"
+    },
+    {
+      "id": "identity-card-unit-code",
+      "element": "identity-card",
+      "attr": "unit-code",
+      "severity": "warning",
+      "applies_to": [
+        "post_fill",
+        "git_push"
+      ],
+      "checks": [
+        {
+          "type": "regex",
+          "pattern": "^[0-9]{3}-[0-9]{3}$"
+        }
+      ],
+      "message": "unit-code в формате 000-000"
+    },
+    {
+      "id": "cs-inn-person",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "Inn",
+          "parent_element": "cs:object",
+          "pattern": "^[0-9]{12}$"
+        }
+      ],
+      "message": "ИНН физлица (дочерний к cs:object): 12 цифр"
+    },
+    {
+      "id": "cs-inn-org",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "Inn",
+          "parent_name": "CorpSender",
+          "pattern": "^[0-9]{10}$"
+        }
+      ],
+      "message": "ИНН организации (CorpSender): 10 цифр"
+    },
+    {
+      "id": "cs-snils",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "Snils",
+          "pattern": "^([0-9]{11}|[0-9]{3}-[0-9]{3}-[0-9]{3} [0-9]{2})$"
+        }
+      ],
+      "message": "СНИЛС: 11 цифр или XXX-XXX-XXX XX"
+    },
+    {
+      "id": "cs-passport-rf",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "CardSeries",
+          "parent_name": "Passport",
+          "pattern": "^[0-9]{4}$"
+        },
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "CardNumber",
+          "parent_name": "Passport",
+          "pattern": "^[0-9]{6}$"
+        },
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "UnitCode",
+          "parent_name": "Passport",
+          "pattern": "^[0-9]{3}-[0-9]{3}$"
+        },
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "CardIssueDate",
+          "parent_name": "Passport",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "CardTypeCodeGNI",
+          "parent_name": "Passport",
+          "pattern": "^[0-9]{2}$"
+        }
+      ],
+      "message": "Паспорт РФ: серия 4 цифры, номер 6 цифр, код подразделения XXX-XXX, дата YYYY-MM-DD"
+    },
+    {
+      "id": "cs-birth-date",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "birth-date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        }
+      ],
+      "message": "birth-date: YYYY-MM-DD"
+    },
+    {
+      "id": "cs-index",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "Index",
+          "parent_name": "Address",
+          "pattern": "^[0-9]{6}$"
+        }
+      ],
+      "message": "Почтовый индекс: 6 цифр"
+    },
+    {
+      "id": "cs-bic",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "Bic",
+          "parent_name": "CorpSender",
+          "pattern": "^[0-9]{9}$"
+        }
+      ],
+      "message": "БИК: 9 цифр"
+    },
+    {
+      "id": "cs-otp-phone",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "OtpPhone",
+          "parent_name": "Key",
+          "pattern": "^(\\+7|7|8)[0-9]{10}$"
+        }
+      ],
+      "message": "OtpPhone: +7/7/8 и 10 цифр"
+    },
+    {
+      "id": "cs-bools",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "error",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "NotAddContract",
+          "pattern": "^(true|false)$"
+        },
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "IsEnabled",
+          "pattern": "^(true|false)$"
+        },
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "isTaxResident",
+          "pattern": "^(true|false)$"
+        },
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "is-closed",
+          "pattern": "^(true|false)$"
+        }
+      ],
+      "message": "Булево поле: true или false"
+    },
+    {
+      "id": "cs-ident-stage",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "warning",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "IdentStage",
+          "pattern": "^(full|simple|none)$"
+        }
+      ],
+      "message": "IdentStage: full, simple или none"
+    },
+    {
+      "id": "cs-address-type",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "warning",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "Address",
+          "parent_name": "Addresses",
+          "pattern": "^(Legal|Postal|Actual)$"
+        }
+      ],
+      "message": "Тип адреса: Legal, Postal или Actual"
+    },
+    {
+      "id": "cs-contact-type",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "warning",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "Contact",
+          "parent_name": "Contacts",
+          "pattern": "^(Phone|Email)$"
+        }
+      ],
+      "message": "Тип контакта: Phone или Email"
+    },
+    {
+      "id": "cs-contact-info",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "warning",
+      "applies_to": [
+        "git_push",
+        "post_fill",
+        "git_ai_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "ContactInfo",
+          "parent_name": "Contact",
+          "parent_value": "Phone",
+          "pattern": "^((\\+7|7|8)[0-9]{10}|[0-9]{10})$"
+        },
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "ContactInfo",
+          "parent_name": "Contact",
+          "parent_value": "Email",
+          "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+        }
+      ],
+      "message": "ContactInfo: для Phone — 10 цифр или +7/7/8…, для Email — адрес почты"
+    },
+    {
+      "id": "cs-citizenship",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "warning",
+      "applies_to": [
+        "git_push",
+        "post_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "citizenship",
+          "pattern": "^(Россия|РФ|RU|643)$"
+        }
+      ],
+      "message": "citizenship: Россия, РФ, RU или 643"
+    },
+    {
+      "id": "cs-sex",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "warning",
+      "applies_to": [
+        "git_push",
+        "post_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "Sex",
+          "pattern": "^[12MF]$"
+        }
+      ],
+      "message": "Sex: 1/2 (ФНС) или M/F"
+    },
+    {
+      "id": "cs-system-reg-number",
+      "element": "cs:attribute",
+      "attr": "value",
+      "severity": "warning",
+      "applies_to": [
+        "git_push",
+        "post_fill"
+      ],
+      "checks": [
+        {
+          "type": "cross_field",
+          "op": "regex_if",
+          "other": "name",
+          "when": "SystemRegNumber",
+          "pattern": "^[0-9]{3,20}$"
+        }
+      ],
+      "message": "SystemRegNumber: только цифры"
     }
   ]
 }

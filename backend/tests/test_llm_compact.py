@@ -73,20 +73,21 @@ def test_collect_fill_tasks_hybrid_only_empty_and_placeholders():
     )
 
     assert len(tasks) == 2
-    # "kladr" (protected) and "active" (already a real, non-placeholder value)
-    # are captured as sibling context ("ctx") for cross_field rule hints, even
-    # though they aren't themselves fill targets -- see build_constraints_note.
+    # "ctx" is the element's own attributes plus parent.* context
+    # (attribute_sibling_context), captured so cross_field validation-rule
+    # hints can be scoped per-instance when building the LLM prompt -- see
+    # build_constraints_note / rule_constraint_hint(siblings=...).
     assert tasks[0] == {
         "i": 0,
         "p": "PayDoc",
         "a": ["id"],
-        "ctx": {"kladr": "from-db", "active": "true"},
+        "ctx": {"id": "id-1", "kladr": "from-db", "active": "true"},
     }
     assert tasks[1] == {
         "i": 1,
         "p": "PayDoc.Body.Record.Field",
         "a": ["name"],
-        "ctx": {"type": "string"},
+        "ctx": {"name": "", "type": "string", "parent.__element__": "Record"},
     }
 
 
@@ -201,7 +202,12 @@ def test_collect_fill_tasks_skips_dtd_declared_defaults():
     xml = '<manage-bank-customer-objects document_type="" source=""/>'
     tasks = collect_fill_tasks(xml, schema, fill_empty_only=False)
     assert tasks == [
-        {"i": 0, "p": "manage-bank-customer-objects", "a": ["source"]},
+        {
+            "i": 0,
+            "p": "manage-bank-customer-objects",
+            "a": ["source"],
+            "ctx": {"document_type": "", "source": ""},
+        },
     ]
 
 
@@ -215,6 +221,7 @@ def test_collect_fill_tasks_full_mode_includes_all_attributes():
         "i": 0,
         "p": "PayDoc",
         "a": ["id", "kladr", "active"],
+        "ctx": {"id": "existing", "kladr": "", "active": "false"},
     }
 
 

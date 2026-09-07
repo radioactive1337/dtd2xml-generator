@@ -1108,15 +1108,12 @@ def collect_fill_tasks(
                 task["a"] = attr_names
             if needs_text:
                 task["t"] = 1
-            # Already-set sibling attributes (e.g. name="citizenship" next to
-            # an empty value=""). Needed to evaluate cross_field validation
-            # rules per-instance when building the prompt -- see
-            # build_constraints_note / rule_constraint_hint(siblings=...).
-            siblings = {
-                key: val
-                for key, val in el.attrib.items()
-                if val and val.strip() and key not in attr_names
-            }
+            # Own attributes plus parent.* context (e.g. name="CardSeries" next
+            # to the empty value="", parent.name="Passport"). Needed to scope
+            # cross_field validation-rule hints to the matching instance when
+            # building the prompt -- see build_constraints_note /
+            # rule_constraint_hint(siblings=...).
+            siblings = rules_svc.attribute_sibling_context(el)
             if siblings:
                 task["ctx"] = siblings
             tasks.append(task)
