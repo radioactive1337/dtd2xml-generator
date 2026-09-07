@@ -73,11 +73,20 @@ def test_collect_fill_tasks_hybrid_only_empty_and_placeholders():
     )
 
     assert len(tasks) == 2
-    assert tasks[0] == {"i": 0, "p": "PayDoc", "a": ["id"]}
+    # "kladr" (protected) and "active" (already a real, non-placeholder value)
+    # are captured as sibling context ("ctx") for cross_field rule hints, even
+    # though they aren't themselves fill targets -- see build_constraints_note.
+    assert tasks[0] == {
+        "i": 0,
+        "p": "PayDoc",
+        "a": ["id"],
+        "ctx": {"kladr": "from-db", "active": "true"},
+    }
     assert tasks[1] == {
         "i": 1,
         "p": "PayDoc.Body.Record.Field",
         "a": ["name"],
+        "ctx": {"type": "string"},
     }
 
 

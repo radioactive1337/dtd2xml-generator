@@ -913,24 +913,34 @@ def build_constraints_note(batch: list[dict[str, Any]]) -> str:
     otherwise only be checked after the fact (``post_fill``), so the model
     can satisfy them on the first attempt instead of relying on manual fixes
     or a later warning pass. Returns "" when no rule in the batch has a hint.
+
+    Lines are keyed by task index (``[i=N]``), not just ``element@attr``:
+    many schemas reuse a generic name/value pair element (e.g. ``<cs:attribute
+    name="citizenship" value=""/>``), so several unrelated tasks can share the
+    same tag+attribute. The index lets the model map each constraint back to
+    the exact ``<f i="N">`` entry in the skeleton instead of guessing which
+    instance it applies to. ``rule_constraint_hint`` also uses each task's
+    captured sibling context (``ctx``) so cross_field rules (e.g. "only when
+    name=citizenship") are only surfaced for the matching instance.
     """
     ruleset = rules_svc.load_attribute_rules()
     lines: list[str] = []
     for task in batch:
         tag = _path_tag(task["p"])
+        siblings = task.get("ctx")
         for attr_name in task.get("a", []):
             hint = rules_svc.rule_constraint_hint(
-                tag, attr_name, ruleset=ruleset, context="post_fill"
+                tag, attr_name, ruleset=ruleset, context="post_fill", siblings=siblings
             )
             if hint:
-                lines.append(f"- {tag}@{attr_name}: {hint}")
+                lines.append(f"- [i={task['i']}] {tag}@{attr_name}: {hint}")
     if not lines:
         return ""
-    # Same tag/attr can repeat across sibling instances in one batch.
     lines = list(dict.fromkeys(lines))
     return (
         "Validation rules — the values you generate MUST satisfy these "
-        "constraints:\n" + "\n".join(lines) + "\n\n"
+        "constraints (each [i=N] refers to the <f i=\"N\"> element below):\n"
+        + "\n".join(lines) + "\n\n"
     )
 
 
@@ -1098,6 +1108,17 @@ def collect_fill_tasks(
                 task["a"] = attr_names
             if needs_text:
                 task["t"] = 1
+            # Already-set sibling attributes (e.g. name="citizenship" next to
+            # an empty value=""). Needed to evaluate cross_field validation
+            # rules per-instance when building the prompt -- see
+            # build_constraints_note / rule_constraint_hint(siblings=...).
+            siblings = {
+                key: val
+                for key, val in el.attrib.items()
+                if val and val.strip() and key not in attr_names
+            }
+            if siblings:
+                task["ctx"] = siblings
             tasks.append(task)
 
     return tasks

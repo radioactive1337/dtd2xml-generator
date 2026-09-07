@@ -406,10 +406,44 @@ def _check_constraint_text(check: RuleCheck) -> str:
     if check.type == "charset":
         return f"allowed characters: {check.charset}"
     if check.type == "cross_field":
-        # Cross-field constraints depend on sibling values the fill prompt
-        # doesn't expose per-attribute; skip rather than emit a confusing hint.
+        # Only reached once the caller has already confirmed (via siblings)
+        # that this check's condition applies to this specific element --
+        # see `_cross_field_hint_applicable`. Safe to render generically.
+        if check.op == "regex_if":
+            return f"must match pattern {check.pattern!r}"
+        if check.op == "required_if":
+            return "must not be empty"
+        if check.op == "empty_if":
+            return "must be empty"
+        if check.op == "eq":
+            return f"must equal sibling attribute '{check.other}'"
+        if check.op == "ne":
+            return f"must differ from sibling attribute '{check.other}'"
+        if check.op == "mapped_eq":
+            return f"must equal the value mapped from sibling attribute '{check.other}'"
         return ""
     return ""
+
+
+def _cross_field_hint_applicable(check: RuleCheck, siblings: dict[str, str]) -> bool:
+    """True when a ``cross_field`` check's condition matches *siblings*.
+
+    Used only for prompt-hint generation (never for real validation). Many
+    schemas use generic name/value pair elements (e.g. ``<cs:attribute
+    name="citizenship" value=""/>``) where a rule scoped to ``attr="value"``
+    only really concerns *one* specific ``name``. Without this check we'd
+    surface the same hint for every sibling instance sharing that element+attr
+    (e.g. also for ``name="firstName"``), which is actively misleading.
+    """
+    other_val = (siblings.get(check.other or "") or "").strip()
+    if check.when is not None:
+        # regex_if / required_if / empty_if are gated by a specific sibling value.
+        return other_val == check.when
+    if check.op == "mapped_eq":
+        return other_val in check.map
+    if check.op in {"eq", "ne"}:
+        return bool(other_val)
+    return False
 
 
 def rule_constraint_hint(
@@ -418,6 +452,7 @@ def rule_constraint_hint(
     *,
     ruleset: AttributeRuleSet | None = None,
     context: RuleContext = "post_fill",
+    siblings: dict[str, str] | None = None,
 ) -> str:
     """Return a compact constraint description for *element*@*attr* for LLM prompts.
 
@@ -425,10 +460,23 @@ def rule_constraint_hint(
     Russian) and falls back to a generated phrase per check type. Returns an
     empty string when no rules apply -- callers should skip the attribute
     entirely rather than emit an empty hint line.
+
+    ``siblings`` should be the element's own currently-set attributes (e.g.
+    from ``attribute_sibling_context``). Rules with a ``cross_field`` check
+    are only surfaced when ``siblings`` shows the check's condition actually
+    matches this instance -- see ``_cross_field_hint_applicable``. Without
+    ``siblings``, cross-field-gated rules are skipped entirely rather than
+    risk showing a hint that doesn't apply to this element.
     """
     ruleset = ruleset if ruleset is not None else load_attribute_rules()
     fragments: list[str] = []
     for rule in rules_for(element, attr, ruleset=ruleset, context=context):
+        cross_checks = [c for c in rule.checks if c.type == "cross_field"]
+        if cross_checks:
+            if siblings is None or not any(
+                _cross_field_hint_applicable(c, siblings) for c in cross_checks
+            ):
+                continue
         if rule.message:
             fragments.append(rule.message)
             continue

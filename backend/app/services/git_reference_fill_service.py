@@ -376,8 +376,13 @@ def _build_batch_user_message(jobs: list[_AiFillJob]) -> str:
         examples = _few_shot_examples(job.stats.values)
         examples_block = "\n".join(f"  - {ex}" for ex in examples) or "  - (none)"
         element_tag = _local_name(job.element.tag)
+        # Own attributes already set on this element (e.g. name="citizenship"
+        # next to the empty value=""). Needed so cross_field rules scoped to
+        # generic name/value pair elements only surface for the matching
+        # instance instead of every sibling sharing the same tag+attribute.
+        siblings = rules_svc.attribute_sibling_context(job.element)
         hint = rules_svc.rule_constraint_hint(
-            element_tag, job.attr_name, ruleset=ruleset, context="post_fill"
+            element_tag, job.attr_name, ruleset=ruleset, context="post_fill", siblings=siblings
         )
         constraint_line = f"\nConstraint: {hint}" if hint else ""
         blocks.append(
@@ -400,11 +405,14 @@ async def _generate_ai_value(
     element: str,
     attr: str,
     examples: list[str],
+    siblings: dict[str, str] | None = None,
     cancel_event: asyncio.Event | None = None,
 ) -> str:
     unique_examples = _few_shot_examples(examples)
     examples_block = "\n".join(f"- {ex}" for ex in unique_examples) or "(none)"
-    hint = rules_svc.rule_constraint_hint(element, attr, context="post_fill")
+    hint = rules_svc.rule_constraint_hint(
+        element, attr, context="post_fill", siblings=siblings
+    )
     constraint_note = f"\n\nValidation constraint (MUST satisfy): {hint}" if hint else ""
     user_message = (
         f"Element: {element}\n"
@@ -465,6 +473,7 @@ async def _generate_validated_ai_value(
                 element=element,
                 attr=attr,
                 examples=examples,
+                siblings=siblings,
                 cancel_event=cancel_event,
             )
         except asyncio.CancelledError:
