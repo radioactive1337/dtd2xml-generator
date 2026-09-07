@@ -65,6 +65,7 @@
             :mapping-validation="mappingValidation"
             :fill-provenance="fillProvenance"
             :fill-warnings="fillWarnings"
+            @go-to-fill-warning="goToFillWarning"
             @save-mapping-preset="saveMappingPreset"
             @open-mapping-wizard="openMappingWizard"
             @remove-mapping="removeMapping"
@@ -297,6 +298,7 @@ const {
   deleteMappingPreset,
   onWizardFinish,
   goToValidationError,
+  goToFillWarning,
   onEditorContentChange,
   onEditorClear,
   onXmlFileImported,

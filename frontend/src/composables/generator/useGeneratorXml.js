@@ -67,6 +67,11 @@ export function useGeneratorXml({
     xmlEditorRef.value?.goToPosition(err.line, err.column)
   }
 
+  function goToFillWarning(warning) {
+    if (!warning?.line) return
+    xmlEditorRef.value?.goToPosition(warning.line, 1)
+  }
+
   function getEditorXmlText() {
     return xmlEditorRef.value?.getValue?.() ?? xmlText.value
   }
@@ -273,6 +278,7 @@ export function useGeneratorXml({
     xmlEditorRef,
     availableElementPaths,
     goToValidationError,
+    goToFillWarning,
     getEditorXmlText,
     setProgrammaticXml,
     onEditorContentChange,

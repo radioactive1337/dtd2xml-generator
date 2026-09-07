@@ -66,10 +66,26 @@ class FillRequest(BaseModel):
     preserve_filled: bool = True
 
 
+class FillWarningItem(BaseModel):
+    """A single fill-stage warning, optionally tied to a spot in the XML.
+
+    ``path``/``attr``/``severity``/``line`` are only set for attribute-rule
+    violations (post_fill validation); other stages (DB/Git/LLM) only ever
+    set ``message``. The frontend uses ``line`` to jump the editor straight
+    to the offending element -- see GeneratorDataTab.vue.
+    """
+
+    message: str
+    severity: Literal["error", "warning"] | None = None
+    path: str | None = None
+    attr: str | None = None
+    line: int | None = None
+
+
 class FillResponse(BaseModel):
     xml_text: str
     strategy: str
-    warnings: list[str] = Field(default_factory=list)
+    warnings: list[FillWarningItem] = Field(default_factory=list)
     provenance: dict[str, str] = Field(default_factory=dict)
 
 
@@ -193,7 +209,7 @@ async def execute_fill(
     request: FillRequest,
     on_progress: ProgressCallback = _noop_progress,
     cancel_event: asyncio.Event | None = None,
-) -> tuple[str, list[str], dict[str, str]]:
+) -> tuple[str, list[dict], dict[str, str]]:
     try:
         resolved_llm = resolve_llm_alias(user, request.llm_alias)
     except ValueError as exc:
@@ -327,16 +343,28 @@ async def execute_fill(
 
     result = overlay_values_preserving_structure(structure_xml, result, schema)
 
+    # Plain-string warnings from the DB/Git/LLM stages above carry no
+    # location info; wrap them so the response has one consistent shape.
+    structured_warnings: list[dict] = [{"message": w} for w in fill_warnings]
+
     try:
         post_report = await asyncio.to_thread(validate_document, result, schema, context="post_fill")
         for violation in post_report.warnings + post_report.errors:
             loc = f"{violation.path}@{violation.attr}" if violation.attr else violation.path
-            fill_warnings.append(f"[post_fill/{violation.severity}] {loc}: {violation.message}")
+            structured_warnings.append(
+                {
+                    "message": f"[post_fill/{violation.severity}] {loc}: {violation.message}",
+                    "severity": violation.severity,
+                    "path": violation.path,
+                    "attr": violation.attr,
+                    "line": violation.line,
+                }
+            )
     except Exception as exc:
         logger.warning("Post-fill attribute rule validation failed: %s", exc)
 
     set_last_generated(user, request.schema_id, result)
-    return result, fill_warnings, provenance
+    return result, structured_warnings, provenance
 
 
 @router.post("/suggest-field-mappings", response_model=SuggestFieldMappingsResponse)

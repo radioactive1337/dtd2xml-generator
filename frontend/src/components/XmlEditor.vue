@@ -182,7 +182,15 @@
           <p class="push-warnings-heading">{{ pushWarningsHeading }}</p>
           <ul class="push-warnings-list">
             <li v-for="(warning, index) in gitPushWarnings" :key="index">
-              {{ formatPushWarningLabel(warning) }}
+              <button
+                v-if="warning?.line"
+                type="button"
+                class="push-warning-link"
+                @click="goToPosition(warning.line, 1)"
+              >
+                {{ formatPushWarningLabel(warning) }}
+              </button>
+              <span v-else>{{ formatPushWarningLabel(warning) }}</span>
             </li>
           </ul>
           <p v-if="pushWarningsTruncated" class="push-warnings-more">
@@ -1098,6 +1106,23 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
   font-size: 12px;
   line-height: 1.4;
   color: var(--warning);
+}
+
+.push-warning-link {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.push-warning-link:hover {
+  opacity: 0.85;
 }
 
 .push-warnings-more {

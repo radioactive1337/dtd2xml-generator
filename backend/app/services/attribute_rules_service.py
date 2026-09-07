@@ -53,6 +53,11 @@ class RuleViolation:
     severity: str
     message: str
     check_type: str
+    # 1-based source line of the offending element in the validated XML text,
+    # when known (set by validate_document via lxml's sourceline). Lets the
+    # frontend jump the editor straight to the violation -- see
+    # api/routes/fill.py's post_fill warnings and serialize_push_warnings.
+    line: int | None = None
 
 
 @dataclass
@@ -351,11 +356,15 @@ def validate_attribute(
     attr_def=None,
     ruleset: AttributeRuleSet | None = None,
     siblings: dict[str, str] | None = None,
+    line: int | None = None,
 ) -> list[RuleViolation]:
     """Validate a single attribute value against applicable rules for *context*.
 
     ``siblings`` are the other attributes on the same element (for
     ``cross_field`` checks); pass the element's own current ``attrib`` dict.
+    ``line`` is the element's source line in the document being validated, if
+    known (see ``validate_document``); it has no effect on the check outcome,
+    only on the reported ``RuleViolation.line`` for editor navigation.
     """
     ruleset = ruleset if ruleset is not None else load_attribute_rules()
     violations: list[RuleViolation] = []
@@ -373,6 +382,7 @@ def validate_attribute(
                     severity=rule.severity,
                     message=_default_message(rule, check, value),
                     check_type=check.type,
+                    line=line,
                 )
             )
             # One reported violation per rule is enough for UI brevity.
@@ -556,6 +566,7 @@ def validate_document(
             elem_def = schema.elements.get(elem_name)
         path = element_dot_path(el)
         siblings = attribute_sibling_context(el)
+        line = el.sourceline  # None if lxml couldn't determine it; fine as-is
         for attr_name, attr_value in el.attrib.items():
             if attr_name == "xmlns" or attr_name.startswith("xmlns:"):
                 continue
@@ -569,6 +580,7 @@ def validate_document(
                 attr_def=attr_def,
                 ruleset=ruleset,
                 siblings=siblings,
+                line=line,
             ):
                 if violation.severity == "error":
                     report.errors.append(violation)
@@ -604,9 +616,13 @@ def serialize_push_warnings(
     report: DocumentValidationReport,
     *,
     limit: int = PUSH_WARNING_ITEM_LIMIT,
-) -> list[dict[str, str]]:
-    """Structured warning items for the Git-push confirmation step."""
-    items: list[dict[str, str]] = []
+) -> list[dict[str, object]]:
+    """Structured warning items for the Git-push confirmation step.
+
+    ``line`` (1-based, or ``None`` if unknown) lets the frontend jump the
+    editor straight to the offending element.
+    """
+    items: list[dict[str, object]] = []
     for violation in report.warnings[:limit]:
         items.append(
             {
@@ -614,6 +630,7 @@ def serialize_push_warnings(
                 "attr": violation.attr,
                 "location": _violation_location(violation),
                 "message": violation.message,
+                "line": violation.line,
             }
         )
     return items

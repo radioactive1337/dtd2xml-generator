@@ -432,6 +432,7 @@ export function useGenerator() {
     onDtdUploaded,
     restoreFromHistory: (entry) => xml.restoreFromHistory(entry, error),
     goToValidationError: xml.goToValidationError,
+    goToFillWarning: xml.goToFillWarning,
     onEditorContentChange: xml.onEditorContentChange,
     onXmlFileImported: xml.onXmlFileImported,
     onDocumentPaste: xml.onDocumentPaste,

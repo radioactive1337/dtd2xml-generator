@@ -68,7 +68,17 @@
         <span class="overrides-title">Предупреждения заполнения</span>
       </div>
       <ul class="fill-warnings-list">
-        <li v-for="(warning, index) in fillWarnings" :key="index">{{ warning }}</li>
+        <li v-for="(warning, index) in fillWarnings" :key="index">
+          <button
+            v-if="warning?.line"
+            type="button"
+            class="fill-warning-link"
+            @click="$emit('go-to-fill-warning', warning)"
+          >
+            {{ warning.message }}
+          </button>
+          <span v-else>{{ warning?.message ?? warning }}</span>
+        </li>
       </ul>
     </div>
 
@@ -280,6 +290,7 @@ const emit = defineEmits([
   'remove-mapping',
   'delete-mapping-preset',
   'remove-selected-preset',
+  'go-to-fill-warning',
 ])
 
 const presetDropdownOpen = ref(false)
@@ -467,6 +478,23 @@ onBeforeUnmount(() => {
 .fill-warnings-list li {
   font-size: 12px;
   color: var(--warning);
+}
+
+.fill-warning-link {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.fill-warning-link:hover {
+  opacity: 0.85;
 }
 
 .db-overrides-panel {
