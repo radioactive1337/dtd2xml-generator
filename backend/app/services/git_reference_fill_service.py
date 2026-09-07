@@ -370,18 +370,25 @@ def _raise_if_cancelled(cancel_event: asyncio.Event | None) -> None:
 
 
 def _build_batch_user_message(jobs: list[_AiFillJob]) -> str:
+    ruleset = rules_svc.load_attribute_rules()
     blocks: list[str] = []
     for index, job in enumerate(jobs):
         examples = _few_shot_examples(job.stats.values)
         examples_block = "\n".join(f"  - {ex}" for ex in examples) or "  - (none)"
+        element_tag = _local_name(job.element.tag)
+        hint = rules_svc.rule_constraint_hint(
+            element_tag, job.attr_name, ruleset=ruleset, context="post_fill"
+        )
+        constraint_line = f"\nConstraint: {hint}" if hint else ""
         blocks.append(
             f"[{index}] Path: {job.dot} Attribute: {job.attr_name}\n"
-            f"Examples:\n{examples_block}"
+            f"Examples:\n{examples_block}{constraint_line}"
         )
     return (
         "Generate one alternative value per field index. "
         "Keep fields that share a Path consistent with each other. "
-        "Do not copy examples verbatim when a close variant is possible.\n\n"
+        "Do not copy examples verbatim when a close variant is possible. "
+        "Values MUST satisfy any listed Constraint.\n\n"
         + "\n\n".join(blocks)
         + '\n\nReturn JSON: {"values": [{"i": 0, "v": "..."}, ...]}'
     )
@@ -397,12 +404,14 @@ async def _generate_ai_value(
 ) -> str:
     unique_examples = _few_shot_examples(examples)
     examples_block = "\n".join(f"- {ex}" for ex in unique_examples) or "(none)"
+    hint = rules_svc.rule_constraint_hint(element, attr, context="post_fill")
+    constraint_note = f"\n\nValidation constraint (MUST satisfy): {hint}" if hint else ""
     user_message = (
         f"Element: {element}\n"
         f"Attribute: {attr}\n"
         f"Example values from reference corpus:\n{examples_block}\n\n"
         "Generate one alternative value that fits the same pattern but is not an "
-        "exact copy of the examples when possible."
+        f"exact copy of the examples when possible.{constraint_note}"
     )
     _raise_if_cancelled(cancel_event)
     content = await llm.complete_text(

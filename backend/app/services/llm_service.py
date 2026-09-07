@@ -29,6 +29,7 @@ from app.core.xml_tree import (
     is_fillable_attribute_value,
     schema_element_def,
 )
+from app.services import attribute_rules_service as rules_svc
 
 logger = logging.getLogger(__name__)
 
@@ -470,9 +471,11 @@ class LLMService:
         elif retry:
             prefix += _FILL_RETRY_NOTE
         diversity_note = build_diversity_note(batch)
+        constraints_note = build_constraints_note(batch)
         user_message = (
             f"{prefix}{_FILL_XML_NOTE}"
             f"{diversity_note}"
+            f"{constraints_note}"
             f"Schema metadata (JavaDoc-style comments):\n{metadata}\n\n"
             f"XML skeleton:\n{skeleton}"
         )
@@ -901,6 +904,34 @@ def build_diversity_note(batch: list[dict[str, Any]]) -> str:
     for tag, instances in by_tag.items():
         lines.append(f"- {tag}: {', '.join(instances)}")
     return "\n".join(lines) + "\n\n"
+
+
+def build_constraints_note(batch: list[dict[str, Any]]) -> str:
+    """Prompt fragment listing config-driven validation rules for this batch.
+
+    Surfaces the same ``config/attribute_rules.json`` constraints that would
+    otherwise only be checked after the fact (``post_fill``), so the model
+    can satisfy them on the first attempt instead of relying on manual fixes
+    or a later warning pass. Returns "" when no rule in the batch has a hint.
+    """
+    ruleset = rules_svc.load_attribute_rules()
+    lines: list[str] = []
+    for task in batch:
+        tag = _path_tag(task["p"])
+        for attr_name in task.get("a", []):
+            hint = rules_svc.rule_constraint_hint(
+                tag, attr_name, ruleset=ruleset, context="post_fill"
+            )
+            if hint:
+                lines.append(f"- {tag}@{attr_name}: {hint}")
+    if not lines:
+        return ""
+    # Same tag/attr can repeat across sibling instances in one batch.
+    lines = list(dict.fromkeys(lines))
+    return (
+        "Validation rules — the values you generate MUST satisfy these "
+        "constraints:\n" + "\n".join(lines) + "\n\n"
+    )
 
 
 def group_tasks_into_batches(

@@ -380,6 +380,67 @@ def validate_attribute(
     return violations
 
 
+def _check_constraint_text(check: RuleCheck) -> str:
+    """Render a single check as a short human/LLM-readable constraint phrase."""
+    if check.type == "regex":
+        return f"must match pattern {check.pattern!r}"
+    if check.type == "enum":
+        values = ", ".join(check.values[:10])
+        if len(check.values) > 10:
+            values += ", …"
+        return f"must be one of: {values}"
+    if check.type == "length":
+        if check.min_length is not None and check.max_length is not None:
+            return f"length must be {check.min_length}\u2013{check.max_length} characters"
+        if check.min_length is not None:
+            return f"length must be at least {check.min_length} characters"
+        if check.max_length is not None:
+            return f"length must be at most {check.max_length} characters"
+        return ""
+    if check.type == "min_length":
+        return f"length must be at least {check.min_length} characters"
+    if check.type == "max_length":
+        return f"length must be at most {check.max_length} characters"
+    if check.type == "not_placeholder":
+        return "must not be a placeholder or dummy value"
+    if check.type == "charset":
+        return f"allowed characters: {check.charset}"
+    if check.type == "cross_field":
+        # Cross-field constraints depend on sibling values the fill prompt
+        # doesn't expose per-attribute; skip rather than emit a confusing hint.
+        return ""
+    return ""
+
+
+def rule_constraint_hint(
+    element: str,
+    attr: str,
+    *,
+    ruleset: AttributeRuleSet | None = None,
+    context: RuleContext = "post_fill",
+) -> str:
+    """Return a compact constraint description for *element*@*attr* for LLM prompts.
+
+    Prefers each rule's own ``message`` (already human-readable, often in
+    Russian) and falls back to a generated phrase per check type. Returns an
+    empty string when no rules apply -- callers should skip the attribute
+    entirely rather than emit an empty hint line.
+    """
+    ruleset = ruleset if ruleset is not None else load_attribute_rules()
+    fragments: list[str] = []
+    for rule in rules_for(element, attr, ruleset=ruleset, context=context):
+        if rule.message:
+            fragments.append(rule.message)
+            continue
+        for check in rule.checks:
+            text = _check_constraint_text(check)
+            if text:
+                fragments.append(text)
+
+    # Deduplicate while preserving order (dict keys keep first-seen order).
+    return "; ".join(dict.fromkeys(fragments))
+
+
 def validate_document(
     xml_text: str,
     schema: DTDSchema | None = None,
