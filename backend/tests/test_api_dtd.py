@@ -4,6 +4,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.api.routes.dtd import _element_to_summary
+from app.core.dtd_models import AttributeDef, ContentNode, ElementDef
 from tests.conftest import login_as
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -126,6 +128,39 @@ def test_list_elements(client: TestClient):
     paydoc = next(e for e in elements if e["name"] == "PayDoc")
     assert "Основной корневой элемент" in paydoc["doc"]
     assert paydoc["attribute_docs"].get("kladr") == "код КЛАДР"
+    header = next(e for e in elements if e["name"] == "Header")
+    assert header["attribute_defaults"].get("version") == "1.0"
+
+
+def test_element_summary_exposes_dtd_defaults():
+    elem = ElementDef(
+        name="amount",
+        content_raw="EMPTY",
+        content_model=ContentNode(kind="EMPTY"),
+        attributes={
+            "currency": AttributeDef(
+                name="currency", attr_type="CDATA", default_decl='"RUB"'
+            ),
+            "value": AttributeDef(
+                name="value", attr_type="CDATA", default_decl="#REQUIRED"
+            ),
+            "version": AttributeDef(
+                name="version", attr_type="CDATA", default_decl='#FIXED "1.0"'
+            ),
+            "kind": AttributeDef(
+                name="kind",
+                attr_type="ENUM",
+                default_decl="#REQUIRED",
+                allowed_values=["a"],
+            ),
+        },
+    )
+    summary = _element_to_summary(elem)
+    assert summary.attribute_defaults == {
+        "currency": "RUB",
+        "version": "1.0",
+        "kind": "a",
+    }
 
 
 def test_get_element_detail(client: TestClient):

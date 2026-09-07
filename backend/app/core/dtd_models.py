@@ -49,6 +49,19 @@ class AttributeDef(BaseModel):
             return self.default_decl.strip().strip("\"'")
         return None
 
+    def is_declared_default(self) -> bool:
+        """True when the DTD names a concrete value that fill should not invent.
+
+        Covers ``#FIXED``, a single-value enum, and quoted CDATA literals
+        such as ``document_type CDATA "d"``. A literal on a multi-value enum
+        is only a fill fallback, not a declared default in this sense.
+        """
+        if self.locked_value():
+            return True
+        if self.attr_type == "ENUM":
+            return False
+        return self.dtd_default_value() is not None
+
 
 class ElementDef(BaseModel):
     """DTD element definition with parsed content model and attributes."""

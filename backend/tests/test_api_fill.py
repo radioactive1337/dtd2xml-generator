@@ -227,3 +227,56 @@ def test_ai_fill_prefills_empty_enum_before_llm_runs(
     assert response.status_code == 200, response.text
     result_root = etree.fromstring(response.json()["xml_text"].encode("utf-8"))
     assert result_root.get("status") in {"active", "inactive", "pending"}
+
+
+def test_ai_fill_preserves_original_element_structure(
+    client: TestClient,
+    monkeypatch: MonkeyPatch,
+):
+    schema_id = _upload_fixture(client)
+    _mock_llm_alias(monkeypatch)
+
+    xml_text = (
+        '<PayDoc id="doc-1" kladr="7700000000000" active="true" status="active">'
+        '<Header version="1.0"><Title></Title></Header>'
+        '<Body><Record><Field name="" type="number"/></Record></Body>'
+        "</PayDoc>"
+    )
+
+    async def fake_llm(xml, schema, user, alias="default", **kwargs):
+        return (
+            '<PayDoc id="filled-id" kladr="7700000000000" active="true" status="active" extra="nope">'
+            "unwanted-root-text"
+            '<Header version="1.0"><Title>Hello</Title></Header>'
+            '<Body><Record><Field name="amount" type="number">999</Field>'
+            "<Hallucinated/></Record></Body>"
+            "<Extra/>"
+            "</PayDoc>"
+        )
+
+    monkeypatch.setattr("app.api.routes.fill.populate_with_llm", fake_llm)
+
+    response = client.post(
+        "/api/fill",
+        json={
+            "schema_id": schema_id,
+            "xml_text": xml_text,
+            "strategy": "ai",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    root = etree.fromstring(response.json()["xml_text"].encode("utf-8"))
+    assert root.get("id") == "filled-id"
+    assert "extra" not in root.attrib
+    assert (root.text or "").strip() != "unwanted-root-text"
+    assert root.find("Extra") is None
+    assert root.find("Body/Record/Hallucinated") is None
+    title = root.find("Header/Title")
+    assert title is not None
+    assert (title.text or "").strip() == "Hello"
+    field = root.find("Body/Record/Field")
+    assert field is not None
+    assert field.get("name") == "amount"
+    assert (field.text or "").strip() == "999"
+

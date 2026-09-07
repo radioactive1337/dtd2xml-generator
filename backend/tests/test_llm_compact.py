@@ -1,5 +1,7 @@
 """Tests for compact LLM fill task collection and value application."""
 
+from lxml import etree
+
 from app.core.dtd_models import AttributeDef, ContentNode, DTDSchema, ElementDef
 from app.services.llm_service import (
     annotate_repeat_counts,
@@ -71,11 +73,20 @@ def test_collect_fill_tasks_hybrid_only_empty_and_placeholders():
     )
 
     assert len(tasks) == 2
-    assert tasks[0] == {"i": 0, "p": "PayDoc", "a": ["id"]}
+    # "kladr" (protected) and "active" (already a real, non-placeholder value)
+    # are captured as sibling context ("ctx") for cross_field rule hints, even
+    # though they aren't themselves fill targets -- see build_constraints_note.
+    assert tasks[0] == {
+        "i": 0,
+        "p": "PayDoc",
+        "a": ["id"],
+        "ctx": {"kladr": "from-db", "active": "true"},
+    }
     assert tasks[1] == {
         "i": 1,
         "p": "PayDoc.Body.Record.Field",
         "a": ["name"],
+        "ctx": {"type": "string"},
     }
 
 
@@ -114,6 +125,86 @@ def test_apply_llm_values_preserves_structure_and_db_values():
     assert "Extra" not in result
 
 
+def test_apply_llm_values_does_not_add_text_to_empty_element():
+    schema = DTDSchema(
+        elements={
+            "saldo-incoming": ElementDef(
+                name="saldo-incoming",
+                content_raw="EMPTY",
+                content_model=ContentNode(kind="EMPTY"),
+                attributes={
+                    "currency": AttributeDef(
+                        name="currency", attr_type="CDATA", default_decl="#IMPLIED"
+                    ),
+                    "value": AttributeDef(name="value", attr_type="CDATA", default_decl="#IMPLIED"),
+                },
+            )
+        }
+    )
+    original = '<saldo-incoming currency="" value=""/>'
+    tasks = [{"i": 0, "p": "saldo-incoming", "a": ["currency", "value"]}]
+    values = [
+        {"i": 0, "a": {"currency": "RUB", "value": "150000.00", "extra": "nope"}, "t": "850000.00"}
+    ]
+
+    result = apply_llm_values(original, values, tasks=tasks, schema=schema)
+    root = etree.fromstring(result.encode("utf-8"))
+
+    assert root.get("currency") == "RUB"
+    assert root.get("value") == "150000.00"
+    assert "extra" not in root.attrib
+    assert not (root.text or "").strip()
+
+
+def test_apply_llm_values_fills_requested_pcdata():
+    original = "<Field/>"
+    schema = DTDSchema(
+        elements={
+            "Field": ElementDef(
+                name="Field",
+                content_raw="#PCDATA",
+                content_model=ContentNode(kind="PCDATA"),
+                attributes={},
+            )
+        }
+    )
+    tasks = [{"i": 0, "p": "Field", "t": 1}]
+    values = [{"i": 0, "t": "hello"}]
+
+    result = apply_llm_values(original, values, tasks=tasks, schema=schema)
+    root = etree.fromstring(result.encode("utf-8"))
+    assert (root.text or "").strip() == "hello"
+
+
+def test_collect_fill_tasks_skips_dtd_declared_defaults():
+    schema = DTDSchema(
+        elements={
+            "manage-bank-customer-objects": ElementDef(
+                name="manage-bank-customer-objects",
+                content_raw="ANY",
+                content_model=ContentNode(kind="ANY"),
+                attributes={
+                    "document_type": AttributeDef(
+                        name="document_type",
+                        attr_type="CDATA",
+                        default_decl='"d"',
+                    ),
+                    "source": AttributeDef(
+                        name="source",
+                        attr_type="CDATA",
+                        default_decl="#IMPLIED",
+                    ),
+                },
+            ),
+        }
+    )
+    xml = '<manage-bank-customer-objects document_type="" source=""/>'
+    tasks = collect_fill_tasks(xml, schema, fill_empty_only=False)
+    assert tasks == [
+        {"i": 0, "p": "manage-bank-customer-objects", "a": ["source"]},
+    ]
+
+
 def test_collect_fill_tasks_full_mode_includes_all_attributes():
     xml = '<PayDoc id="existing" kladr="" active="false"/>'
 
@@ -147,6 +238,18 @@ def test_build_batch_xml_skeleton_and_parse_response():
         {"i": 0, "a": {"id": "ai-id"}},
         {"i": 1, "a": {"name": "filled", "type": "string"}},
     ]
+
+
+def test_parse_batch_ignores_unsolicited_text_on_attribute_tasks():
+    batch = [{"i": 0, "p": "saldo-incoming", "a": ["value"]}]
+    filled = '<fill><f i="0" p="saldo-incoming" value="150000.00">850000.00</f></fill>'
+    assert parse_batch_xml_response(filled, batch) == [{"i": 0, "a": {"value": "150000.00"}}]
+
+
+def test_parse_batch_keeps_text_when_requested():
+    batch = [{"i": 0, "p": "Title", "t": 1}]
+    filled = '<fill><f i="0" p="Title">Hello</f></fill>'
+    assert parse_batch_xml_response(filled, batch) == [{"i": 0, "t": "Hello"}]
 
 
 def test_parse_batch_ignores_copied_instance_index():

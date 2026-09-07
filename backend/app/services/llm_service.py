@@ -21,11 +21,15 @@ from app.core.dtd_models import DTDSchema
 from app.core.logging_config import truncate
 from app.core.xml_tree import (
     ProtectedAttrs,
+    apply_declared_dtd_defaults,
+    element_allows_pcdata_fill,
     element_dot_path,
     element_path,
     find_elements_by_dot_path,
     is_fillable_attribute_value,
+    schema_element_def,
 )
+from app.services import attribute_rules_service as rules_svc
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +70,8 @@ _FILL_SYSTEM_PROMPT = (
     "#FIXED and single-value enums stay unchanged. "
     "Keep values internally consistent within one element "
     "(bank name matches its BIC and city). "
+    "Self-closing <f .../> elements must stay empty: fill attributes only, "
+    "never add inner text or child elements. "
     "Return only valid XML without markdown fences or explanations."
 )
 
@@ -75,7 +81,8 @@ _FILL_XML_NOTE = (
     "Fill every empty attribute listed and any required text — an attribute "
     "left empty or missing from your response is a mistake, even if it looks "
     "optional (e.g. wing, door, area-code, place). Do not add or remove "
-    "elements.\n\n"
+    "elements or attributes. Put inner text only on pair tags (<f ...></f>); "
+    "self-closing <f .../> must stay self-closing with attributes only.\n\n"
 )
 
 _FILL_RETRY_NOTE = (
@@ -277,6 +284,7 @@ class LLMService:
             tasks=tasks,
             fill_empty_only=fill_empty_only,
             protected_attrs=protected_attrs,
+            schema=schema,
         )
 
         result_xml = await self._retry_stubborn_fields(
@@ -436,6 +444,7 @@ class LLMService:
                 tasks=leftover,
                 fill_empty_only=True,
                 protected_attrs=protected_attrs,
+                schema=schema,
             )
 
         return result
@@ -462,9 +471,11 @@ class LLMService:
         elif retry:
             prefix += _FILL_RETRY_NOTE
         diversity_note = build_diversity_note(batch)
+        constraints_note = build_constraints_note(batch)
         user_message = (
             f"{prefix}{_FILL_XML_NOTE}"
             f"{diversity_note}"
+            f"{constraints_note}"
             f"Schema metadata (JavaDoc-style comments):\n{metadata}\n\n"
             f"XML skeleton:\n{skeleton}"
         )
@@ -895,6 +906,44 @@ def build_diversity_note(batch: list[dict[str, Any]]) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+def build_constraints_note(batch: list[dict[str, Any]]) -> str:
+    """Prompt fragment listing config-driven validation rules for this batch.
+
+    Surfaces the same ``config/attribute_rules.json`` constraints that would
+    otherwise only be checked after the fact (``post_fill``), so the model
+    can satisfy them on the first attempt instead of relying on manual fixes
+    or a later warning pass. Returns "" when no rule in the batch has a hint.
+
+    Lines are keyed by task index (``[i=N]``), not just ``element@attr``:
+    many schemas reuse a generic name/value pair element (e.g. ``<cs:attribute
+    name="citizenship" value=""/>``), so several unrelated tasks can share the
+    same tag+attribute. The index lets the model map each constraint back to
+    the exact ``<f i="N">`` entry in the skeleton instead of guessing which
+    instance it applies to. ``rule_constraint_hint`` also uses each task's
+    captured sibling context (``ctx``) so cross_field rules (e.g. "only when
+    name=citizenship") are only surfaced for the matching instance.
+    """
+    ruleset = rules_svc.load_attribute_rules()
+    lines: list[str] = []
+    for task in batch:
+        tag = _path_tag(task["p"])
+        siblings = task.get("ctx")
+        for attr_name in task.get("a", []):
+            hint = rules_svc.rule_constraint_hint(
+                tag, attr_name, ruleset=ruleset, context="post_fill", siblings=siblings
+            )
+            if hint:
+                lines.append(f"- [i={task['i']}] {tag}@{attr_name}: {hint}")
+    if not lines:
+        return ""
+    lines = list(dict.fromkeys(lines))
+    return (
+        "Validation rules — the values you generate MUST satisfy these "
+        "constraints (each [i=N] refers to the <f i=\"N\"> element below):\n"
+        + "\n".join(lines) + "\n\n"
+    )
+
+
 def group_tasks_into_batches(
     tasks: list[dict[str, Any]],
     *,
@@ -981,6 +1030,7 @@ def parse_batch_xml_response(content: str, batch: list[dict[str, Any]]) -> list[
         task["i"]: set(task.get("a", []))
         for task in batch
     }
+    text_requested = {task["i"] for task in batch if task.get("t")}
     values: list[dict[str, Any]] = []
 
     for node in root.iter("f"):
@@ -1003,7 +1053,7 @@ def parse_batch_xml_response(content: str, batch: list[dict[str, Any]]) -> list[
         }
         if filled_attrs:
             item["a"] = filled_attrs
-        if (node.text or "").strip():
+        if index in text_requested and (node.text or "").strip():
             item["t"] = node.text.strip()
         if len(item) > 1:
             values.append(item)
@@ -1025,7 +1075,7 @@ def collect_fill_tasks(
     tasks: list[dict[str, Any]] = []
 
     for el in root.iter():
-        elem_def = schema.elements.get(el.tag)
+        elem_def = schema_element_def(el, schema)
         dot_path = element_dot_path(el)
         tree_path = element_path(el)
 
@@ -1034,6 +1084,8 @@ def collect_fill_tasks(
             if (tree_path, attr_name) in protected_attrs:
                 continue
             attr_def = elem_def.attributes.get(attr_name) if elem_def else None
+            if attr_def is not None and attr_def.is_declared_default():
+                continue
             if fill_empty_only:
                 if is_fillable_attribute_value(attr_value, attr_def=attr_def):
                     attr_names.append(attr_name)
@@ -1041,7 +1093,7 @@ def collect_fill_tasks(
                 attr_names.append(attr_name)
 
         needs_text = False
-        if not attr_names and elem_def and elem_def.content_model.kind == "PCDATA" and len(el) == 0:
+        if not attr_names and element_allows_pcdata_fill(el, schema):
             if fill_empty_only:
                 needs_text = not (el.text or "").strip()
             else:
@@ -1056,6 +1108,17 @@ def collect_fill_tasks(
                 task["a"] = attr_names
             if needs_text:
                 task["t"] = 1
+            # Already-set sibling attributes (e.g. name="citizenship" next to
+            # an empty value=""). Needed to evaluate cross_field validation
+            # rules per-instance when building the prompt -- see
+            # build_constraints_note / rule_constraint_hint(siblings=...).
+            siblings = {
+                key: val
+                for key, val in el.attrib.items()
+                if val and val.strip() and key not in attr_names
+            }
+            if siblings:
+                task["ctx"] = siblings
             tasks.append(task)
 
     return tasks
@@ -1100,10 +1163,12 @@ def apply_llm_values(
     tasks: list[dict[str, Any]] | None = None,
     fill_empty_only: bool = False,
     protected_attrs: ProtectedAttrs = frozenset(),
+    schema: DTDSchema | None = None,
 ) -> str:
     """Apply LLM JSON field values onto the original XML tree."""
     original_root = etree.fromstring(original_xml.encode("utf-8"))
     by_dot_path = {element_dot_path(el): el for el in original_root.iter()}
+    tasks_by_index = {task["i"]: task for task in tasks} if tasks else {}
 
     for item in values:
         normalized = _normalize_llm_value_item(item, tasks=tasks)
@@ -1119,6 +1184,13 @@ def apply_llm_values(
             continue
 
         tree_path = element_path(el)
+        matching_task = None
+        raw_index = item.get("i")
+        if raw_index is not None:
+            try:
+                matching_task = tasks_by_index.get(int(raw_index))
+            except (TypeError, ValueError):
+                matching_task = None
 
         attrs = normalized.get("attrs")
         if isinstance(attrs, dict):
@@ -1132,12 +1204,20 @@ def apply_llm_values(
                 if new_value is not None and str(new_value).strip():
                     el.set(attr_name, str(new_value))
 
-        if "text" in normalized:
-            new_text = normalized["text"]
-            if new_text is not None and str(new_text).strip():
-                if fill_empty_only and (el.text or "").strip():
-                    continue
-                el.text = str(new_text)
+        if "text" not in normalized:
+            continue
+        new_text = normalized["text"]
+        if new_text is None or not str(new_text).strip():
+            continue
+        if fill_empty_only and (el.text or "").strip():
+            continue
+        requested_text = bool(matching_task and matching_task.get("t"))
+        if schema is not None:
+            if not element_allows_pcdata_fill(el, schema):
+                continue
+        elif not requested_text:
+            continue
+        el.text = str(new_text)
 
     return etree.tostring(
         original_root,
@@ -1159,32 +1239,9 @@ def apply_schema_default_fill(
     for the attribute (#FIXED, a literal default, or a single-value enum).
     No attribute-name guesswork, so it applies equally to any schema.
     """
-    root = etree.fromstring(xml_text.encode("utf-8"))
-    filled_paths: list[str] = []
-
-    for el in root.iter():
-        elem_def = schema.elements.get(el.tag)
-        if elem_def is None:
-            continue
-        tree_path = element_path(el)
-        for attr_name, attr_value in list(el.attrib.items()):
-            if (tree_path, attr_name) in protected_attrs:
-                continue
-            if not is_fillable_attribute_value(attr_value):
-                continue
-            attr_def = elem_def.attributes.get(attr_name)
-            default = attr_def.dtd_default_value() if attr_def else None
-            if not default:
-                continue
-            el.set(attr_name, default)
-            filled_paths.append(f"{element_dot_path(el)}@{attr_name}")
-
-    if not filled_paths:
-        return xml_text, []
-    new_xml = etree.tostring(
-        root, pretty_print=True, encoding="UTF-8", xml_declaration=False
-    ).decode("UTF-8")
-    return new_xml, filled_paths
+    return apply_declared_dtd_defaults(
+        xml_text, schema, protected_attrs=protected_attrs
+    )
 
 
 def apply_generic_placeholder_fill(
@@ -1237,6 +1294,7 @@ def merge_fill_empty_only(
     filled_xml: str,
     *,
     protected_attrs: ProtectedAttrs = frozenset(),
+    schema: DTDSchema | None = None,
 ) -> str:
     """Keep the original tree; copy values from *filled_xml* for non-DB attributes."""
     original_root = etree.fromstring(original_xml.encode("utf-8"))
@@ -1257,6 +1315,8 @@ def merge_fill_empty_only(
             filled_value = filled_el.attrib.get(attr_name)
             if filled_value is not None and filled_value.strip():
                 el.set(attr_name, filled_value)
+        if not element_allows_pcdata_fill(el, schema):
+            continue
         if not (el.text or "").strip() and (filled_el.text or "").strip():
             el.text = filled_el.text
 

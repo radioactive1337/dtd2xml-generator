@@ -18,7 +18,12 @@ from app.api.routes.dtd import get_schema_registry
 from app.api.routes.generate import get_last_generated, set_last_generated
 from app.auth.sessions import get_current_user
 from app.config import reference_xml_root, resolve_llm_alias
-from app.core.xml_tree import ProtectedAttrs, prefill_empty_enums
+from app.core.xml_tree import (
+    ProtectedAttrs,
+    apply_declared_dtd_defaults,
+    overlay_values_preserving_structure,
+    prefill_empty_enums,
+)
 from app.services.attribute_rules_service import validate_document
 from app.services.db_service import SqlMapping, apply_db_overrides
 from app.services.field_mapping_service import suggest_field_mappings as suggest_field_mappings_service
@@ -212,11 +217,20 @@ async def execute_fill(
         )
 
     xml, enum_prefill_count = prefill_empty_enums(xml, schema)
+    structure_xml = xml
     if enum_prefill_count:
         await on_progress(
             "enum_prefill",
             f"Заполнено {enum_prefill_count} enum-атрибут(ов) случайным допустимым значением",
             5,
+        )
+
+    xml, defaulted_paths = apply_declared_dtd_defaults(xml, schema)
+    if defaulted_paths:
+        await on_progress(
+            "dtd_default_prefill",
+            f"Заполнено {len(defaulted_paths)} атрибут(ов) значением по умолчанию из DTD",
+            8,
         )
 
     protected_attrs: ProtectedAttrs = frozenset()
@@ -310,6 +324,8 @@ async def execute_fill(
             status_code=422,
             detail=f"LLM stage failed: {exc}",
         ) from exc
+
+    result = overlay_values_preserving_structure(structure_xml, result, schema)
 
     try:
         post_report = await asyncio.to_thread(validate_document, result, schema, context="post_fill")

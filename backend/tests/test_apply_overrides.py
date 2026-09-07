@@ -184,3 +184,28 @@ async def test_apply_overrides_overwrites_filled_when_not_fill_empty_only(db_use
     assert 'inn="already"' not in xml_out
     assert xml_out.count('inn="7701"') == 3
     assert len(protected) == 3
+
+
+@pytest.mark.asyncio
+async def test_apply_overrides_does_not_add_missing_attributes(db_user: UserContext):
+    mapping = SqlMapping(
+        query="SELECT 1",
+        target_element="client",
+        fields={"inn": "inn", "status": "status"},
+        db_alias="test_db",
+    )
+
+    with patch.object(
+        DBService,
+        "run_query",
+        new=AsyncMock(return_value=[{"inn": "7701", "status": "active"}]),
+    ):
+        xml_out, protected, warnings = await DBService(db_user).apply_overrides(
+            SAMPLE_XML,
+            [mapping],
+        )
+
+    assert 'inn="7701"' in xml_out
+    assert "status=" not in xml_out
+    assert any("status" in warning for warning in warnings)
+    assert len(protected) == 3
