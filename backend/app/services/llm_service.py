@@ -40,6 +40,13 @@ _LLM_MAX_CONCURRENT = 4
 # Extra corrective passes for attributes the model still left empty after the
 # main fill — see LLMService._retry_stubborn_fields.
 _LLM_RETRY_ROUNDS = 3
+# Extra corrective passes for attributes that violate a severity="error"
+# attribute_rules.json rule after the main fill — see
+# LLMService._retry_rule_violations. Kept low: unlike empty fields (common,
+# expected to eventually succeed), rule violations should be rarer once the
+# constraint hints are in the initial prompt, and a model that fails the same
+# hard rule twice is unlikely to succeed on a third try.
+_RULE_FIX_ROUNDS = 2
 
 LlmProgressCallback = Callable[[str, str, int], Awaitable[None]]
 
@@ -335,6 +342,15 @@ class LLMService:
                     min(progress_base + progress_span, 99),
                 )
 
+        result_xml = await self._retry_rule_violations(
+            result_xml,
+            schema,
+            protected_attrs=protected_attrs,
+            on_progress=on_progress,
+            progress_percent=min(progress_base + progress_span, 99),
+            cancel_event=cancel_event,
+        )
+
         return result_xml
 
     async def _retry_stubborn_fields(
@@ -449,6 +465,115 @@ class LLMService:
 
         return result
 
+    async def _retry_rule_violations(
+        self,
+        xml_text: str,
+        schema: DTDSchema,
+        *,
+        protected_attrs: ProtectedAttrs,
+        on_progress: LlmProgressCallback | None,
+        progress_percent: int,
+        cancel_event: asyncio.Event | None,
+    ) -> str:
+        """Re-ask the LLM to fix attributes that fail a hard validation rule.
+
+        The constraint hints baked into the fill prompt (see
+        ``build_constraints_note``) are advisory -- the model does not always
+        follow them, especially in large batches with many unrelated
+        attributes. This closes the loop for ``severity="error"`` rules from
+        ``config/attribute_rules.json``: after the main fill (and the
+        empty-field retries above), re-validate with the exact same rule
+        engine used at ``post_fill``/``git_push`` time and, for anything
+        still failing a hard rule, ask the model specifically to replace
+        that one value -- with the concrete failure message attached, not
+        just a generic hint.
+
+        Warnings (``severity="warning"``) are intentionally left alone here:
+        they are often softer/subjective checks (see each rule's
+        ``applies_to``) and still reach the user via the ``post_fill``
+        report in ``fill.py`` either way, for manual review. This is a
+        best-effort pass, not a guarantee -- the model can still fail the
+        same rule again after ``_RULE_FIX_ROUNDS`` attempts, in which case
+        the violation is reported as usual.
+        """
+        result = xml_text
+        for round_index in range(_RULE_FIX_ROUNDS):
+            _raise_if_cancelled(cancel_event)
+
+            report = await asyncio.to_thread(
+                rules_svc.validate_document, result, schema, context="post_fill"
+            )
+            if not report.errors:
+                break
+
+            tasks = _build_violation_fix_tasks(
+                result, report.errors, protected_attrs=protected_attrs
+            )
+            if not tasks:
+                # Every hard violation is on a protected (DB/Git) attribute --
+                # nothing left for the LLM to safely fix.
+                break
+
+            logger.info(
+                "LLM rule-fix round %d/%d [violations=%d]",
+                round_index + 1,
+                _RULE_FIX_ROUNDS,
+                len(tasks),
+            )
+            if on_progress:
+                await on_progress(
+                    "llm_rule_fix",
+                    f"Fixing {len(tasks)} attribute(s) that failed validation "
+                    f"(round {round_index + 1}/{_RULE_FIX_ROUNDS})",
+                    progress_percent,
+                )
+
+            metadata = self._extract_metadata_for_tasks(schema, tasks)
+            batches = group_tasks_into_batches(tasks)
+            semaphore = asyncio.Semaphore(_LLM_MAX_CONCURRENT)
+
+            async def fill_batch(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                _raise_if_cancelled(cancel_event)
+                async with semaphore:
+                    return await self._fill_tasks_batch(
+                        batch,
+                        metadata=metadata,
+                        fill_empty_only=False,
+                        cancel_event=cancel_event,
+                        # Not `retry=True`: that note talks about fields left
+                        # empty, which would contradict `extra_note` here --
+                        # these attributes already have a (wrong) value.
+                        extra_note=_build_violation_fix_note(batch),
+                    )
+
+            batch_results = await asyncio.gather(
+                *(fill_batch(batch) for batch in batches),
+                return_exceptions=True,
+            )
+
+            round_values: list[dict[str, Any]] = []
+            for index, batch_result in enumerate(batch_results):
+                if isinstance(batch_result, asyncio.CancelledError):
+                    raise batch_result
+                if isinstance(batch_result, BaseException):
+                    logger.warning("LLM rule-fix batch %d failed: %s", index, batch_result)
+                    continue
+                round_values.extend(batch_result)
+
+            if not round_values:
+                break
+
+            result = apply_llm_values(
+                result,
+                round_values,
+                tasks=tasks,
+                fill_empty_only=False,
+                protected_attrs=protected_attrs,
+                schema=schema,
+            )
+
+        return result
+
     async def _fill_tasks_batch(
         self,
         batch: list[dict[str, Any]],
@@ -458,6 +583,7 @@ class LLMService:
         cancel_event: asyncio.Event | None = None,
         retry: bool = False,
         last_resort: bool = False,
+        extra_note: str = "",
     ) -> list[dict[str, Any]]:
         skeleton = build_batch_xml_skeleton(batch)
         prefix = (
@@ -470,8 +596,12 @@ class LLMService:
             prefix += _FILL_LAST_RESORT_NOTE
         elif retry:
             prefix += _FILL_RETRY_NOTE
+        prefix = extra_note + prefix
         diversity_note = build_diversity_note(batch)
-        constraints_note = build_constraints_note(batch)
+        # A rule-fix pass already carries the exact, siblings-resolved failure
+        # message per attribute (extra_note) -- skip the generic rule-lookup
+        # note to avoid repeating the same constraint twice in one prompt.
+        constraints_note = "" if extra_note else build_constraints_note(batch)
         user_message = (
             f"{prefix}{_FILL_XML_NOTE}"
             f"{diversity_note}"
@@ -941,6 +1071,70 @@ def build_constraints_note(batch: list[dict[str, Any]]) -> str:
         "Validation rules — the values you generate MUST satisfy these "
         "constraints (each [i=N] refers to the <f i=\"N\"> element below):\n"
         + "\n".join(lines) + "\n\n"
+    )
+
+
+def _build_violation_fix_tasks(
+    xml_text: str,
+    violations: list[Any],
+    *,
+    protected_attrs: ProtectedAttrs,
+) -> list[dict[str, Any]]:
+    """Turn severity="error" rule violations into fill tasks targeting just
+    the offending attributes, so the LLM can be asked to replace each one.
+
+    Skips violations on protected (DB/Git-sourced) attributes -- those are
+    not the LLM's to touch and are left to surface as-is in the final
+    post_fill report instead.
+    """
+    root = etree.fromstring(xml_text.encode("utf-8"))
+    by_dot_path = {element_dot_path(el): el for el in root.iter()}
+
+    by_path: dict[str, dict[str, Any]] = {}
+    for violation in violations:
+        if not violation.attr or not violation.path:
+            continue
+        el = by_dot_path.get(violation.path)
+        if el is None:
+            continue
+        tree_path = element_path(el)
+        if (tree_path, violation.attr) in protected_attrs:
+            continue
+        entry = by_path.setdefault(
+            violation.path, {"p": violation.path, "a": [], "violations": {}}
+        )
+        if violation.attr not in entry["a"]:
+            entry["a"].append(violation.attr)
+        entry["violations"][violation.attr] = violation.message
+
+    tasks: list[dict[str, Any]] = []
+    for index, entry in enumerate(by_path.values()):
+        entry["i"] = index
+        tasks.append(entry)
+    return tasks
+
+
+def _build_violation_fix_note(batch: list[dict[str, Any]]) -> str:
+    """Prompt fragment naming the exact rule each attribute below failed.
+
+    Uses the concrete ``RuleViolation.message`` already resolved against real
+    sibling/parent values by ``validate_document`` -- more precise than
+    re-deriving a hint from ``rule_constraint_hint`` (see
+    ``build_constraints_note``), since we already know exactly which rule
+    fired for this exact element, not just which rule might apply.
+    """
+    lines: list[str] = []
+    for task in batch:
+        tag = _path_tag(task["p"])
+        for attr_name, message in task.get("violations", {}).items():
+            lines.append(f"- [i={task['i']}] {tag}@{attr_name}: {message}")
+    if not lines:
+        return ""
+    return (
+        "CORRECTION PASS: each attribute below currently holds a value that "
+        "FAILED validation. Replace it with a NEW value that actually "
+        "satisfies its constraint -- do not repeat the same invalid value "
+        "and do not leave it unchanged:\n" + "\n".join(lines) + "\n\n"
     )
 
 

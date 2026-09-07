@@ -3,6 +3,7 @@
 from lxml import etree
 
 from app.core.dtd_models import AttributeDef, ContentNode, DTDSchema, ElementDef
+from app.services.attribute_rules_service import RuleViolation
 from app.services.llm_service import (
     annotate_repeat_counts,
     apply_llm_values,
@@ -11,6 +12,8 @@ from app.services.llm_service import (
     collect_fill_tasks,
     group_tasks_into_batches,
     parse_batch_xml_response,
+    _build_violation_fix_note,
+    _build_violation_fix_tasks,
 )
 
 
@@ -337,3 +340,70 @@ def test_diversity_note_empty_when_no_repeats():
     annotate_repeat_counts(tasks)
     assert build_diversity_note(tasks) == ""
     assert "n=" not in build_batch_xml_skeleton(tasks)
+
+
+def _violation(path: str, attr: str, message: str, *, rule_id: str = "r") -> RuleViolation:
+    return RuleViolation(
+        rule_id=rule_id,
+        element="PayDoc",
+        attr=attr,
+        path=path,
+        value="bad",
+        severity="error",
+        message=message,
+        check_type="regex",
+    )
+
+
+def test_build_violation_fix_tasks_groups_by_path_and_skips_protected():
+    xml = (
+        '<PayDoc id="existing" kladr="bad-value">'
+        '<Body><Record><Field name="x" type="string"/></Record></Body>'
+        "</PayDoc>"
+    )
+    violations = [
+        _violation("PayDoc", "kladr", "kladr должен состоять из 11–19 цифр", rule_id="kladr-format"),
+        _violation("PayDoc", "id", "id не должен быть пустым или placeholder", rule_id="id-not-placeholder"),
+        _violation(
+            "PayDoc.Body.Record.Field", "type", "type must be one of: string, number", rule_id="type-enum"
+        ),
+    ]
+
+    # "id" is protected (e.g. sourced from DB) -- must not be offered to the LLM.
+    tasks = _build_violation_fix_tasks(xml, violations, protected_attrs=frozenset({((), "id")}))
+
+    assert len(tasks) == 2
+    by_path = {task["p"]: task for task in tasks}
+    assert by_path["PayDoc"]["a"] == ["kladr"]
+    assert by_path["PayDoc"]["violations"] == {"kladr": "kladr должен состоять из 11–19 цифр"}
+    assert by_path["PayDoc.Body.Record.Field"]["a"] == ["type"]
+    # Indexes are contiguous and stable regardless of dict insertion order.
+    assert {task["i"] for task in tasks} == {0, 1}
+
+
+def test_build_violation_fix_tasks_empty_when_all_protected():
+    xml = '<PayDoc id="existing" kladr="bad-value"/>'
+    violations = [_violation("PayDoc", "kladr", "bad kladr")]
+
+    tasks = _build_violation_fix_tasks(xml, violations, protected_attrs=frozenset({((), "kladr")}))
+
+    assert tasks == []
+
+
+def test_build_violation_fix_note_lists_index_and_message():
+    batch = [
+        {
+            "i": 0,
+            "p": "PayDoc",
+            "a": ["kladr"],
+            "violations": {"kladr": "kladr должен состоять из 11–19 цифр"},
+        }
+    ]
+    note = _build_violation_fix_note(batch)
+
+    assert "CORRECTION PASS" in note
+    assert "[i=0] PayDoc@kladr: kladr должен состоять из 11–19 цифр" in note
+
+
+def test_build_violation_fix_note_empty_for_no_violations():
+    assert _build_violation_fix_note([{"i": 0, "p": "PayDoc", "a": ["kladr"], "violations": {}}]) == ""
