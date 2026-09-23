@@ -91,14 +91,14 @@
           </ul>
         </section>
 
-        <section v-if="report.attribute_values?.length" class="paths-section">
+        <section v-if="report.attribute_values" class="paths-section">
           <h3 class="section-title">Значения в эталонах</h3>
-          <p class="compare-meta">
-            Каталог значений по пути. В промпт Git AI может уйти другой набор из этого же пула.
+          <p v-if="!mismatchedAttributeValues.length" class="compare-meta">
+            Все заполненные значения уже есть в эталонах.
           </p>
-          <ul class="paths-list">
+          <ul v-else class="paths-list">
             <li
-              v-for="row in report.attribute_values"
+              v-for="row in mismatchedAttributeValues"
               :key="`${row.path}@${row.attr}`"
               class="path-item"
             >
@@ -169,6 +169,13 @@ const referencesLabel = computed(() => {
   const count = props.report?.references_count ?? 0
   return `${count} ${plural(count, 'эталоном', 'эталонами', 'эталонами')}`
 })
+
+const mismatchedAttributeValues = computed(() =>
+  (props.report?.attribute_values || []).filter((row) => {
+    const currentCount = row.current_total ?? row.current_values?.length ?? 0
+    return currentCount > 0 && !row.matches_references
+  }),
+)
 
 const expanded = reactive({})
 
