@@ -161,7 +161,17 @@
       </form>
       <p v-if="folderFormError" class="library-error" role="alert">{{ folderFormError }}</p>
 
-      <div v-for="section in personalSections" :key="section.key" class="folder-block">
+      <p v-if="canDragDocuments" class="library-hint">Перетащите документ на папку</p>
+
+      <div
+        v-for="section in personalSections"
+        :key="section.key"
+        class="folder-block"
+        :class="{ 'folder-block--drop': dropTargetKey === section.key }"
+        @dragover="onFolderDragOver($event, section.key)"
+        @dragleave="onFolderDragLeave($event, section.key)"
+        @drop="onFolderDrop($event, section)"
+      >
         <div class="folder-header">
           <div v-if="renamingFolder === section.name" class="folder-rename">
             <input
@@ -214,7 +224,16 @@
         </div>
         <ul v-if="isFolderOpen(section.key)" class="doc-list">
           <li v-if="!section.docs.length" class="doc-loading">Нет документов</li>
-          <li v-for="doc in section.docs" :key="doc.name" class="doc-item">
+          <li
+            v-for="doc in section.docs"
+            :key="doc.name"
+            class="doc-item"
+            :class="{ 'doc-item--dragging': draggingName === doc.name }"
+            :draggable="canDragDocuments"
+            :title="canDragDocuments ? 'Перетащите в папку' : undefined"
+            @dragstart="onDocDragStart($event, doc)"
+            @dragend="onDocDragEnd"
+          >
             <div class="doc-info">
               <span class="doc-title" v-html="highlightMatch(doc.name, searchQuery)" />
               <span
@@ -229,20 +248,8 @@
                 class="doc-desc"
                 v-html="highlightMatch(doc.description, searchQuery)"
               />
-              <select
-                v-if="personalFolders.length"
-                class="doc-folder-select"
-                :value="doc.folder || ''"
-                :aria-label="`Папка для ${doc.name}`"
-                @change="$emit('move-personal', doc.name, $event.target.value)"
-              >
-                <option value="">Без группы</option>
-                <option v-for="folder in orderedFolders" :key="folder" :value="folder">
-                  {{ folder }}
-                </option>
-              </select>
             </div>
-            <div class="doc-actions">
+            <div class="doc-actions" @dragstart.stop.prevent>
               <button
                 type="button"
                 class="btn-secondary btn-sm"
@@ -327,6 +334,8 @@ const folderFormError = ref('')
 const renamingFolder = ref('')
 const renameDraft = ref('')
 const collapsedFolders = ref({})
+const draggingName = ref('')
+const dropTargetKey = ref('')
 
 // Reset search when switching scopes
 watch(() => props.activeScope, () => { searchQuery.value = '' })
@@ -532,11 +541,16 @@ const personalSections = computed(() => {
   }
   const loose = props.personalDocuments.filter((doc) => !doc.folder || !known.has(doc.folder))
   const looseDocs = q ? loose.filter((doc) => documentMatchesQuery(doc, q)) : loose
-  if (looseDocs.length) {
+  const showLoose = looseDocs.length > 0 || (!q && props.personalFolders.length > 0)
+  if (showLoose) {
     sections.push({ key: '__ungrouped__', name: 'Без группы', docs: looseDocs, loose: true })
   }
   return sections
 })
+
+const canDragDocuments = computed(
+  () => !searchQuery.value && props.personalFolders.length > 0 && props.personalDocuments.length > 0,
+)
 
 const showPersonalEmpty = computed(
   () => !props.loading && !searchQuery.value && !props.personalFolders.length && !props.personalDocuments.length,
@@ -603,6 +617,51 @@ function askDeleteFolder(name) {
   const ok = window.confirm(`Удалить папку «${name}»? Документы останутся в «Без группы».`)
   if (!ok) return
   emit('delete-folder', name)
+}
+
+function documentFolder(doc) {
+  if (!doc?.folder || !props.personalFolders.includes(doc.folder)) return ''
+  return doc.folder
+}
+
+function onDocDragStart(event, doc) {
+  if (!canDragDocuments.value) {
+    event.preventDefault()
+    return
+  }
+  draggingName.value = doc.name
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', doc.name)
+}
+
+function onDocDragEnd() {
+  draggingName.value = ''
+  dropTargetKey.value = ''
+}
+
+function onFolderDragOver(event, key) {
+  if (!draggingName.value) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  dropTargetKey.value = key
+}
+
+function onFolderDragLeave(event, key) {
+  const next = event.relatedTarget
+  if (next instanceof Node && event.currentTarget.contains(next)) return
+  if (dropTargetKey.value === key) dropTargetKey.value = ''
+}
+
+function onFolderDrop(event, section) {
+  event.preventDefault()
+  const name = draggingName.value || event.dataTransfer.getData('text/plain')
+  draggingName.value = ''
+  dropTargetKey.value = ''
+  if (!name) return
+  const folder = section.loose ? '' : section.name
+  const doc = props.personalDocuments.find((item) => item.name === name)
+  if (!doc || documentFolder(doc) === folder) return
+  emit('move-personal', name, folder)
 }
 
 function isFolderOpen(key) {
@@ -806,6 +865,15 @@ function onSync() {
   background: color-mix(in srgb, var(--surface) 50%, transparent);
 }
 
+.doc-item[draggable='true'] {
+  cursor: grab;
+  user-select: none;
+}
+
+.doc-item--dragging {
+  opacity: 0.45;
+}
+
 .doc-item--button {
   width: 100%;
   margin: 0;
@@ -823,11 +891,15 @@ function onSync() {
 .doc-info {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 2px;
+  flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .doc-title {
+  max-width: 100%;
   min-width: 0;
   font-size: 12px;
   overflow: hidden;
@@ -841,6 +913,8 @@ function onSync() {
 }
 
 .doc-desc {
+  max-width: 100%;
+  min-width: 0;
   font-size: 10px;
   color: var(--text-muted);
   overflow: hidden;
@@ -910,6 +984,11 @@ function onSync() {
   gap: 4px;
 }
 
+.folder-block--drop > .folder-header .folder-toggle {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+
 .folder-header {
   display: flex;
   align-items: center;
@@ -927,18 +1006,6 @@ function onSync() {
   gap: 4px;
   flex-shrink: 0;
 }
-
-.doc-folder-select {
-  width: 100%;
-  margin-top: 4px;
-  padding: 3px 6px;
-  font-size: 11px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--text);
-}
-
 
 /* ── Search ─────────────────────────────────────────────────────────────── */
 

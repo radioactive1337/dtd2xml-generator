@@ -96,20 +96,21 @@ function scanToTagEnd(xml, start) {
 function rewriteStartTag(tag, written) {
   const parsed = parseStartTag(tag)
   if (!parsed || parsed.attrs.length === 0) return tag
-  const attrIndent = lineIndent(written) + INDENT
-  const close = parsed.selfClosing ? ' />' : '>'
-  const lines = parsed.attrs.map((attr, attrIndex) => {
-    const suffix = attrIndex === parsed.attrs.length - 1 ? close : ''
-    return `${attrIndent}${attr}${suffix}`
+  const close = parsed.selfClosing ? '/>' : '>'
+  const [first, ...rest] = parsed.attrs
+  if (rest.length === 0) return `<${parsed.name} ${first}${close}`
+  const prefix = currentLinePrefix(written)
+  const contIndent = ' '.repeat(prefix.length + `<${parsed.name} `.length)
+  const lines = rest.map((attr, index) => {
+    const suffix = index === rest.length - 1 ? close : ''
+    return `${contIndent}${attr}${suffix}`
   })
-  return `<${parsed.name}\n${lines.join('\n')}`
+  return `<${parsed.name} ${first}\n${lines.join('\n')}`
 }
 
-function lineIndent(written) {
+function currentLinePrefix(written) {
   const breakAt = written.lastIndexOf('\n')
-  const line = breakAt === -1 ? written : written.slice(breakAt + 1)
-  const match = /^[ \t]*/.exec(line)
-  return match ? match[0] : ''
+  return breakAt === -1 ? written : written.slice(breakAt + 1)
 }
 
 function parseStartTag(tag) {
