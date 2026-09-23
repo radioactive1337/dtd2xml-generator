@@ -83,6 +83,83 @@ def test_build_corpus_empty_when_no_matching_docs(tmp_path: Path):
     assert git_fill.build_corpus(tmp_path, "PayDoc") == {}
 
 
+def test_build_corpus_records_structural_path_without_indexes(tmp_path: Path):
+    _write_ref(
+        tmp_path,
+        "PayDoc",
+        "one.xml",
+        '<PayDoc><item id="1" code="A"/><item id="2" code="B"/></PayDoc>',
+    )
+
+    stats = git_fill.build_corpus(tmp_path, "PayDoc")[("item", "code")]
+
+    assert {item.path for item in stats.occurrences} == {"PayDoc/item"}
+    assert {item.siblings for item in stats.occurrences} == {(("id", "1"),), (("id", "2"),)}
+    assert stats.diversity == 2
+
+
+def test_select_git_ai_examples_prefers_same_path_and_sibling():
+    stats = git_fill.AttributeCorpusStats(
+        values=["AAA", "BBB", "CCC", "XXX"],
+        occurrences=[
+            git_fill.AttributeOccurrence("AAA", "a", "PayDoc/client", (("kind", "person"),)),
+            git_fill.AttributeOccurrence("BBB", "a", "PayDoc/client", (("kind", "person"),)),
+            git_fill.AttributeOccurrence("CCC", "a", "PayDoc/client", (("kind", "person"),)),
+            git_fill.AttributeOccurrence("XXX", "a", "PayDoc/org", (("kind", "org"),)),
+        ],
+    )
+
+    examples = git_fill.select_git_ai_examples(
+        stats, path="PayDoc/client", siblings={"kind": "person"}
+    )
+
+    assert set(examples) == {"AAA", "BBB", "CCC"}
+
+
+def test_select_git_ai_examples_falls_back_when_context_is_too_small():
+    stats = git_fill.AttributeCorpusStats(
+        occurrences=[
+            git_fill.AttributeOccurrence("ONLY", "a", "PayDoc/party/client", (("kind", "person"),)),
+            git_fill.AttributeOccurrence("BBB", "a", "PayDoc/client", (("kind", "org"),)),
+            git_fill.AttributeOccurrence("CCC", "a", "PayDoc/client", (("kind", "org"),)),
+            git_fill.AttributeOccurrence("DDD", "a", "PayDoc/client", (("kind", "org"),)),
+        ],
+    )
+
+    examples = git_fill.select_git_ai_examples(
+        stats, path="PayDoc/party/client", siblings={"kind": "person"}
+    )
+
+    assert set(examples) == {"ONLY", "BBB", "CCC", "DDD"}
+
+
+def test_select_git_ai_examples_keeps_frequent_values_and_other_shapes():
+    occurrences = [
+        git_fill.AttributeOccurrence("COMMON", "a", "PayDoc", ())
+        for _ in range(30)
+    ]
+    occurrences += [
+        git_fill.AttributeOccurrence(value, "a", "PayDoc", ())
+        for value in ("ALSO", "THIRD", "FOURTH")
+        for _ in range({"ALSO": 20, "THIRD": 10, "FOURTH": 5}[value])
+    ]
+    occurrences.append(git_fill.AttributeOccurrence("123456789012345", "a", "PayDoc", ()))
+    occurrences.append(git_fill.AttributeOccurrence("??", "a", "PayDoc", ()))
+    occurrences += [
+        git_fill.AttributeOccurrence(f"N{i:02d}", "a", "PayDoc", ())
+        for i in range(12)
+    ]
+    stats = git_fill.AttributeCorpusStats(occurrences=occurrences)
+
+    examples = git_fill.select_git_ai_examples(stats, path="PayDoc", siblings={})
+
+    assert examples[:4] == ["COMMON", "ALSO", "THIRD", "FOURTH"]
+    assert "123456789012345" in examples
+    assert "??" in examples
+    assert len(examples) == 10
+    assert examples.count("N00") + examples.count("N11") < 10
+
+
 # --- choose_fill_mode -------------------------------------------------------
 
 
@@ -470,6 +547,52 @@ async def test_git_ai_batches_run_concurrently(tmp_path: Path, monkeypatch):
     )
     assert llm.calls == 2
     assert llm.max_in_flight == 2
+
+
+@pytest.mark.asyncio
+async def test_git_ai_prompt_uses_contextual_examples(tmp_path: Path, monkeypatch):
+    def force_ai(attr_def, stats, **kwargs):
+        if stats and stats.values and not kwargs.get("deny_copy"):
+            return "ai"
+        return "skip"
+
+    monkeypatch.setattr(git_fill, "choose_fill_mode", force_ai)
+
+    _write_ref(
+        tmp_path,
+        "PayDoc",
+        "one.xml",
+        "<PayDoc>"
+        '<client kind="person" code="AAA"/>'
+        '<client kind="person" code="BBB"/>'
+        '<client kind="person" code="CCC"/>'
+        '<org kind="org" code="XXX"/>'
+        "</PayDoc>",
+    )
+
+    class CaptureLlm:
+        def __init__(self) -> None:
+            self.message = ""
+
+        async def complete_text(self, *, system_prompt: str, user_message: str, temperature: float = 0.7, **_kwargs) -> str:
+            self.message = user_message
+            indexes = [int(match) for match in re.findall(r"\[(\d+)\] Path:", user_message)]
+            return json.dumps({"values": [{"i": i, "v": "ZZZ"} for i in indexes or [0]]})
+
+    llm = CaptureLlm()
+    await git_fill.populate_from_git(
+        '<PayDoc><client kind="person" code=""/></PayDoc>',
+        _schema(),
+        root=tmp_path,
+        root_element="PayDoc",
+        allow_ai=True,
+        llm=llm,
+    )
+
+    assert "AAA" in llm.message
+    assert "BBB" in llm.message
+    assert "CCC" in llm.message
+    assert "XXX" not in llm.message
 
 
 def test_parse_batch_ai_values_accepts_fenced_json():

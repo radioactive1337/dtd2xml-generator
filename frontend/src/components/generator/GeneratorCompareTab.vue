@@ -90,11 +90,67 @@
             </li>
           </ul>
         </section>
+
+        <section v-if="report.attribute_values" class="paths-section">
+          <h3 class="section-title">Значения в эталонах</h3>
+          <p v-if="!mismatchedAttributeValues.length" class="compare-meta">
+            Все заполненные значения уже есть в эталонах.
+          </p>
+          <ul v-else class="value-list">
+            <li
+              v-for="row in mismatchedAttributeValues"
+              :key="`${row.path}@${row.attr}`"
+              class="value-card"
+            >
+              <button
+                type="button"
+                class="path-link value-card-head"
+                :disabled="!row.line"
+                :title="row.line ? `Перейти к строке ${row.line}` : ''"
+                @click="row.line && $emit('go-to-path', { start_line: row.line })"
+              >
+                <span class="value-card-path">
+                  <span class="value-card-path-name">{{ row.path }}</span><span class="value-card-attr">@{{ row.attr }}</span>
+                </span>
+                <span class="path-line" :class="valueStatusClass(row)">{{ valueStatusLabel(row) }}</span>
+              </button>
+              <div class="value-card-body">
+                <div v-if="row.reference_values?.length" class="value-block">
+                  <span class="value-label">В эталонах</span>
+                  <p class="value-line">
+                    <span
+                      v-for="(value, index) in row.reference_values"
+                      :key="`${row.attr}-${index}`"
+                      class="value-chip"
+                    >
+                      {{ value }}
+                    </span>
+                    <span
+                      v-if="row.reference_total > row.reference_values.length"
+                      class="path-line"
+                    >
+                      ещё {{ row.reference_total - row.reference_values.length }}
+                    </span>
+                  </p>
+                </div>
+                <div v-if="showCurrentValues(row)" class="value-block">
+                  <span class="value-label">В документе</span>
+                  <p class="value-current">
+                    {{ row.current_values.join(', ') }}
+                    <template v-if="row.current_total > row.current_values.length">
+                      — ещё {{ row.current_total - row.current_values.length }}
+                    </template>
+                  </p>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </section>
       </template>
     </template>
 
     <p v-else-if="!compareError" class="compare-placeholder">
-      Нажмите «Проверить уникальность» на панели редактора, чтобы сравнить структуру XML с эталонами.
+      Нажмите «Проверить уникальность» на панели редактора, чтобы сравнить структуру и значения атрибутов с эталонами.
     </p>
   </div>
 </template>
@@ -123,6 +179,13 @@ const referencesLabel = computed(() => {
   const count = props.report?.references_count ?? 0
   return `${count} ${plural(count, 'эталоном', 'эталонами', 'эталонами')}`
 })
+
+const mismatchedAttributeValues = computed(() =>
+  (props.report?.attribute_values || []).filter((row) => {
+    const currentCount = row.current_total ?? row.current_values?.length ?? 0
+    return currentCount > 0 && !row.matches_references
+  }),
+)
 
 const expanded = reactive({})
 
@@ -176,6 +239,23 @@ const aiButtonTitle = computed(() => {
   if (!props.hasUniquePaths) return 'Нет уникальных путей для объяснения'
   return 'Отправить отчёт в ИИ для объяснения'
 })
+
+function valueStatusLabel(row) {
+  const currentCount = row.current_total ?? row.current_values?.length ?? 0
+  if (!currentCount) return 'в документе пусто'
+  if (row.matches_references) return 'есть в эталонах'
+  return 'нет в эталонах'
+}
+
+function valueStatusClass(row) {
+  const currentCount = row.current_total ?? row.current_values?.length ?? 0
+  if (currentCount && !row.matches_references) return 'path-line--miss'
+  return ''
+}
+
+function showCurrentValues(row) {
+  return !row.matches_references && (row.current_values?.length || 0) > 0
+}
 
 function formatScore(score) {
   if (typeof score !== 'number') return ''
@@ -371,6 +451,103 @@ function plural(n, one, few, many) {
   font-size: 11px;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+
+.path-line--miss {
+  color: var(--warning);
+}
+
+.value-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.value-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 45%, transparent);
+  overflow: hidden;
+}
+
+.value-card-head {
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.value-card-path {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.value-card-path-name {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.value-card-attr {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.value-card-head .path-line--miss {
+  font-weight: 700;
+}
+
+.value-card-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.value-block {
+  padding: 8px 10px;
+}
+
+.value-block + .value-block {
+  border-top: 1px solid var(--border);
+}
+
+.value-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.value-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+
+.value-chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface) 50%, transparent);
+  word-break: break-all;
+}
+
+.value-current {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--warning);
 }
 
 .ai-section {

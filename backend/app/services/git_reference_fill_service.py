@@ -12,8 +12,11 @@ same root element:
 - Enum-like / low-cardinality attributes (few distinct values relative to the
   number of reference documents) are copied from the corpus.
 - High-cardinality / free-text attributes are handed to the LLM as a "vary
-  this" task, seeded with a few corpus examples, then re-validated with
-  ``attribute_rules_service`` before being accepted.
+  this" task. Examples come from the same structural path and similar sibling
+  attributes when that pool has enough distinct values, otherwise from the
+  whole tag. The sample keeps the most frequent values and adds other shapes.
+  Candidates are re-validated with ``attribute_rules_service`` before being
+  accepted.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ import json
 import logging
 import random
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +42,7 @@ from app.core.xml_tree import (
     element_dot_path,
     element_path,
     is_fillable_attribute_value,
+    structural_element_path,
 )
 from app.services import attribute_rules_service as rules_svc
 from app.services import reference_xml_service as ref_service
@@ -50,10 +54,15 @@ FillMode = Literal["copy", "ai", "skip"]
 # Below this many reference documents we don't trust the diversity ratio
 # enough to pick "ai" -- too little data to tell an enum from free text.
 _MIN_DOCS_FOR_AI_POLICY = 3
+# A narrower example pool is used only when it has at least this many distinct
+# values. Below that, Git AI falls back to the wider pool.
+_MIN_POOL_VALUES = 3
 # If (distinct values / documents) is at or above this ratio, treat the
 # attribute as free-text/identifier-like rather than enum-like.
 _HIGH_DIVERSITY_RATIO = 0.6
 _AI_FEW_SHOT_MAX = 10
+# How many of the few-shot slots are reserved for the most common values.
+_FREQUENT_EXAMPLE_SLOTS = 4
 _AI_MAX_ATTEMPTS = 2
 _AI_MAX_CONCURRENT = 4
 _AI_BATCH_SIZE = 12
@@ -72,10 +81,21 @@ class ChatCompleter(Protocol):
     ) -> str: ...
 
 
+@dataclass(frozen=True)
+class AttributeOccurrence:
+    """One non-empty attribute value seen in a reference document."""
+
+    value: str
+    source: str
+    path: str
+    siblings: tuple[tuple[str, str], ...] = ()
+
+
 @dataclass
 class AttributeCorpusStats:
     values: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)  # parallel to values: "category/filename"
+    occurrences: list[AttributeOccurrence] = field(default_factory=list)
     frequency: float = 0.0
     diversity: int = 0
     doc_count: int = 0
@@ -89,6 +109,7 @@ class _AiFillJob:
     attr_def: AttributeDef | None
     stats: AttributeCorpusStats
     dot: str
+    structural_path: str
     tree_path: ElementPath
 
 
@@ -140,6 +161,7 @@ def build_corpus(
     """
     per_key_values: dict[tuple[str, str], list[str]] = defaultdict(list)
     per_key_sources: dict[tuple[str, str], list[str]] = defaultdict(list)
+    per_key_occurrences: dict[tuple[str, str], list[AttributeOccurrence]] = defaultdict(list)
     per_key_filled_docs: dict[tuple[str, str], int] = defaultdict(int)
     doc_count = 0
     root_key = _normalize_element_key(root_element)
@@ -167,6 +189,7 @@ def build_corpus(
             if not isinstance(el.tag, str):
                 continue
             elem_name = _local_name(el.tag)
+            structural_path = structural_element_path(el)
             for attr_name, attr_value in el.attrib.items():
                 if attr_name == "xmlns" or attr_name.startswith("xmlns:"):
                     continue
@@ -174,8 +197,26 @@ def build_corpus(
                 if not normalized:
                     continue
                 key = (elem_name, attr_name)
+                siblings = tuple(
+                    sorted(
+                        (name, _normalize_value(raw))
+                        for name, raw in el.attrib.items()
+                        if name != attr_name
+                        and name != "xmlns"
+                        and not name.startswith("xmlns:")
+                        and _normalize_value(raw)
+                    )
+                )
                 per_key_values[key].append(normalized)
                 per_key_sources[key].append(source)
+                per_key_occurrences[key].append(
+                    AttributeOccurrence(
+                        value=normalized,
+                        source=source,
+                        path=structural_path,
+                        siblings=siblings,
+                    )
+                )
                 seen_keys.add(key)
 
         for key in seen_keys:
@@ -188,6 +229,7 @@ def build_corpus(
         corpus[key] = AttributeCorpusStats(
             values=values,
             sources=per_key_sources.get(key, []),
+            occurrences=per_key_occurrences.get(key, []),
             frequency=(filled / doc_count) if doc_count else 0.0,
             diversity=len(unique),
             doc_count=doc_count,
@@ -276,6 +318,119 @@ _GIT_AI_BATCH_SYSTEM_PROMPT = (
     'Return only JSON: {"values": [{"i": 0, "v": "..."}, ...]}. '
     "No markdown, no explanation, no XML."
 )
+
+
+def _value_shape(value: str) -> tuple[str, str]:
+    """Coarse form of a value: character class plus a length bucket."""
+    text = value.strip()
+    if text.isdigit():
+        kind = "digits"
+    elif text.isalpha():
+        kind = "alpha"
+    elif text.isalnum():
+        kind = "alnum"
+    else:
+        kind = "mixed"
+    length = len(text)
+    if length <= 4:
+        bucket = "short"
+    elif length <= 16:
+        bucket = "medium"
+    else:
+        bucket = "long"
+    return kind, bucket
+
+
+def _diverse_sample(counts: Counter[str], limit: int) -> list[str]:
+    """Frequent values first, then one representative of each other shape.
+
+    Leftover slots continue in frequency order, so a rare outlier does not
+    take the place of a common format.
+    """
+    if limit <= 0 or not counts:
+        return []
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    selected: list[str] = []
+    selected_set: set[str] = set()
+    frequent_slots = min(_FREQUENT_EXAMPLE_SLOTS, limit, len(ranked))
+    for value, _count in ranked[:frequent_slots]:
+        selected.append(value)
+        selected_set.add(value)
+
+    by_shape: dict[tuple[str, str], list[tuple[str, int]]] = defaultdict(list)
+    for value, count in ranked:
+        if value in selected_set:
+            continue
+        by_shape[_value_shape(value)].append((value, count))
+
+    covered = {_value_shape(value) for value in selected}
+    uncovered = [shape for shape in by_shape if shape not in covered]
+    uncovered.sort(key=lambda shape: (-by_shape[shape][0][1], shape))
+    for shape in uncovered:
+        if len(selected) >= limit:
+            break
+        value = by_shape[shape][0][0]
+        selected.append(value)
+        selected_set.add(value)
+
+    if len(selected) < limit:
+        for value, _count in ranked:
+            if value in selected_set:
+                continue
+            selected.append(value)
+            selected_set.add(value)
+            if len(selected) >= limit:
+                break
+    return selected
+
+
+def _filled_sibling_pairs(element: etree._Element, attr_name: str) -> set[tuple[str, str]]:
+    pairs: set[tuple[str, str]] = set()
+    for name, raw in element.attrib.items():
+        if name == attr_name or name == "xmlns" or name.startswith("xmlns:"):
+            continue
+        value = _normalize_value(raw)
+        if value:
+            pairs.add((name, value))
+    return pairs
+
+
+def _contextual_occurrences(
+    occurrences: list[AttributeOccurrence],
+    path: str,
+    sibling_pairs: set[tuple[str, str]],
+) -> list[AttributeOccurrence]:
+    path_pool = [item for item in occurrences if item.path == path]
+    context_pool: list[AttributeOccurrence] = []
+    if sibling_pairs:
+        context_pool = [
+            item for item in path_pool if sibling_pairs.intersection(item.siblings)
+        ]
+    for pool in (context_pool, path_pool, occurrences):
+        if len({item.value for item in pool}) >= _MIN_POOL_VALUES:
+            return pool
+    return list(occurrences)
+
+
+def select_git_ai_examples(
+    stats: AttributeCorpusStats,
+    *,
+    path: str,
+    siblings: dict[str, str] | None = None,
+    limit: int = _AI_FEW_SHOT_MAX,
+) -> list[str]:
+    """Pick few-shot values for one field from the corpus collected in this fill."""
+    sibling_pairs = {
+        (name, _normalize_value(raw))
+        for name, raw in (siblings or {}).items()
+        if name != "xmlns" and not name.startswith("xmlns:") and _normalize_value(raw)
+    }
+    if stats.occurrences:
+        pool = _contextual_occurrences(stats.occurrences, path, sibling_pairs)
+        counts: Counter[str] = Counter(item.value for item in pool)
+    else:
+        counts = Counter(stats.values)
+    return _diverse_sample(counts, limit)
 
 
 def _few_shot_examples(values: list[str]) -> list[str]:
@@ -373,7 +528,11 @@ def _build_batch_user_message(jobs: list[_AiFillJob]) -> str:
     ruleset = rules_svc.load_attribute_rules()
     blocks: list[str] = []
     for index, job in enumerate(jobs):
-        examples = _few_shot_examples(job.stats.values)
+        examples = select_git_ai_examples(
+            job.stats,
+            path=job.structural_path,
+            siblings=dict(_filled_sibling_pairs(job.element, job.attr_name)),
+        )
         examples_block = "\n".join(f"  - {ex}" for ex in examples) or "  - (none)"
         element_tag = _local_name(job.element.tag)
         # Own attributes already set on this element (e.g. name="citizenship"
@@ -625,7 +784,11 @@ async def _run_ai_fill_jobs(
                             llm,
                             element=job.element.tag,
                             attr=job.attr_name,
-                            examples=job.stats.values,
+                            examples=select_git_ai_examples(
+                                job.stats,
+                                path=job.structural_path,
+                                siblings=dict(_filled_sibling_pairs(job.element, job.attr_name)),
+                            ),
                             attr_def=job.attr_def,
                             dot_path=job.dot,
                             ruleset=ruleset,
@@ -756,6 +919,7 @@ async def populate_from_git(
                         attr_def=attr_def,
                         stats=stats,
                         dot=dot,
+                        structural_path=structural_element_path(el),
                         tree_path=tree_path,
                     )
                 )

@@ -13,6 +13,7 @@ from app.auth.sessions import get_current_user
 from app.config import reference_xml_root, resolve_llm_alias
 from app.services import reference_xml_service as ref_service
 from app.services import xml_structure_service as structure_service
+from app.services.attribute_rules_service import is_deny_copy
 from app.services.llm_service import LLMService
 from app.services.xml_structure_service import ReferenceDoc, XmlParseError
 from app.user_context import UserContext
@@ -49,6 +50,17 @@ class StructureSnippet(BaseModel):
     xml: str
 
 
+class AttributeValueEntry(BaseModel):
+    path: str
+    attr: str
+    reference_values: list[str]
+    reference_total: int
+    current_values: list[str]
+    current_total: int
+    matches_references: bool
+    line: int | None = None
+
+
 class StructureCompareResponse(BaseModel):
     root_element: str
     references_count: int
@@ -61,6 +73,7 @@ class StructureCompareResponse(BaseModel):
     similarities: list[SimilarityEntry]
     closest: SimilarityEntry | None = None
     closest_paths: list[str] = Field(default_factory=list)
+    attribute_values: list[AttributeValueEntry] = Field(default_factory=list)
 
 
 class ClosestReference(BaseModel):
@@ -125,7 +138,9 @@ async def compare_structure(
         raise HTTPException(status_code=400, detail=f"Не удалось разобрать XML: {exc}") from exc
 
     report = structure_service.compare_structure(
-        request.xml_text, _iter_references(root, root_element)
+        request.xml_text,
+        _iter_references(root, root_element),
+        skip_attr=is_deny_copy,
     )
     return StructureCompareResponse(**report)
 
