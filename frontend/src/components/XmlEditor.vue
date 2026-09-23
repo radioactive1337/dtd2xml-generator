@@ -110,7 +110,7 @@
                 class="more-dropdown-item"
                 role="menuitem"
                 :disabled="!modelValue || comparing"
-                title="Сравнить структуру XML со всеми эталонами того же корневого элемента"
+                title="Сравнить структуру и значения атрибутов со всеми эталонами того же корневого элемента"
                 @click="onMoreCompare"
               >
                 {{ comparing ? 'Проверяем…' : 'Проверить уникальность' }}

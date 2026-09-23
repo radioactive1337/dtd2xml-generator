@@ -116,6 +116,22 @@ def element_dot_path(el: etree._Element) -> str:
     return ".".join(segments)
 
 
+def structural_element_path(el: etree._Element) -> str:
+    """Slash path of local tag names, without sibling indexes or namespaces.
+
+    ``PayDoc.item[0]`` and ``PayDoc.item[1]`` both become ``PayDoc/item``.
+    """
+    parts: list[str] = []
+    current: etree._Element | None = el
+    while current is not None:
+        tag = current.tag
+        if isinstance(tag, str):
+            parts.append(tag.split("}", 1)[1] if "}" in tag else tag)
+        current = current.getparent()
+    parts.reverse()
+    return "/".join(parts)
+
+
 def element_path(el: etree._Element) -> ElementPath:
     """Indexed path from root to *el* (tag, sibling-index among same-tag children)."""
     parts: list[tuple[str, int]] = []

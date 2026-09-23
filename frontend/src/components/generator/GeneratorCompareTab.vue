@@ -90,11 +90,57 @@
             </li>
           </ul>
         </section>
+
+        <section v-if="report.attribute_values?.length" class="paths-section">
+          <h3 class="section-title">Значения в эталонах</h3>
+          <p class="compare-meta">
+            Каталог значений по пути. В промпт Git AI может уйти другой набор из этого же пула.
+          </p>
+          <ul class="paths-list">
+            <li
+              v-for="row in report.attribute_values"
+              :key="`${row.path}@${row.attr}`"
+              class="path-item"
+            >
+              <button
+                type="button"
+                class="path-link"
+                :disabled="!row.line"
+                :title="row.line ? `Перейти к строке ${row.line}` : ''"
+                @click="row.line && $emit('go-to-path', { start_line: row.line })"
+              >
+                <span class="path-text">{{ row.path }}@{{ row.attr }}</span>
+                <span class="path-line" :class="valueStatusClass(row)">{{ valueStatusLabel(row) }}</span>
+              </button>
+              <p class="value-line">
+                <span
+                  v-for="(value, index) in row.reference_values"
+                  :key="`${row.attr}-${index}`"
+                  class="value-chip"
+                >
+                  {{ value }}
+                </span>
+                <span
+                  v-if="row.reference_total > row.reference_values.length"
+                  class="path-line"
+                >
+                  ещё {{ row.reference_total - row.reference_values.length }}
+                </span>
+              </p>
+              <p v-if="showCurrentValues(row)" class="value-current">
+                В документе: {{ row.current_values.join(', ') }}
+                <template v-if="row.current_total > row.current_values.length">
+                  — ещё {{ row.current_total - row.current_values.length }}
+                </template>
+              </p>
+            </li>
+          </ul>
+        </section>
       </template>
     </template>
 
     <p v-else-if="!compareError" class="compare-placeholder">
-      Нажмите «Проверить уникальность» на панели редактора, чтобы сравнить структуру XML с эталонами.
+      Нажмите «Проверить уникальность» на панели редактора, чтобы сравнить структуру и значения атрибутов с эталонами.
     </p>
   </div>
 </template>
@@ -176,6 +222,23 @@ const aiButtonTitle = computed(() => {
   if (!props.hasUniquePaths) return 'Нет уникальных путей для объяснения'
   return 'Отправить отчёт в ИИ для объяснения'
 })
+
+function valueStatusLabel(row) {
+  const currentCount = row.current_total ?? row.current_values?.length ?? 0
+  if (!currentCount) return 'в документе пусто'
+  if (row.matches_references) return 'есть в эталонах'
+  return 'нет в эталонах'
+}
+
+function valueStatusClass(row) {
+  const currentCount = row.current_total ?? row.current_values?.length ?? 0
+  if (currentCount && !row.matches_references) return 'path-line--miss'
+  return ''
+}
+
+function showCurrentValues(row) {
+  return !row.matches_references && (row.current_values?.length || 0) > 0
+}
 
 function formatScore(score) {
   if (typeof score !== 'number') return ''
@@ -371,6 +434,35 @@ function plural(n, one, few, many) {
   font-size: 11px;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+
+.path-line--miss {
+  color: var(--warning);
+}
+
+.value-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0 2px;
+}
+
+.value-chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface) 50%, transparent);
+  word-break: break-all;
+}
+
+.value-current {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--warning);
 }
 
 .ai-section {

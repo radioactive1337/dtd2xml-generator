@@ -8,10 +8,13 @@ the element structure matters.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from lxml import etree
+
+from app.core.xml_tree import structural_element_path
 
 
 class XmlParseError(ValueError):
@@ -46,14 +49,96 @@ def _parse(xml_text: str) -> etree._Element:
 
 def _element_path(element: etree._Element) -> str:
     """Build the structural path (``Root/child/grandchild``) for an element."""
-    parts: list[str] = []
-    current: etree._Element | None = element
-    while current is not None:
-        if isinstance(current.tag, str):
-            parts.append(_local_name(current.tag))
-        current = current.getparent()
-    parts.reverse()
-    return "/".join(parts)
+    return structural_element_path(element)
+
+
+# How many distinct reference values the compare tab receives per attribute.
+_REFERENCE_VALUE_PREVIEW = 8
+
+
+def _is_xmlns(name: str) -> bool:
+    return name == "xmlns" or name.startswith("xmlns:")
+
+
+def _attribute_counts(root: etree._Element) -> dict[tuple[str, str], Counter[str]]:
+    """Non-empty attribute values keyed by ``(structural path, attr)``."""
+    counts: dict[tuple[str, str], Counter[str]] = {}
+    for element in root.iter():
+        if not isinstance(element.tag, str):
+            continue
+        path = _element_path(element)
+        for name, raw in element.attrib.items():
+            if _is_xmlns(name):
+                continue
+            value = (raw or "").strip()
+            if not value:
+                continue
+            counts.setdefault((path, name), Counter())[value] += 1
+    return counts
+
+
+def _current_attributes(root: etree._Element) -> dict[tuple[str, str], dict]:
+    """Attributes present on the current document, including empty ones."""
+    found: dict[tuple[str, str], dict] = {}
+    for element in root.iter():
+        if not isinstance(element.tag, str):
+            continue
+        path = _element_path(element)
+        line = element.sourceline or None
+        for name, raw in element.attrib.items():
+            if _is_xmlns(name):
+                continue
+            key = (path, name)
+            slot = found.get(key)
+            if slot is None:
+                slot = {"values": set(), "line": line}
+                found[key] = slot
+            elif slot["line"] is None and line:
+                slot["line"] = line
+            value = (raw or "").strip()
+            if value:
+                slot["values"].add(value)
+    return found
+
+
+def _attribute_value_report(
+    current_root: etree._Element,
+    ref_counts: dict[tuple[str, str], Counter[str]],
+    *,
+    skip_attr: Callable[[str], bool] | None,
+    has_references: bool,
+) -> list[dict]:
+    """Catalog of reference values for attributes that exist in the current XML.
+
+    The preview is capped. ``matches_references`` is computed from the full
+    sets: an empty current value is not treated as a mismatch.
+    """
+    if not has_references:
+        return []
+    rows: list[dict] = []
+    for (path, attr), info in sorted(_current_attributes(current_root).items()):
+        if skip_attr is not None and skip_attr(attr):
+            continue
+        current_values: set[str] = info["values"]
+        counts = ref_counts.get((path, attr), Counter())
+        if not counts and not current_values:
+            continue
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        missing = sorted(value for value in current_values if value not in counts)
+        matched = sorted(value for value in current_values if value in counts)
+        rows.append(
+            {
+                "path": path,
+                "attr": attr,
+                "reference_values": [value for value, _count in ranked[:_REFERENCE_VALUE_PREVIEW]],
+                "reference_total": len(ranked),
+                "current_values": (missing + matched)[:_REFERENCE_VALUE_PREVIEW],
+                "current_total": len(current_values),
+                "matches_references": not missing,
+                "line": info["line"],
+            }
+        )
+    return rows
 
 
 def _extract_paths_from_root(root: etree._Element) -> set[str]:
@@ -161,7 +246,10 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 
 
 def compare_structure(
-    xml_text: str, references: Iterable[ReferenceDoc]
+    xml_text: str,
+    references: Iterable[ReferenceDoc],
+    *,
+    skip_attr: Callable[[str], bool] | None = None,
 ) -> dict:
     """Compare the current XML structure against every reference document.
 
@@ -183,6 +271,7 @@ def compare_structure(
 
     union_paths: set[str] = set()
     similarities: list[dict] = []
+    ref_counts: dict[tuple[str, str], Counter[str]] = {}
 
     # Track only the best reference's paths to avoid keeping all path sets
     # in memory simultaneously.
@@ -191,9 +280,12 @@ def compare_structure(
 
     for ref in references:
         try:
-            ref_paths = _extract_paths_from_root(_parse(ref.xml_text))
+            ref_root = _parse(ref.xml_text)
         except XmlParseError:
             continue  # skip unparseable references
+        ref_paths = _extract_paths_from_root(ref_root)
+        for key, counter in _attribute_counts(ref_root).items():
+            ref_counts.setdefault(key, Counter()).update(counter)
         union_paths |= ref_paths
         score = _jaccard(current_paths, ref_paths)
         similarities.append(
@@ -217,11 +309,12 @@ def compare_structure(
     snippets = _extract_snippets_from_root(current_root, unique_set)
     closest = similarities[0] if similarities else None
     closest_paths = sorted(closest_ref_paths) if closest else []
+    has_references = bool(similarities)
 
     return {
         "root_element": root_element,
         "references_count": len(similarities),
-        "has_references": bool(similarities),
+        "has_references": has_references,
         "is_unique": bool(unique_paths),
         "unique_paths": unique_paths,
         "highlight_ranges": highlight_ranges,
@@ -230,6 +323,12 @@ def compare_structure(
         "similarities": similarities,
         "closest": closest,
         "closest_paths": closest_paths,
+        "attribute_values": _attribute_value_report(
+            current_root,
+            ref_counts,
+            skip_attr=skip_attr,
+            has_references=has_references,
+        ),
     }
 
 

@@ -144,6 +144,75 @@ def test_highlight_targets_cover_every_unique_element():
     assert by_path["PayDoc/newBlock/inner"]["tag"] == "inner"
 
 
+def test_compare_structure_reports_attribute_value_catalog():
+    current = (
+        "<PayDoc>\n"
+        '  <client kind="person" code="NEW"/>\n'
+        '  <client kind="person" code=""/>\n'
+        "</PayDoc>\n"
+    )
+    refs = [
+        ReferenceDoc("c", "r1", "R1", '<PayDoc><client kind="person" code="AAA"/></PayDoc>'),
+        ReferenceDoc("c", "r2", "R2", '<PayDoc><client kind="person" code="BBB"/></PayDoc>'),
+        ReferenceDoc("c", "r3", "R3", '<PayDoc><client kind="org" code="AAA"/></PayDoc>'),
+    ]
+    report = svc.compare_structure(current, refs, skip_attr=lambda name: name == "kind")
+    rows = {(row["path"], row["attr"]): row for row in report["attribute_values"]}
+
+    assert ("PayDoc/client", "kind") not in rows
+    code = rows[("PayDoc/client", "code")]
+    assert code["matches_references"] is False
+    assert code["current_values"] == ["NEW"]
+    assert code["reference_total"] == 2
+    assert set(code["reference_values"]) == {"AAA", "BBB"}
+    assert code["line"] == 2
+
+
+def test_compare_structure_empty_current_value_is_not_a_mismatch():
+    report = svc.compare_structure(
+        '<PayDoc code=""/>',
+        [ReferenceDoc("c", "r", "R", '<PayDoc code="AAA"/>')],
+    )
+    row = report["attribute_values"][0]
+    assert row["attr"] == "code"
+    assert row["current_values"] == []
+    assert row["matches_references"] is True
+    assert row["reference_values"] == ["AAA"]
+
+
+def test_compare_structure_caps_reference_preview_and_prefers_frequent_values():
+    refs = [
+        ReferenceDoc("c", str(i), f"R{i}", '<PayDoc code="COMMON"/>')
+        for i in range(5)
+    ]
+    refs.append(ReferenceDoc("c", "rare", "Rare", '<PayDoc code="RARE"/>'))
+    for i in range(8):
+        refs.append(ReferenceDoc("c", f"u{i}", f"U{i}", f'<PayDoc code="U{i}"/>'))
+    report = svc.compare_structure('<PayDoc code="COMMON"/>', refs)
+    row = report["attribute_values"][0]
+    assert row["reference_total"] == 10
+    assert len(row["reference_values"]) == 8
+    assert row["reference_values"][0] == "COMMON"
+    assert row["matches_references"] is True
+
+
+def test_compare_structure_without_references_has_no_attribute_catalog():
+    report = svc.compare_structure('<PayDoc code="AAA"/>', [])
+    assert report["attribute_values"] == []
+
+
+def test_compare_structure_collapses_repeated_siblings_to_one_path():
+    current = '<PayDoc><item code="A"/><item code="B"/></PayDoc>'
+    refs = [ReferenceDoc("c", "r", "R", '<PayDoc><item code="A"/><item code="C"/></PayDoc>')]
+    report = svc.compare_structure(current, refs)
+    rows = report["attribute_values"]
+    assert len(rows) == 1
+    assert rows[0]["path"] == "PayDoc/item"
+    assert rows[0]["current_values"][0] == "B"
+    assert set(rows[0]["reference_values"]) == {"A", "C"}
+    assert rows[0]["matches_references"] is False
+
+
 def test_extract_snippets_truncates_and_targets_topmost():
     current = "<PayDoc><client/><newBlock><inner/></newBlock></PayDoc>"
     snippets = svc.extract_snippets(current, ["PayDoc/newBlock", "PayDoc/newBlock/inner"])
