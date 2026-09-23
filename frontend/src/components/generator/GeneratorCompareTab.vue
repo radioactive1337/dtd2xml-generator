@@ -109,7 +109,9 @@
                 :title="row.line ? `Перейти к строке ${row.line}` : ''"
                 @click="row.line && $emit('go-to-path', { start_line: row.line })"
               >
-                <span class="path-text">{{ row.path }}@{{ row.attr }}</span>
+                <span class="value-card-path">
+                  <span class="value-card-path-name">{{ row.path }}</span><span class="value-card-attr">@{{ row.attr }}</span>
+                </span>
                 <span class="path-line" :class="valueStatusClass(row)">{{ valueStatusLabel(row) }}</span>
               </button>
               <div class="value-card-body">
@@ -474,8 +476,29 @@ function plural(n, one, few, many) {
 .value-card-head {
   border: none;
   border-radius: 0;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.value-card-path {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.value-card-path-name {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.value-card-attr {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.value-card-head .path-line--miss {
+  font-weight: 700;
 }
 
 .value-card-body {
