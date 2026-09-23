@@ -34,6 +34,39 @@ export async function listPersonalDocuments() {
   return data
 }
 
+export async function listPersonalFolders() {
+  const { data } = await client.get('/xml-library/personal/folders')
+  return data.folders || []
+}
+
+export async function createPersonalFolder(name) {
+  const { data } = await client.post('/xml-library/personal/folders', { name })
+  return data.folders || []
+}
+
+export async function renamePersonalFolder(name, nextName) {
+  const { data } = await client.patch(
+    `/xml-library/personal/folders/${encodeURIComponent(name)}`,
+    { name: nextName },
+  )
+  return data.folders || []
+}
+
+export async function deletePersonalFolder(name) {
+  const { data } = await client.delete(
+    `/xml-library/personal/folders/${encodeURIComponent(name)}`,
+  )
+  return data.folders || []
+}
+
+export async function movePersonalDocument(name, folder) {
+  const { data } = await client.patch(
+    `/xml-library/personal/${encodeURIComponent(name)}/folder`,
+    { folder },
+  )
+  return data
+}
+
 export async function savePersonalDocument(document) {
   const { data } = await client.post('/xml-library/personal', document)
   return data

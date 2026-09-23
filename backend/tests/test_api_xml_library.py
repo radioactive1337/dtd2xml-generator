@@ -136,6 +136,81 @@ def test_personal_crud(client: TestClient):
     assert response.status_code == 404
 
 
+def _clean_personal_storage() -> None:
+    docs_dir = dev_user_context().xml_documents_dir
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    for path in docs_dir.glob("*.json"):
+        path.unlink()
+    registry = docs_dir / "_meta" / "folders.json"
+    if registry.exists():
+        registry.unlink()
+
+
+def test_personal_folders_round_trip(client: TestClient):
+    _clean_personal_storage()
+
+    response = client.post("/api/xml-library/personal/folders", json={"name": "  Черновики  "})
+    assert response.status_code == 200, response.text
+    assert response.json()["folders"] == ["Черновики"]
+
+    response = client.get("/api/xml-library/personal/folders")
+    assert response.status_code == 200
+    assert response.json()["folders"] == ["Черновики"]
+
+    response = client.get("/api/xml-library/personal")
+    assert response.status_code == 200
+    assert response.json() == []
+
+    created = {**SAMPLE_PERSONAL, "folder": "Черновики"}
+    response = client.post("/api/xml-library/personal", json=created)
+    assert response.status_code == 200, response.text
+    assert response.json()["folder"] == "Черновики"
+
+    response = client.get("/api/xml-library/personal")
+    assert response.json()[0]["folder"] == "Черновики"
+
+    response = client.patch(
+        "/api/xml-library/personal/folders/Черновики",
+        json={"name": "Задача 14"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["folders"] == ["Задача 14"]
+
+    response = client.patch(
+        "/api/xml-library/personal/folders/Задача%2014",
+        json={"name": "Задача 14"},
+    )
+    assert response.status_code == 200, response.text
+    loaded = client.get("/api/xml-library/personal/Мой%20тест").json()
+    assert loaded["folder"] == "Задача 14"
+    assert loaded["xml_text"] == "<root>personal</root>"
+
+    response = client.post("/api/xml-library/personal/folders", json={"name": "Архив"})
+    assert response.status_code == 200
+    response = client.patch(
+        "/api/xml-library/personal/Мой%20тест/folder",
+        json={"folder": "Архив"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["folder"] == "Архив"
+
+    response = client.delete("/api/xml-library/personal/folders/Архив")
+    assert response.status_code == 200, response.text
+    assert "Архив" not in response.json()["folders"]
+    assert "Задача 14" in response.json()["folders"]
+    loaded = client.get("/api/xml-library/personal/Мой%20тест").json()
+    assert loaded["folder"] == ""
+
+    response = client.post("/api/xml-library/personal", json={**SAMPLE_PERSONAL, "folder": "нет такой"})
+    assert response.status_code == 400
+
+    response = client.post("/api/xml-library/personal/folders", json={"name": "a/b"})
+    assert response.status_code == 400
+
+    response = client.post("/api/xml-library/personal/folders", json={"name": "Задача 14"})
+    assert response.status_code == 409
+
+
 def test_list_personal_filters_by_schema(client: TestClient):
     docs_dir = dev_user_context().xml_documents_dir
     docs_dir.mkdir(parents=True, exist_ok=True)

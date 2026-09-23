@@ -32,7 +32,7 @@
           v-model="searchQuery"
           type="search"
           class="library-search-input"
-          :placeholder="activeScope === 'shared' ? 'Поиск по категориям и документам…' : 'Поиск по названию, описанию…'"
+          :placeholder="activeScope === 'shared' ? 'Поиск по категориям и документам…' : 'Поиск по названию, описанию, папке…'"
           autocomplete="off"
           @keydown.escape="searchQuery = ''"
         />
@@ -137,53 +137,143 @@
     </div>
 
     <div v-else class="library-pane">
-      <ul v-if="filteredPersonalDocuments.length" class="doc-list doc-list--flat">
-        <li v-for="doc in filteredPersonalDocuments" :key="doc.name" class="doc-item">
-          <div class="doc-info">
-            <span class="doc-title" v-html="highlightMatch(doc.name, searchQuery)" />
-            <span
-              v-if="currentSchemaId && doc.schema_id && doc.schema_id !== currentSchemaId"
-              class="doc-schema-hint"
-            >
-              другая схема DTD
-            </span>
-            <span v-if="doc.shared_by_name" class="doc-shared-badge">от {{ doc.shared_by_name }}</span>
-            <span
-              v-if="doc.description"
-              class="doc-desc"
-              v-html="highlightMatch(doc.description, searchQuery)"
+      <div class="personal-toolbar">
+        <button type="button" class="btn-secondary btn-sm" @click="beginCreateFolder">
+          Новая папка
+        </button>
+      </div>
+      <form v-if="creatingFolder" class="folder-create" @submit.prevent="submitCreateFolder">
+        <input
+          v-model="draftFolderName"
+          type="text"
+          class="folder-create-input"
+          maxlength="80"
+          placeholder="Имя папки"
+          aria-label="Имя папки"
+          autofocus
+        />
+        <button type="submit" class="btn-secondary btn-sm" :disabled="!draftFolderName.trim()">
+          Создать
+        </button>
+        <button type="button" class="btn-secondary btn-sm" @click="cancelCreateFolder">
+          Отмена
+        </button>
+      </form>
+      <p v-if="folderFormError" class="library-error" role="alert">{{ folderFormError }}</p>
+
+      <div v-for="section in personalSections" :key="section.key" class="folder-block">
+        <div class="folder-header">
+          <div v-if="renamingFolder === section.name" class="folder-rename">
+            <input
+              v-model="renameDraft"
+              type="text"
+              class="folder-create-input"
+              maxlength="80"
+              :aria-label="`Новое имя папки ${section.name}`"
+              autofocus
+              @keydown.enter.prevent="submitRename(section.name)"
+              @keydown.esc.prevent="cancelRename"
             />
-          </div>
-          <div class="doc-actions">
-            <button
-              type="button"
-              class="btn-secondary btn-sm"
-              title="Поделиться"
-              @click="$emit('share-personal', doc.name)"
-            >
-              Поделиться
+            <button type="button" class="btn-secondary btn-sm" @click="submitRename(section.name)">
+              Ок
             </button>
+            <button type="button" class="btn-secondary btn-sm" @click="cancelRename">
+              Отмена
+            </button>
+          </div>
+          <button
+            v-else
+            type="button"
+            class="category-toggle folder-toggle"
+            :aria-expanded="isFolderOpen(section.key)"
+            @click="toggleFolder(section.key)"
+          >
+            <span class="category-chevron" :class="{ 'category-chevron--open': isFolderOpen(section.key) }">▶</span>
+            <span class="category-name">{{ section.name }}</span>
+            <span class="category-count">{{ section.docs.length }}</span>
+          </button>
+          <div v-if="!section.loose && renamingFolder !== section.name" class="folder-actions">
             <button
               type="button"
               class="btn-secondary btn-sm"
-              @click="$emit('open-personal', doc.name)"
+              title="Переименовать папку"
+              @click="beginRename(section.name)"
             >
-              Открыть
+              Переименовать
             </button>
             <button
               type="button"
               class="btn-secondary btn-sm btn-icon"
-              title="Удалить"
-              aria-label="Удалить документ"
-              @click="$emit('delete-personal', doc.name)"
+              title="Удалить папку"
+              :aria-label="`Удалить папку ${section.name}`"
+              @click="askDeleteFolder(section.name)"
             >
               ×
             </button>
           </div>
-        </li>
-      </ul>
-      <p v-else-if="!loading && !searchQuery" class="library-hint">Нет сохранённых документов.</p>
-      <p v-else-if="!loading && searchQuery" class="library-hint">
+        </div>
+        <ul v-if="isFolderOpen(section.key)" class="doc-list">
+          <li v-if="!section.docs.length" class="doc-loading">Нет документов</li>
+          <li v-for="doc in section.docs" :key="doc.name" class="doc-item">
+            <div class="doc-info">
+              <span class="doc-title" v-html="highlightMatch(doc.name, searchQuery)" />
+              <span
+                v-if="currentSchemaId && doc.schema_id && doc.schema_id !== currentSchemaId"
+                class="doc-schema-hint"
+              >
+                другая схема DTD
+              </span>
+              <span v-if="doc.shared_by_name" class="doc-shared-badge">от {{ doc.shared_by_name }}</span>
+              <span
+                v-if="doc.description"
+                class="doc-desc"
+                v-html="highlightMatch(doc.description, searchQuery)"
+              />
+              <select
+                v-if="personalFolders.length"
+                class="doc-folder-select"
+                :value="doc.folder || ''"
+                :aria-label="`Папка для ${doc.name}`"
+                @change="$emit('move-personal', doc.name, $event.target.value)"
+              >
+                <option value="">Без группы</option>
+                <option v-for="folder in orderedFolders" :key="folder" :value="folder">
+                  {{ folder }}
+                </option>
+              </select>
+            </div>
+            <div class="doc-actions">
+              <button
+                type="button"
+                class="btn-secondary btn-sm"
+                title="Поделиться"
+                @click="$emit('share-personal', doc.name)"
+              >
+                Поделиться
+              </button>
+              <button
+                type="button"
+                class="btn-secondary btn-sm"
+                @click="$emit('open-personal', doc.name)"
+              >
+                Открыть
+              </button>
+              <button
+                type="button"
+                class="btn-secondary btn-sm btn-icon"
+                title="Удалить"
+                aria-label="Удалить документ"
+                @click="$emit('delete-personal', doc.name)"
+              >
+                ×
+              </button>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <p v-if="showPersonalEmpty" class="library-hint">Нет сохранённых документов.</p>
+      <p v-else-if="showPersonalSearchEmpty" class="library-hint">
         По запросу «{{ searchQuery }}» ничего не найдено.
       </p>
     </div>
@@ -197,6 +287,7 @@ const props = defineProps({
   activeScope: { type: String, default: 'shared' },
   sharedCategories: { type: Array, default: () => [] },
   personalDocuments: { type: Array, default: () => [] },
+  personalFolders: { type: Array, default: () => [] },
   syncStatus: { type: Object, default: null },
   syncing: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
@@ -215,6 +306,10 @@ const emit = defineEmits([
   'open-personal',
   'share-personal',
   'delete-personal',
+  'create-folder',
+  'rename-folder',
+  'delete-folder',
+  'move-personal',
 ])
 
 const canSyncFromGit = computed(() => {
@@ -226,6 +321,12 @@ const canSyncFromGit = computed(() => {
 
 const expandedCategory = ref(null)
 const searchQuery = ref('')
+const creatingFolder = ref(false)
+const draftFolderName = ref('')
+const folderFormError = ref('')
+const renamingFolder = ref('')
+const renameDraft = ref('')
+const collapsedFolders = ref({})
 
 // Reset search when switching scopes
 watch(() => props.activeScope, () => { searchQuery.value = '' })
@@ -391,16 +492,131 @@ const searchMatchCount = computed(() => {
 
 // ── Personal search ──────────────────────────────────────────────────────────
 
+const orderedFolders = computed(() =>
+  [...props.personalFolders].sort((a, b) => a.localeCompare(b, 'ru', { sensitivity: 'base' })),
+)
+
+function documentMatchesQuery(doc, query) {
+  return (
+    textContains(doc.name, query) ||
+    textContains(doc.description, query) ||
+    textContains(doc.shared_by_name, query)
+  )
+}
+
 const filteredPersonalDocuments = computed(() => {
   const q = normalizeSearch(searchQuery.value)
   if (!q) return props.personalDocuments
+  const folderHits = new Set(orderedFolders.value.filter((name) => textContains(name, q)))
   return props.personalDocuments.filter(
-    (doc) =>
-      textContains(doc.name, q) ||
-      textContains(doc.description, q) ||
-      textContains(doc.shared_by_name, q),
+    (doc) => folderHits.has(doc.folder) || documentMatchesQuery(doc, q),
   )
 })
+
+const personalSections = computed(() => {
+  const q = normalizeSearch(searchQuery.value)
+  const known = new Set(props.personalFolders)
+  const sections = []
+  for (const name of orderedFolders.value) {
+    const all = props.personalDocuments.filter((doc) => doc.folder === name)
+    if (!q) {
+      sections.push({ key: name, name, docs: all, loose: false })
+      continue
+    }
+    if (textContains(name, q)) {
+      sections.push({ key: name, name, docs: all, loose: false })
+      continue
+    }
+    const docs = all.filter((doc) => documentMatchesQuery(doc, q))
+    if (docs.length) sections.push({ key: name, name, docs, loose: false })
+  }
+  const loose = props.personalDocuments.filter((doc) => !doc.folder || !known.has(doc.folder))
+  const looseDocs = q ? loose.filter((doc) => documentMatchesQuery(doc, q)) : loose
+  if (looseDocs.length) {
+    sections.push({ key: '__ungrouped__', name: 'Без группы', docs: looseDocs, loose: true })
+  }
+  return sections
+})
+
+const showPersonalEmpty = computed(
+  () => !props.loading && !searchQuery.value && !props.personalFolders.length && !props.personalDocuments.length,
+)
+
+const showPersonalSearchEmpty = computed(
+  () => !props.loading && !!searchQuery.value && personalSections.value.length === 0,
+)
+
+function folderNameError(name) {
+  const trimmed = name.trim()
+  if (!trimmed) return 'Введите имя папки'
+  if (trimmed.length > 80) return 'Имя папки длиннее 80 символов'
+  if (/[\\/\u0000-\u001f]/.test(trimmed) || trimmed === '.' || trimmed === '..') {
+    return 'Имя папки не должно быть пустым и не может содержать / или \\'
+  }
+  return ''
+}
+
+function beginCreateFolder() {
+  folderFormError.value = ''
+  draftFolderName.value = ''
+  creatingFolder.value = true
+  cancelRename()
+}
+
+function cancelCreateFolder() {
+  creatingFolder.value = false
+  draftFolderName.value = ''
+  folderFormError.value = ''
+}
+
+function submitCreateFolder() {
+  const reason = folderNameError(draftFolderName.value)
+  folderFormError.value = reason
+  if (reason) return
+  emit('create-folder', draftFolderName.value.trim())
+  creatingFolder.value = false
+  draftFolderName.value = ''
+}
+
+function beginRename(name) {
+  folderFormError.value = ''
+  renamingFolder.value = name
+  renameDraft.value = name
+  cancelCreateFolder()
+}
+
+function cancelRename() {
+  renamingFolder.value = ''
+  renameDraft.value = ''
+}
+
+function submitRename(name) {
+  const reason = folderNameError(renameDraft.value)
+  folderFormError.value = reason
+  if (reason) return
+  const next = renameDraft.value.trim()
+  if (next !== name) emit('rename-folder', name, next)
+  cancelRename()
+}
+
+function askDeleteFolder(name) {
+  const ok = window.confirm(`Удалить папку «${name}»? Документы останутся в «Без группы».`)
+  if (!ok) return
+  emit('delete-folder', name)
+}
+
+function isFolderOpen(key) {
+  if (searchQuery.value) return true
+  return !collapsedFolders.value[key]
+}
+
+function toggleFolder(key) {
+  if (searchQuery.value) return
+  collapsedFolders.value = {
+    ...collapsedFolders.value,
+    [key]: !collapsedFolders.value[key],
+  }
+}
 
 function setScope(scope) {
   emit('update:activeScope', scope)
@@ -658,6 +874,69 @@ function onSync() {
   min-width: 24px;
   padding: 4px 6px;
   line-height: 1;
+}
+
+.personal-toolbar {
+  display: flex;
+  align-items: center;
+}
+
+.folder-create,
+.folder-rename {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.folder-rename {
+  flex: 1;
+}
+
+.folder-create-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface, #1e1e1e);
+  color: var(--text);
+}
+
+.folder-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.folder-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.folder-toggle {
+  flex: 1;
+  min-width: 0;
+}
+
+.folder-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.doc-folder-select {
+  width: 100%;
+  margin-top: 4px;
+  padding: 3px 6px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
 }
 
 

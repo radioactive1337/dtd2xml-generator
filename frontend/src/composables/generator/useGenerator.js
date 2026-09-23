@@ -183,7 +183,7 @@ export function useGenerator() {
     }
   }
 
-  async function handleLibrarySave({ name, description }) {
+  async function handleLibrarySave({ name, description, folder = '' }) {
     const xmlText = xml.getEditorXmlText() || xml.xmlText.value || ''
     try {
       await xmlLibrary.saveCurrentDocument({
@@ -191,9 +191,44 @@ export function useGenerator() {
         schemaId: schema.schemaId.value,
         xmlText,
         description,
+        folder,
       })
     } catch (err) {
-      xmlLibrary.libraryError.value = err?.response?.data?.detail || err?.message || String(err)
+      xmlLibrary.libraryError.value = translateApiError(
+        err?.response?.data?.detail || err?.message || String(err),
+      )
+    }
+  }
+
+  async function handleCreatePersonalFolder(name) {
+    try {
+      await xmlLibrary.createFolder(name)
+    } catch {
+      // libraryError is set in useXmlLibrary
+    }
+  }
+
+  async function handleRenamePersonalFolder(name, nextName) {
+    try {
+      await xmlLibrary.renameFolder(name, nextName)
+    } catch {
+      // libraryError is set in useXmlLibrary
+    }
+  }
+
+  async function handleDeletePersonalFolder(name) {
+    try {
+      await xmlLibrary.removeFolder(name)
+    } catch {
+      // libraryError is set in useXmlLibrary
+    }
+  }
+
+  async function handleMovePersonalDocument(name, folder) {
+    try {
+      await xmlLibrary.moveDocumentToFolder(name, folder)
+    } catch {
+      // libraryError is set in useXmlLibrary
     }
   }
 
@@ -439,6 +474,7 @@ export function useGenerator() {
     libraryActiveScope: xmlLibrary.activeScope,
     sharedCategories: xmlLibrary.sharedCategories,
     personalDocuments: xmlLibrary.personalDocuments,
+    personalFolders: xmlLibrary.personalFolders,
     syncStatus: xmlLibrary.syncStatus,
     librarySyncing: xmlLibrary.syncing,
     libraryLoading: xmlLibrary.loading,
@@ -460,6 +496,10 @@ export function useGenerator() {
     handleLibraryOpenPersonal: xmlLibrary.openPersonalDocument,
     handleLibrarySave,
     handleLibraryDeletePersonal,
+    handleCreatePersonalFolder,
+    handleRenamePersonalFolder,
+    handleDeletePersonalFolder,
+    handleMovePersonalDocument,
     shareDialogOpen,
     shareDialogMode,
     shareDialogDocumentName,

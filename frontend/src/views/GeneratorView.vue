@@ -104,6 +104,7 @@
             v-model:library-active-scope="libraryActiveScope"
             :shared-categories="sharedCategories"
             :personal-documents="personalDocuments"
+            :personal-folders="personalFolders"
             :sync-status="syncStatus"
             :library-syncing="librarySyncing"
             :library-loading="libraryLoading"
@@ -120,6 +121,10 @@
             @library-open-personal="handleLibraryOpenPersonal"
             @library-share-personal="openSharePersonalDialog"
             @library-delete-personal="handleLibraryDeletePersonal"
+            @library-create-folder="handleCreatePersonalFolder"
+            @library-rename-folder="handleRenamePersonalFolder"
+            @library-delete-folder="handleDeletePersonalFolder"
+            @library-move-personal="handleMovePersonalDocument"
           />
         </div>
 
@@ -169,6 +174,7 @@
         :filename="`${rootElement || 'generated'}.xml`"
         :validation-errors="validationResult?.valid === false ? validationResult.errors : []"
         :can-save="canSaveLibraryDocument"
+        :folders="personalFolders"
         :unique-ranges="uniqueRanges"
         :git-push-enabled="gitPushEnabled"
         :root-element="rootElement"
@@ -309,6 +315,7 @@ const {
   libraryActiveScope,
   sharedCategories,
   personalDocuments,
+  personalFolders,
   syncStatus,
   librarySyncing,
   libraryLoading,
@@ -330,6 +337,10 @@ const {
   handleLibraryOpenPersonal,
   handleLibrarySave,
   handleLibraryDeletePersonal,
+  handleCreatePersonalFolder,
+  handleRenamePersonalFolder,
+  handleDeletePersonalFolder,
+  handleMovePersonalDocument,
   shareDialogOpen,
   shareDialogMode,
   shareDialogDocumentName,

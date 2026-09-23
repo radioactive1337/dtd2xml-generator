@@ -22,14 +22,40 @@
         </div>
 
         <div class="action-group">
-          <button
-            class="btn-secondary"
-            :disabled="!modelValue"
-            title="Форматировать документ (Alt+Shift+F)"
-            @click="formatDocument"
-          >
-            <span class="format-icon" aria-hidden="true">{ }</span>Форматировать
-          </button>
+          <div ref="formatMenuRef" class="format-split">
+            <button
+              type="button"
+              class="btn-secondary format-split-main"
+              :disabled="!modelValue"
+              title="Форматировать документ (Alt+Shift+F)"
+              @click="formatDocument"
+            >
+              <span class="format-icon" aria-hidden="true">{ }</span>Форматировать
+            </button>
+            <button
+              type="button"
+              class="btn-secondary format-split-more"
+              :class="{ open: formatMenuOpen }"
+              :disabled="!modelValue"
+              aria-haspopup="menu"
+              :aria-expanded="formatMenuOpen"
+              aria-label="Другие виды форматирования"
+              title="Другие виды форматирования"
+              @click="toggleFormatMenu"
+            >
+              <span class="more-dropdown-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div v-if="formatMenuOpen" class="more-dropdown-menu format-menu" role="menu" @click.stop>
+              <button
+                type="button"
+                class="more-dropdown-item"
+                role="menuitem"
+                @click="formatIndentAttributes"
+              >
+                Атрибуты с новой строки
+              </button>
+            </div>
+          </div>
           <button
             class="btn-secondary btn-tint btn-tint-danger"
             :disabled="!modelValue"
@@ -248,6 +274,13 @@
           Описание (необязательно)
           <input v-model="saveDescription" type="text" class="save-input" />
         </label>
+        <label class="save-label">
+          Папка
+          <select v-model="saveFolder" class="save-input">
+            <option value="">Без группы</option>
+            <option v-for="folder in folders" :key="folder" :value="folder">{{ folder }}</option>
+          </select>
+        </label>
         <div class="save-dialog-actions">
           <button type="button" class="btn-secondary btn-sm" @click="closeSaveDialog">Отмена</button>
           <button type="submit" class="btn-primary btn-sm" :disabled="!saveName.trim()">Сохранить</button>
@@ -261,7 +294,7 @@
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import loader from '@monaco-editor/loader'
-import { registerXmlFormatter } from '../utils/formatXml'
+import { formatXmlIndentAttributes, registerXmlFormatter } from '../utils/formatXml'
 import { escapeXmlText, unescapeXmlText } from '../utils/escapeXml'
 import { clearAttributeValues, openTagPrefix } from '../utils/clearAttributeValues'
 import { readXmlFileAsText } from '../utils/readXmlFile'
@@ -275,6 +308,7 @@ const props = defineProps({
   filename: { type: String, default: 'generated.xml' },
   validationErrors: { type: Array, default: () => [] },
   canSave: { type: Boolean, default: false },
+  folders: { type: Array, default: () => [] },
   uniqueRanges: { type: Array, default: () => [] },
   gitPushEnabled: { type: Boolean, default: false },
   rootElement: { type: String, default: '' },
@@ -309,11 +343,14 @@ const showSaveDialog = ref(false)
 const showPushDialog = ref(false)
 const saveName = ref('')
 const saveDescription = ref('')
+const saveFolder = ref('')
 const pushFilename = ref('')
 const pushCommitMessage = ref('')
 const hasSelection = ref(false)
 const moreOpen = ref(false)
 const moreRef = ref(null)
+const formatMenuOpen = ref(false)
+const formatMenuRef = ref(null)
 const KEEP_CS_NAME_KEY = 'xml-gen-keep-cs-name'
 const keepCsName = ref(readKeepCsNamePreference())
 
@@ -390,13 +427,29 @@ let suppressEditorEvent = false
 let pasteFlushTimer = null
 let uniqueDecorations = null
 
+function replaceWholeDocument(text, source, { silent = false } = {}) {
+  if (!editor) return
+  const model = editor.getModel()
+  if (!model || model.getValue() === text) return
+  if (silent) suppressEditorEvent = true
+  try {
+    editor.pushUndoStop()
+    editor.executeEdits(source, [{
+      range: model.getFullModelRange(),
+      text,
+      forceMoveMarkers: true,
+    }])
+    editor.pushUndoStop()
+  } finally {
+    if (silent) suppressEditorEvent = false
+  }
+}
+
 function applyModelValue(val) {
   if (!editor) return
   const next = val || ''
   if (editor.getValue() === next) return
-  suppressEditorEvent = true
-  editor.setValue(next)
-  suppressEditorEvent = false
+  replaceWholeDocument(next, 'xml-document-replace', { silent: true })
   editor.layout()
 }
 
@@ -628,7 +681,23 @@ async function onFileSelect(e) {
 
 async function formatDocument() {
   if (!editor) return
+  closeFormatMenu()
   await editor.getAction('editor.action.formatDocument')?.run()
+}
+
+function formatIndentAttributes() {
+  if (!editor) return
+  closeFormatMenu()
+  replaceWholeDocument(formatXmlIndentAttributes(editor.getValue()), 'xml-indent-attributes')
+}
+
+function closeFormatMenu() {
+  formatMenuOpen.value = false
+}
+
+function toggleFormatMenu() {
+  formatMenuOpen.value = !formatMenuOpen.value
+  if (formatMenuOpen.value) moreOpen.value = false
 }
 
 function replaceSelection(transform) {
@@ -676,6 +745,7 @@ function closeMoreMenu() {
 
 function toggleMoreMenu() {
   moreOpen.value = !moreOpen.value
+  if (moreOpen.value) formatMenuOpen.value = false
 }
 
 function onMoreEscape() {
@@ -704,6 +774,7 @@ function onMoreShare() {
 }
 
 onClickOutside(moreRef, closeMoreMenu)
+onClickOutside(formatMenuRef, closeFormatMenu)
 
 function clearEditor() {
   if (!props.modelValue) return
@@ -752,6 +823,7 @@ watch(
 function onSaveClick() {
   saveName.value = ''
   saveDescription.value = ''
+  saveFolder.value = ''
   showSaveDialog.value = true
 }
 
@@ -766,7 +838,11 @@ function closeSaveDialog() {
 function submitSave() {
   const name = saveName.value.trim()
   if (!name) return
-  emit('save', { name, description: saveDescription.value.trim() })
+  emit('save', {
+    name,
+    description: saveDescription.value.trim(),
+    folder: saveFolder.value,
+  })
   closeSaveDialog()
 }
 
@@ -855,6 +931,29 @@ defineExpose({ goToPosition, getValue, setValue, clearUniqueDecorations })
 .editor-actions .btn-tint-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 20%, var(--surface2));
   border-color: color-mix(in srgb, var(--danger) 44%, var(--border));
+}
+
+.format-split {
+  position: relative;
+  display: inline-flex;
+}
+
+.format-split-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.format-split-more {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.format-menu {
+  left: 0;
+  right: auto;
 }
 
 .more-dropdown {

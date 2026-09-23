@@ -4,6 +4,7 @@
       :active-scope="libraryActiveScope"
       :shared-categories="sharedCategories"
       :personal-documents="personalDocuments"
+      :personal-folders="personalFolders"
       :sync-status="syncStatus"
       :syncing="librarySyncing"
       :loading="libraryLoading"
@@ -19,6 +20,10 @@
       @open-personal="(name) => $emit('library-open-personal', name)"
       @share-personal="(name) => $emit('library-share-personal', name)"
       @delete-personal="(name) => $emit('library-delete-personal', name)"
+      @create-folder="(name) => $emit('library-create-folder', name)"
+      @rename-folder="(name, nextName) => $emit('library-rename-folder', name, nextName)"
+      @delete-folder="(name) => $emit('library-delete-folder', name)"
+      @move-personal="(name, folder) => $emit('library-move-personal', name, folder)"
     />
   </div>
 </template>
@@ -30,6 +35,7 @@ defineProps({
   libraryActiveScope: { type: String, default: 'shared' },
   sharedCategories: { type: Array, default: () => [] },
   personalDocuments: { type: Array, default: () => [] },
+  personalFolders: { type: Array, default: () => [] },
   syncStatus: { type: Object, default: null },
   librarySyncing: { type: Boolean, default: false },
   libraryLoading: { type: Boolean, default: false },
@@ -48,6 +54,10 @@ defineEmits([
   'library-open-personal',
   'library-share-personal',
   'library-delete-personal',
+  'library-create-folder',
+  'library-rename-folder',
+  'library-delete-folder',
+  'library-move-personal',
 ])
 </script>
 
