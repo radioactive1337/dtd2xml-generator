@@ -96,15 +96,15 @@
           <p v-if="!mismatchedAttributeValues.length" class="compare-meta">
             Все заполненные значения уже есть в эталонах.
           </p>
-          <ul v-else class="paths-list">
+          <ul v-else class="value-list">
             <li
               v-for="row in mismatchedAttributeValues"
               :key="`${row.path}@${row.attr}`"
-              class="path-item"
+              class="value-card"
             >
               <button
                 type="button"
-                class="path-link"
+                class="path-link value-card-head"
                 :disabled="!row.line"
                 :title="row.line ? `Перейти к строке ${row.line}` : ''"
                 @click="row.line && $emit('go-to-path', { start_line: row.line })"
@@ -112,27 +112,35 @@
                 <span class="path-text">{{ row.path }}@{{ row.attr }}</span>
                 <span class="path-line" :class="valueStatusClass(row)">{{ valueStatusLabel(row) }}</span>
               </button>
-              <p class="value-line">
-                <span
-                  v-for="(value, index) in row.reference_values"
-                  :key="`${row.attr}-${index}`"
-                  class="value-chip"
-                >
-                  {{ value }}
-                </span>
-                <span
-                  v-if="row.reference_total > row.reference_values.length"
-                  class="path-line"
-                >
-                  ещё {{ row.reference_total - row.reference_values.length }}
-                </span>
-              </p>
-              <p v-if="showCurrentValues(row)" class="value-current">
-                В документе: {{ row.current_values.join(', ') }}
-                <template v-if="row.current_total > row.current_values.length">
-                  — ещё {{ row.current_total - row.current_values.length }}
-                </template>
-              </p>
+              <div class="value-card-body">
+                <div v-if="row.reference_values?.length" class="value-block">
+                  <span class="value-label">В эталонах</span>
+                  <p class="value-line">
+                    <span
+                      v-for="(value, index) in row.reference_values"
+                      :key="`${row.attr}-${index}`"
+                      class="value-chip"
+                    >
+                      {{ value }}
+                    </span>
+                    <span
+                      v-if="row.reference_total > row.reference_values.length"
+                      class="path-line"
+                    >
+                      ещё {{ row.reference_total - row.reference_values.length }}
+                    </span>
+                  </p>
+                </div>
+                <div v-if="showCurrentValues(row)" class="value-block">
+                  <span class="value-label">В документе</span>
+                  <p class="value-current">
+                    {{ row.current_values.join(', ') }}
+                    <template v-if="row.current_total > row.current_values.length">
+                      — ещё {{ row.current_total - row.current_values.length }}
+                    </template>
+                  </p>
+                </div>
+              </div>
             </li>
           </ul>
         </section>
@@ -447,12 +455,58 @@ function plural(n, one, few, many) {
   color: var(--warning);
 }
 
+.value-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.value-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 45%, transparent);
+  overflow: hidden;
+}
+
+.value-card-head {
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.value-card-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.value-block {
+  padding: 8px 10px;
+}
+
+.value-block + .value-block {
+  border-top: 1px solid var(--border);
+}
+
+.value-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 .value-line {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
-  margin: 4px 0 0;
-  padding: 0 2px;
+  margin: 0;
 }
 
 .value-chip {
@@ -467,8 +521,9 @@ function plural(n, one, few, many) {
 }
 
 .value-current {
-  margin: 4px 0 0;
-  font-size: 11px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--warning);
 }
 
