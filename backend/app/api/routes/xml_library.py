@@ -31,6 +31,13 @@ from app.services.attribute_rules_service import (
 )
 from app.services.git_identity_service import ensure_git_commit_author
 from app.services.git_push_service import push_document
+from app.services.personal_folder_service import (
+    create_folder,
+    delete_folder,
+    list_folders,
+    rename_folder,
+    resolve_folder_assignment,
+)
 from app.services.reference_xml_sync import GitAuth, load_sync_state, sync_reference_repository
 from app.services.xml_structure_service import XmlParseError, peek_root_element
 from app.services.xml_share_service import (
@@ -105,6 +112,7 @@ class PersonalDocumentSummary(BaseModel):
     name: str
     schema_id: str = ""
     category: str = ""
+    folder: str = ""
     description: str = ""
     created_at: str = ""
     updated_at: str = ""
@@ -117,6 +125,7 @@ class PersonalDocumentData(BaseModel):
     name: str
     schema_id: str = ""
     category: str = "free-document"
+    folder: str = ""
     description: str = ""
     created_at: str | None = None
     updated_at: str | None = None
@@ -124,6 +133,18 @@ class PersonalDocumentData(BaseModel):
     shared_by_id: str | None = None
     shared_by_name: str | None = None
     shared_at: str | None = None
+
+
+class PersonalFolderListResponse(BaseModel):
+    folders: list[str]
+
+
+class PersonalFolderNameRequest(BaseModel):
+    name: str = Field(min_length=1)
+
+
+class PersonalDocumentFolderRequest(BaseModel):
+    folder: str = ""
 
 
 def _utc_now() -> str:
@@ -329,6 +350,38 @@ async def load_shared_document(
     )
 
 
+@router.get("/personal/folders", response_model=PersonalFolderListResponse)
+async def list_personal_folders(
+    user: UserContext = Depends(get_current_user),
+) -> PersonalFolderListResponse:
+    return PersonalFolderListResponse(folders=list_folders(user))
+
+
+@router.post("/personal/folders", response_model=PersonalFolderListResponse)
+async def create_personal_folder(
+    body: PersonalFolderNameRequest,
+    user: UserContext = Depends(get_current_user),
+) -> PersonalFolderListResponse:
+    return PersonalFolderListResponse(folders=create_folder(user, body.name))
+
+
+@router.patch("/personal/folders/{name}", response_model=PersonalFolderListResponse)
+async def rename_personal_folder(
+    name: str,
+    body: PersonalFolderNameRequest,
+    user: UserContext = Depends(get_current_user),
+) -> PersonalFolderListResponse:
+    return PersonalFolderListResponse(folders=rename_folder(user, name, body.name))
+
+
+@router.delete("/personal/folders/{name}", response_model=PersonalFolderListResponse)
+async def delete_personal_folder(
+    name: str,
+    user: UserContext = Depends(get_current_user),
+) -> PersonalFolderListResponse:
+    return PersonalFolderListResponse(folders=delete_folder(user, name))
+
+
 @router.get("/personal", response_model=list[PersonalDocumentSummary])
 async def list_personal_documents(
     schema_id: str | None = Query(default=None),
@@ -350,6 +403,7 @@ async def list_personal_documents(
                 name=data.get("name", path.stem),
                 schema_id=doc_schema,
                 category=data.get("category", ""),
+                folder=data.get("folder", "") or "",
                 description=data.get("description", ""),
                 created_at=data.get("created_at", ""),
                 updated_at=data.get("updated_at", ""),
@@ -378,6 +432,7 @@ async def save_personal_document(
     now = _utc_now()
     created_at = document.created_at or now
     payload = document.model_dump()
+    payload["folder"] = resolve_folder_assignment(user, document.folder)
     payload["created_at"] = created_at
     payload["updated_at"] = now
     path.write_text(
@@ -420,6 +475,7 @@ async def update_personal_document(
     existing = json.loads(path.read_text(encoding="utf-8"))
     now = _utc_now()
     payload = document.model_dump()
+    payload["folder"] = resolve_folder_assignment(user, document.folder)
     payload["created_at"] = existing.get("created_at") or now
     payload["updated_at"] = now
     path.write_text(
@@ -427,6 +483,28 @@ async def update_personal_document(
         encoding="utf-8",
     )
     return PersonalDocumentData(**payload)
+
+
+@router.patch("/personal/{name}/folder", response_model=PersonalDocumentData)
+async def move_personal_document(
+    name: str,
+    body: PersonalDocumentFolderRequest,
+    user: UserContext = Depends(get_current_user),
+) -> PersonalDocumentData:
+    path = _personal_path(user, name)
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Personal document '{name}' not found",
+        )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["folder"] = resolve_folder_assignment(user, body.folder)
+    data["updated_at"] = _utc_now()
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return PersonalDocumentData(**data)
 
 
 @router.delete("/personal/{name}")

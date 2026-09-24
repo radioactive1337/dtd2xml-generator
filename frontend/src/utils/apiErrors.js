@@ -11,6 +11,11 @@ const API_ERROR_MESSAGES = {
   'Cannot share a document with yourself': 'Нельзя отправить документ самому себе',
   'Either source_document_name or document must be provided': 'Укажите документ для отправки',
   'Document xml_text is required': 'XML-документ пуст',
+  'Invalid folder name': 'Имя папки не должно быть пустым и не может содержать / или \\',
+  'Folder name is too long': 'Имя папки длиннее 80 символов',
+  'Folder already exists': 'Такая папка уже есть',
+  'Folder not found': 'Папка не найдена',
+  'Unknown folder': 'Выбранная папка не найдена',
 }
 
 export function translateApiError(message) {

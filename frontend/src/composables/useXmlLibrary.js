@@ -2,12 +2,17 @@ import { ref } from 'vue'
 import {
   deletePersonalDocument,
   getSharedStatus,
+  createPersonalFolder,
+  deletePersonalFolder,
   listPersonalDocuments,
+  listPersonalFolders,
   listSharedCategories,
   listSharedDocuments,
   loadPersonalDocument,
   loadSharedDocument,
+  movePersonalDocument,
   pushDocumentToGit,
+  renamePersonalFolder,
   savePersonalDocument,
   shareDocument,
   syncSharedLibrary,
@@ -19,6 +24,7 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
   const sharedCategories = ref([])
   const sharedDocuments = ref([])
   const personalDocuments = ref([])
+  const personalFolders = ref([])
   const selectedCategory = ref(null)
   const syncing = ref(false)
   const gitPushing = ref(false)
@@ -126,16 +132,73 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
     }
   }
 
+  async function reloadPersonalLibrary() {
+    const [docs, folders] = await Promise.all([
+      listPersonalDocuments(),
+      listPersonalFolders(),
+    ])
+    personalDocuments.value = docs
+    personalFolders.value = folders
+  }
+
   async function refreshPersonalDocuments() {
     libraryError.value = ''
     loading.value = true
     try {
-      personalDocuments.value = await listPersonalDocuments()
+      await reloadPersonalLibrary()
     } catch (err) {
       libraryError.value = translateApiError(err?.response?.data?.detail || err?.message || String(err))
       personalDocuments.value = []
+      personalFolders.value = []
     } finally {
       loading.value = false
+    }
+  }
+
+  function reportLibraryError(err) {
+    libraryError.value = translateApiError(err?.response?.data?.detail || err?.message || String(err))
+  }
+
+  async function createFolder(name) {
+    libraryError.value = ''
+    try {
+      personalFolders.value = await createPersonalFolder(name)
+    } catch (err) {
+      reportLibraryError(err)
+      throw err
+    }
+  }
+
+  async function renameFolder(name, nextName) {
+    libraryError.value = ''
+    try {
+      await renamePersonalFolder(name, nextName)
+      await reloadPersonalLibrary()
+    } catch (err) {
+      reportLibraryError(err)
+      throw err
+    }
+  }
+
+  async function removeFolder(name) {
+    libraryError.value = ''
+    try {
+      await deletePersonalFolder(name)
+      await reloadPersonalLibrary()
+    } catch (err) {
+      reportLibraryError(err)
+      throw err
+    }
+  }
+
+  async function moveDocumentToFolder(name, folder) {
+    libraryError.value = ''
+    try {
+      await movePersonalDocument(name, folder)
+      await reloadPersonalLibrary()
+    } catch (err) {
+      reportLibraryError(err)
+      throw err
     }
   }
 
@@ -151,11 +214,19 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
     return doc
   }
 
-  async function saveCurrentDocument({ name, schemaId, xmlText, description = '', category = 'free-document' }) {
+  async function saveCurrentDocument({
+    name,
+    schemaId,
+    xmlText,
+    description = '',
+    category = 'free-document',
+    folder = '',
+  }) {
     const payload = {
       name: name.trim(),
       schema_id: schemaId || '',
       category,
+      folder: folder || '',
       description: description.trim(),
       xml_text: xmlText,
     }
@@ -211,6 +282,7 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
     sharedCategories,
     sharedDocuments,
     personalDocuments,
+    personalFolders,
     selectedCategory,
     syncing,
     gitPushing,
@@ -227,6 +299,10 @@ export function useXmlLibrary({ onLoadDocument } = {}) {
     openPersonalDocument,
     saveCurrentDocument,
     removePersonalDocument,
+    createFolder,
+    renameFolder,
+    removeFolder,
+    moveDocumentToFolder,
     sharePersonalDocument,
     shareCurrentDocument,
     loadIntoEditor,

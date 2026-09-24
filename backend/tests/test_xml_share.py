@@ -63,6 +63,33 @@ def test_share_personal_document_success(
     assert len(alice_docs) == 1
 
 
+def test_share_does_not_copy_personal_folder(
+    user_a_client: TestClient,
+    user_b_client: TestClient,
+):
+    created = user_a_client.post(
+        "/api/xml-library/personal/folders",
+        json={"name": "Черновики"},
+    )
+    assert created.status_code == 200, created.text
+    _save_personal(user_a_client, {**SAMPLE_PERSONAL, "name": "В папке", "folder": "Черновики"})
+
+    response = user_a_client.post(
+        "/api/xml-library/share",
+        json={
+            "recipient_username": "bob",
+            "source_document_name": "В папке",
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    loaded = user_b_client.get("/api/xml-library/personal/В%20папке").json()
+    assert loaded["folder"] == ""
+    assert loaded["xml_text"] == "<root>personal</root>"
+    bob_folders = user_b_client.get("/api/xml-library/personal/folders").json()
+    assert bob_folders["folders"] == []
+
+
 def test_share_inline_document(
     user_a_client: TestClient,
     user_b_client: TestClient,
