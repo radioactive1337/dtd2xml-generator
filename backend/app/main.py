@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
-from app.api.routes import admin, config, db, dtd, export, fill, generate, mapping_presets, presets, validate, xml_compare, xml_library
+from app.api.routes import admin, anonymize, config, db, dtd, export, fill, generate, mapping_presets, presets, validate, xml_compare, xml_library
 from app.auth import routes as auth
 from app.auth.sessions import get_current_user, install_session_middleware
 from app.auth.users import init_user_db
@@ -94,6 +94,7 @@ app.include_router(mapping_presets.router, prefix="/api")
 app.include_router(xml_library.router, prefix="/api")
 app.include_router(xml_compare.router, prefix="/api")
 app.include_router(validate.router, prefix="/api")
+app.include_router(anonymize.router, prefix="/api")
 
 
 @app.exception_handler(Exception)

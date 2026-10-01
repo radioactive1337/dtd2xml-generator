@@ -8,6 +8,7 @@
       <nav class="nav">
         <div class="nav-links">
           <router-link to="/" class="nav-link">Генератор</router-link>
+          <router-link to="/anonymize" class="nav-link">Анонимизация</router-link>
           <router-link to="/settings" class="nav-link">Настройки</router-link>
           <router-link v-if="isAdmin" to="/admin" class="nav-link">Админ</router-link>
           <span class="nav-sep" aria-hidden="true"></span>
@@ -95,7 +96,7 @@
     <main class="app-main">
       <div class="route-wrapper">
         <router-view v-slot="{ Component }">
-          <keep-alive include="GeneratorView">
+          <keep-alive include="GeneratorView,AnonymizeView">
             <component :is="Component" />
           </keep-alive>
         </router-view>

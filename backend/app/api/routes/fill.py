@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
 from collections.abc import Awaitable, Callable
 from typing import Literal
 
@@ -28,6 +27,7 @@ from app.services.attribute_rules_service import validate_document
 from app.services.db_service import SqlMapping, apply_db_overrides
 from app.services.field_mapping_service import suggest_field_mappings as suggest_field_mappings_service
 from app.services.git_reference_fill_service import populate_from_git
+from app.services.llm_concurrency import llm_semaphore
 from app.services.llm_service import LLMService, populate_with_llm
 from app.services.xml_structure_service import peek_root_element
 from app.user_context import UserContext
@@ -35,11 +35,8 @@ from app.user_context import UserContext
 router = APIRouter(prefix="/fill", tags=["fill"])
 logger = logging.getLogger(__name__)
 
-# Allow at most this many LLM requests to run concurrently across all users.
-# Keeps the LLM backend responsive and prevents a single runaway client from
-# starving everyone else.  Adjust via env var LLM_CONCURRENCY if needed.
-_LLM_CONCURRENCY = int(os.getenv("LLM_CONCURRENCY", "5"))
-_llm_semaphore = asyncio.Semaphore(_LLM_CONCURRENCY)
+# Shared with other LLM-backed routes (see app.services.llm_concurrency).
+_llm_semaphore = llm_semaphore
 
 Strategy = Literal["ai", "db_ai", "git_ai", "git_ai_db"]
 

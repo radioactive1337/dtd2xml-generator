@@ -10,6 +10,7 @@ import { translateApiError } from '../../utils/apiErrors'
 import { extractPushWarnings } from '../../utils/gitPushWarnings'
 import { useGenerationHistory } from '../useGenerationHistory'
 import { useXmlLibrary } from '../useXmlLibrary'
+import { useAnonymizeHandoff } from '../useAnonymizeHandoff'
 import { useGeneratorLayout } from './useGeneratorLayout'
 import { useGeneratorTabs, leftTabs } from './useGeneratorTabs'
 import { useGeneratorMapping } from './useGeneratorMapping'
@@ -79,6 +80,16 @@ export function useGenerator() {
       await stageFillXml(schema.schemaId.value, xmlText)
       await xml.syncFromPastedXml(xmlText)
     }
+  }
+
+  // XML handed over from the anonymization page (in-memory only).
+  const anonymizeHandoff = useAnonymizeHandoff()
+
+  async function consumeAnonymizeHandoff() {
+    const xmlText = anonymizeHandoff.consume()
+    if (!xmlText) return
+    await onLoadLibraryDocument(xmlText)
+    error.value = ''
   }
 
   const xmlLibrary = useXmlLibrary({ onLoadDocument: onLoadLibraryDocument })
@@ -427,6 +438,8 @@ export function useGenerator() {
 
     await aliasesPromise
 
+    await consumeAnonymizeHandoff()
+
     await xmlLibrary.refreshSharedCategories()
     await xmlLibrary.refreshPersonalDocuments()
   })
@@ -440,6 +453,7 @@ export function useGenerator() {
       return
     }
     refreshConnectionAliases()
+    void consumeAnonymizeHandoff()
   })
 
   onBeforeUnmount(() => {
