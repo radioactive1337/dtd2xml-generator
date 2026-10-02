@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -255,6 +258,181 @@ def test_rules_export_import_roundtrip(client: TestClient):
     ).json()
     assert imported["imported"] == 1 and imported["skipped"] == 1
     assert [r["attr"] for r in imported["user"]] == ["foo"]
+
+
+def test_promote_moves_personal_rule_into_shared_file(client: TestClient):
+    created = client.post(
+        "/api/anonymize/rules/upsert",
+        json={
+            "rules": [
+                {
+                    "element": "cs:attribute",
+                    "attr": "value",
+                    "name": "Mystery",
+                    "action": "replace",
+                    "category": "format_preserving",
+                    "note": "поле с ПДн",
+                }
+            ]
+        },
+    ).json()["user"][0]
+
+    response = client.post("/api/anonymize/rules/promote", json={"rule_id": created["id"]})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["user"] == []
+    promoted = [rule for rule in body["global"] if rule.get("name") == "Mystery"]
+    assert len(promoted) == 1
+    assert promoted[0]["id"].startswith("g-")
+    assert promoted[0]["created_by"] == "dev"
+    assert promoted[0]["layer"] == "global"
+
+    on_disk = json.loads(anon_rules.ANON_RULES_FILE.read_text(encoding="utf-8"))
+    assert all("layer" not in rule for rule in on_disk["rules"])
+    assert any(rule.get("name") == "Mystery" for rule in on_disk["rules"])
+
+    missing = client.post("/api/anonymize/rules/promote", json={"rule_id": created["id"]})
+    assert missing.status_code == 404
+
+
+def test_promote_replaces_shared_rule_with_the_same_scope(client: TestClient):
+    created = client.post(
+        "/api/anonymize/rules/upsert",
+        json={"rules": [{"attr": "status", "action": "replace", "category": "format_preserving"}]},
+    ).json()["user"][0]
+    body = client.post("/api/anonymize/rules/promote", json={"rule_id": created["id"]}).json()
+    status_rules = [rule for rule in body["global"] if rule["attr"] == "status" and not rule.get("element")]
+    assert len(status_rules) == 1
+    assert status_rules[0]["id"] == "t-status"
+    assert status_rules[0]["action"] == "replace"
+    assert body["user"] == []
+
+
+def test_promote_and_delete_restore_the_shipped_rules_file(client: TestClient):
+    shipped = Path(__file__).resolve().parents[2] / "config" / "anonymize_rules.json"
+    original = shipped.read_text(encoding="utf-8")
+    path = anon_rules.ANON_RULES_FILE
+    path.write_text(original, encoding="utf-8")
+    anon_rules.clear_global_rules_cache()
+
+    created = client.post(
+        "/api/anonymize/rules/upsert",
+        json={"rules": [{"attr": "zz-temp", "action": "keep", "note": "временное"}]},
+    ).json()["user"][0]
+    promoted = client.post("/api/anonymize/rules/promote", json={"rule_id": created["id"]})
+    assert promoted.status_code == 200, promoted.text
+    text = path.read_text(encoding="utf-8")
+    assert '"attr": "zz-temp"' in text
+    assert original.split("g-phone", 1)[1].split("g-account-number-attr", 1)[0] in text
+
+    rule_id = next(rule["id"] for rule in promoted.json()["global"] if rule["attr"] == "zz-temp")
+    deleted = client.delete(f"/api/anonymize/rules/global/{rule_id}")
+    assert deleted.status_code == 200, deleted.text
+    assert path.read_text(encoding="utf-8") == original
+
+
+def test_promote_keeps_other_shared_rules_verbatim(client: TestClient):
+    path = anon_rules.ANON_RULES_FILE
+    untouched = '{ "id": "t-inn", "attr": "inn", "action": "replace", "category": "inn", "source": "builtin" }'
+    path.write_text(
+        "{\n"
+        '  "version": 1,\n'
+        '  "rules": [\n'
+        f"    {untouched}\n"
+        "  ]\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    anon_rules.clear_global_rules_cache()
+
+    created = client.post(
+        "/api/anonymize/rules/upsert",
+        json={"rules": [{"attr": "extra", "action": "keep"}]},
+    ).json()["user"][0]
+    response = client.post("/api/anonymize/rules/promote", json={"rule_id": created["id"]})
+    assert response.status_code == 200, response.text
+    text = path.read_text(encoding="utf-8")
+    assert untouched in text
+    assert '"attr": "extra"' in text
+
+
+def test_promote_writes_shared_file_without_touching_example(client: TestClient, tmp_path, monkeypatch):
+    example = tmp_path / "anonymize_rules.json.example"
+    example.write_text(
+        json.dumps({"version": 1, "rules": [{"id": "g-x", "attr": "foo", "action": "keep"}]}),
+        encoding="utf-8",
+    )
+    before = example.read_text(encoding="utf-8")
+    target = tmp_path / "out" / "anonymize_rules.json"
+    monkeypatch.setattr(anon_rules, "ANON_RULES_FILE", target)
+    monkeypatch.setattr(anon_rules, "ANON_RULES_EXAMPLE", example)
+    anon_rules.clear_global_rules_cache()
+
+    created = client.post(
+        "/api/anonymize/rules/upsert",
+        json={"rules": [{"attr": "bar", "action": "keep"}]},
+    ).json()["user"][0]
+    response = client.post("/api/anonymize/rules/promote", json={"rule_id": created["id"]})
+    assert response.status_code == 200, response.text
+    assert target.is_file()
+    assert example.read_text(encoding="utf-8") == before
+    saved = json.loads(target.read_text(encoding="utf-8"))
+    assert {rule["attr"] for rule in saved["rules"]} == {"foo", "bar"}
+
+
+def test_promote_does_not_overwrite_corrupt_shared_file(client: TestClient):
+    path = anon_rules.ANON_RULES_FILE
+    path.write_text("{not json", encoding="utf-8")
+    anon_rules.clear_global_rules_cache()
+    created = client.post(
+        "/api/anonymize/rules/upsert",
+        json={"rules": [{"attr": "extra", "action": "keep"}]},
+    ).json()["user"][0]
+    response = client.post("/api/anonymize/rules/promote", json={"rule_id": created["id"]})
+    assert response.status_code == 500
+    assert path.read_text(encoding="utf-8") == "{not json"
+    assert client.get("/api/anonymize/rules").json()["user"][0]["attr"] == "extra"
+
+
+def test_delete_shared_rule(client: TestClient):
+    assert client.delete("/api/anonymize/rules/global/missing").status_code == 404
+    created = client.post(
+        "/api/anonymize/rules/upsert",
+        json={"rules": [{"attr": "extra", "action": "keep"}]},
+    ).json()["user"][0]
+    promoted = client.post("/api/anonymize/rules/promote", json={"rule_id": created["id"]}).json()
+    rule_id = next(rule["id"] for rule in promoted["global"] if rule["attr"] == "extra")
+    deleted = client.delete(f"/api/anonymize/rules/global/{rule_id}")
+    assert deleted.status_code == 200, deleted.text
+    assert all(rule["attr"] != "extra" for rule in deleted.json()["global"])
+    assert any(rule["id"] == "t-inn" for rule in deleted.json()["global"])
+
+
+def test_promoted_rule_applies_to_other_users(user_a_client: TestClient, user_b_client: TestClient):
+    created = user_a_client.post(
+        "/api/anonymize/rules/upsert",
+        json={
+            "rules": [
+                {
+                    "element": "cs:attribute",
+                    "attr": "value",
+                    "name": "Mystery",
+                    "action": "replace",
+                    "category": "format_preserving",
+                }
+            ]
+        },
+    ).json()["user"][0]
+    promoted = user_a_client.post("/api/anonymize/rules/promote", json={"rule_id": created["id"]})
+    assert promoted.status_code == 200, promoted.text
+
+    assert user_a_client.get("/api/anonymize/rules").json()["user"] == []
+    bob = user_b_client.get("/api/anonymize/rules").json()
+    assert bob["user"] == []
+    assert any(rule.get("name") == "Mystery" for rule in bob["global"])
+
+    analyze = user_b_client.post("/api/anonymize/analyze", json={"xml_text": XML}).json()
+    assert "cs:attribute|value|Mystery" not in _unclassified_keys(analyze)
 
 
 def test_user_rules_are_per_user(user_a_client: TestClient, user_b_client: TestClient):

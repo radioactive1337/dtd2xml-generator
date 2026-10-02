@@ -2,9 +2,11 @@ import { ref, computed } from 'vue'
 import {
   clearAnonymizeRules,
   deleteAnonymizeRule,
+  deleteGlobalAnonymizeRule,
   exportAnonymizeRules,
   getAnonymizeRules,
   importAnonymizeRules,
+  promoteAnonymizeRule,
   upsertAnonymizeRules,
 } from '../api/anonymize'
 import { filterRules, safeErrorMessage } from '../utils/anonymize'
@@ -50,11 +52,29 @@ export function useAnonymizeRules({ onChanged } = {}) {
     if (onChanged) await onChanged()
   }
 
-  async function addRules(rules) {
+  async function addRules(rules, { successMessage = '' } = {}) {
     error.value = ''
     try {
       const data = await upsertAnonymizeRules(rules)
       userRules.value = data.user || []
+      await changed()
+      if (successMessage) message.value = successMessage
+      return true
+    } catch (err) {
+      error.value = safeErrorMessage(err)
+      message.value = ''
+      return false
+    }
+  }
+
+  async function promote(ruleId) {
+    error.value = ''
+    message.value = ''
+    try {
+      const data = await promoteAnonymizeRule(ruleId)
+      globalRules.value = data.global || []
+      userRules.value = data.user || []
+      message.value = 'Правило перенесено в общие'
       await changed()
       return true
     } catch (err) {
@@ -68,6 +88,19 @@ export function useAnonymizeRules({ onChanged } = {}) {
     try {
       await deleteAnonymizeRule(ruleId)
       userRules.value = userRules.value.filter((r) => r.id !== ruleId)
+      await changed()
+    } catch (err) {
+      error.value = safeErrorMessage(err)
+    }
+  }
+
+  async function removeGlobal(ruleId) {
+    error.value = ''
+    message.value = ''
+    try {
+      const data = await deleteGlobalAnonymizeRule(ruleId)
+      globalRules.value = data.global || []
+      message.value = 'Общее правило удалено'
       await changed()
     } catch (err) {
       error.value = safeErrorMessage(err)
@@ -133,7 +166,9 @@ export function useAnonymizeRules({ onChanged } = {}) {
     visibleRules,
     load,
     addRules,
+    promote,
     remove,
+    removeGlobal,
     clearUser,
     exportJson,
     importFile,

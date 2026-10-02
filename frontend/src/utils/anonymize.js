@@ -106,6 +106,52 @@ export function ruleScopeOptions(item) {
   return options
 }
 
+const RULE_KEY_FIELDS = ['element', 'attr', 'name', 'parent_element', 'parent_name', 'parent_value']
+
+/** Same identity the server uses to merge rules (scope, not id). */
+export function ruleKey(rule) {
+  return RULE_KEY_FIELDS.map((field) => String(rule?.[field] ?? '').trim().toLowerCase()).join('|')
+}
+
+export function emptyRuleForm() {
+  return {
+    attr: '',
+    element: '',
+    name: '',
+    parent_element: '',
+    parent_name: '',
+    parent_value: '',
+    action: 'replace',
+    category: '',
+    note: '',
+  }
+}
+
+export function ruleToForm(rule) {
+  const form = emptyRuleForm()
+  for (const key of Object.keys(form)) {
+    if (rule?.[key] != null) form[key] = String(rule[key])
+  }
+  if (form.action !== 'keep') form.action = 'replace'
+  return form
+}
+
+/** Form state -> personal-rule payload. Category is omitted for ``keep``. */
+export function formToRule(form) {
+  const action = form?.action === 'keep' ? 'keep' : 'replace'
+  const rule = {
+    attr: String(form?.attr || '').trim(),
+    action,
+    source: 'manual',
+    category: action === 'replace' ? String(form?.category || '').trim() || null : null,
+  }
+  for (const field of ['element', 'name', 'parent_element', 'parent_name', 'parent_value', 'note']) {
+    const value = String(form?.[field] || '').trim()
+    if (value) rule[field] = value
+  }
+  return rule
+}
+
 export function buildRule(item, scope, action, category) {
   const rule = {
     attr: item.attr,

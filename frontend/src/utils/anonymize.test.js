@@ -3,15 +3,19 @@ import {
   buildRequestPayload,
   buildRule,
   downloadFileName,
+  emptyRuleForm,
   fieldLabel,
   filterRules,
+  formToRule,
   groupCategoriesByGroup,
   groupFindingsByCategory,
   isHandoffBlocked,
   overridesToPayload,
   reportStatus,
+  ruleKey,
   ruleScopeOptions,
   ruleSummary,
+  ruleToForm,
   safeErrorMessage,
 } from './anonymize'
 
@@ -78,6 +82,42 @@ describe('rules from queue items', () => {
     expect(buildRule(plain, 'attr', 'replace', 'phone')).toEqual({
       attr: 'taxId', action: 'replace', category: 'phone', source: 'manual',
     })
+  })
+})
+
+describe('rule form', () => {
+  it('builds a personal rule and the same key the server uses', () => {
+    const rule = formToRule({
+      attr: ' value ',
+      element: ' cs:attribute ',
+      name: 'LastName',
+      parent_element: '',
+      parent_name: ' Passport ',
+      parent_value: '',
+      action: 'replace',
+      category: 'person_last',
+      note: '  ',
+    })
+    expect(rule).toEqual({
+      attr: 'value',
+      element: 'cs:attribute',
+      name: 'LastName',
+      parent_name: 'Passport',
+      action: 'replace',
+      category: 'person_last',
+      source: 'manual',
+    })
+    expect(ruleKey(rule)).toBe('cs:attribute|value|lastname||passport|')
+  })
+
+  it('drops the category when the action is keep', () => {
+    expect(formToRule({ attr: 'status', action: 'keep', category: 'inn' }).category).toBeNull()
+  })
+
+  it('round-trips a stored rule into an empty form', () => {
+    const form = ruleToForm({ attr: 'inn', action: 'keep', element: 'client', note: 'код' })
+    expect(form).toMatchObject({ attr: 'inn', action: 'keep', element: 'client', note: 'код', category: '' })
+    expect(emptyRuleForm().action).toBe('replace')
   })
 })
 

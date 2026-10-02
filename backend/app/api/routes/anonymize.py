@@ -37,12 +37,14 @@ from app.services.anonymize.engine import (
 from app.services.anonymize.rules import (
     AnonRule,
     anonymize_dir,
+    delete_global_rule,
     delete_user_rule,
     get_user_secret,
     load_effective_rules,
     load_global_rules,
     load_user_rules,
     parse_rules,
+    promote_user_rule,
     save_user_rules,
     upsert_user_rules,
 )
@@ -91,6 +93,10 @@ class RulesBody(BaseModel):
 class RulesImportBody(BaseModel):
     rules: list[dict[str, Any]] = Field(default_factory=list)
     mode: Literal["merge", "replace"] = "merge"
+
+
+class PromoteRuleBody(BaseModel):
+    rule_id: str = Field(min_length=1, max_length=200)
 
 
 class SuggestItem(BaseModel):
@@ -340,6 +346,40 @@ async def put_rules(body: RulesBody, user: UserContext = Depends(get_current_use
 async def upsert_rules(body: RulesBody, user: UserContext = Depends(get_current_user)) -> dict[str, Any]:
     merged = upsert_user_rules(user, list(body.rules))
     return {"user": [_rule_dict(r, "user") for r in merged]}
+
+
+@router.post("/rules/promote")
+async def promote_rule(
+    body: PromoteRuleBody, user: UserContext = Depends(get_current_user)
+) -> dict[str, Any]:
+    """Move one personal rule into the shared ``config/anonymize_rules.json``."""
+    try:
+        promote_user_rule(user, body.rule_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Правило не найдено в личных правилах") from None
+    except (OSError, json.JSONDecodeError, ValueError):
+        logger.exception("Failed to write shared anonymize rules")
+        raise HTTPException(status_code=500, detail="Не удалось записать общие правила") from None
+    logger.info("Promoted anonymize rule %s to shared [user=%s]", body.rule_id, user.display_name)
+    return {
+        "global": [_rule_dict(r, "global") for r in load_global_rules()],
+        "user": [_rule_dict(r, "user") for r in load_user_rules(user)],
+    }
+
+
+@router.delete("/rules/global/{rule_id}")
+async def remove_global_rule(
+    rule_id: str, user: UserContext = Depends(get_current_user)
+) -> dict[str, Any]:
+    try:
+        removed = delete_global_rule(rule_id)
+    except (OSError, json.JSONDecodeError, ValueError):
+        logger.exception("Failed to write shared anonymize rules")
+        raise HTTPException(status_code=500, detail="Не удалось записать общие правила") from None
+    if not removed:
+        raise HTTPException(status_code=404, detail="Общее правило не найдено")
+    logger.info("Deleted shared anonymize rule %s [user=%s]", rule_id, user.display_name)
+    return {"global": [_rule_dict(r, "global") for r in load_global_rules()]}
 
 
 @router.delete("/rules/{rule_id}")

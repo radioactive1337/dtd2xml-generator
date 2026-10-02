@@ -33,6 +33,16 @@ export async function deleteAnonymizeRule(ruleId) {
   return data
 }
 
+export async function promoteAnonymizeRule(ruleId) {
+  const { data } = await client.post('/anonymize/rules/promote', { rule_id: ruleId })
+  return data
+}
+
+export async function deleteGlobalAnonymizeRule(ruleId) {
+  const { data } = await client.delete(`/anonymize/rules/global/${encodeURIComponent(ruleId)}`)
+  return data
+}
+
 export async function clearAnonymizeRules() {
   const { data } = await client.delete('/anonymize/rules')
   return data
