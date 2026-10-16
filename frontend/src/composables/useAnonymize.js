@@ -258,14 +258,28 @@ export function useAnonymize() {
   }
 
   async function rememberMany(items, scope, action, category = null) {
-    const list = items.map((item) => buildRule(item, scope, action, category))
+    return rememberDecisions(items.map((item) => ({ item, scope, action, category })))
+  }
+
+  async function rememberDecisions(entries) {
+    const list = entries.map((entry) =>
+      buildRule(entry.item, entry.scope || 'exact', entry.action, entry.category),
+    )
     const ok = await rules.addRules(list)
     if (ok) {
       const next = { ...overrides.value }
-      for (const item of items) delete next[item.key]
+      for (const entry of entries) delete next[entry.item.key]
       overrides.value = next
     }
     return ok
+  }
+
+  function decideEach(entries) {
+    const next = { ...overrides.value }
+    for (const entry of entries) {
+      next[entry.key] = { action: entry.action, category: entry.category ?? null }
+    }
+    overrides.value = next
   }
 
   function toggleCategory(id) {
@@ -510,9 +524,11 @@ export function useAnonymize() {
     analyzeNow,
     decide,
     decideMany,
+    decideEach,
     undoDecision,
     remember,
     rememberMany,
+    rememberDecisions,
     // result
     result,
     report,

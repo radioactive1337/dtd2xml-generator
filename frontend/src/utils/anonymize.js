@@ -84,6 +84,33 @@ export function groupCategoriesByGroup(categories) {
   return [...groups.entries()].map(([name, items]) => ({ name, items }))
 }
 
+/**
+ * Category a queue row would use for «Это ПДн».
+ * An explicit pick wins; otherwise the AI suggestion, then the heuristic.
+ * `picked` is `undefined` when the user has not touched the select.
+ */
+export function effectiveCategory(item, picked) {
+  if (typeof picked === 'string') return picked
+  if (item?.ai_category && item.ai_category !== 'none') return item.ai_category
+  return item?.suggested_category || ''
+}
+
+/**
+ * Bulk «Это ПДн»: a common category applies to every row; otherwise each row
+ * uses its own suggestion. Rows with neither are skipped.
+ */
+export function planBulkReplace(items, { commonCategory = '', picked = {} } = {}) {
+  const ready = []
+  const skipped = []
+  for (const item of items || []) {
+    const choice = Object.prototype.hasOwnProperty.call(picked, item.key) ? picked[item.key] : undefined
+    const category = commonCategory || effectiveCategory(item, choice)
+    if (category) ready.push({ key: item.key, category })
+    else skipped.push(item.key)
+  }
+  return { ready, skipped }
+}
+
 /** Scopes in which a decision about a queue item can be remembered as a rule. */
 export function ruleScopeOptions(item) {
   const options = [

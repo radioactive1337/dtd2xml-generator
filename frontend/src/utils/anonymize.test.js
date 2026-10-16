@@ -3,10 +3,12 @@ import {
   buildRequestPayload,
   buildRule,
   downloadFileName,
+  effectiveCategory,
   emptyRuleForm,
   fieldLabel,
   filterRules,
   formToRule,
+  planBulkReplace,
   groupCategoriesByGroup,
   groupFindingsByCategory,
   isHandoffBlocked,
@@ -82,6 +84,33 @@ describe('rules from queue items', () => {
     expect(buildRule(plain, 'attr', 'replace', 'phone')).toEqual({
       attr: 'taxId', action: 'replace', category: 'phone', source: 'manual',
     })
+  })
+})
+
+describe('queue decisions', () => {
+  const withHint = { key: 'bank|bic|', suggested_category: 'bic', ai_category: null }
+  const plain = { key: 'note|text|', suggested_category: '', ai_category: null }
+
+  it('uses a suggestion when the category select was not touched', () => {
+    expect(effectiveCategory(withHint, undefined)).toBe('bic')
+    expect(effectiveCategory(withHint, 'phone')).toBe('phone')
+    expect(effectiveCategory(withHint, '')).toBe('')
+    expect(effectiveCategory({ ai_category: 'email', suggested_category: 'phone' }, undefined)).toBe('email')
+    expect(effectiveCategory({ ai_category: 'none', suggested_category: 'bic' }, undefined)).toBe('bic')
+    expect(effectiveCategory(plain, undefined)).toBe('')
+  })
+
+  it('applies one category to the selection, or each field suggestion', () => {
+    const items = [withHint, plain]
+    expect(planBulkReplace(items, {}).ready.map((row) => row.key)).toEqual(['bank|bic|'])
+    expect(planBulkReplace(items, {}).skipped).toEqual(['note|text|'])
+    expect(planBulkReplace(items, { commonCategory: 'phone' }).ready).toEqual([
+      { key: 'bank|bic|', category: 'phone' },
+      { key: 'note|text|', category: 'phone' },
+    ])
+    expect(planBulkReplace(items, { picked: { 'bank|bic|': 'city' } }).ready).toEqual([
+      { key: 'bank|bic|', category: 'city' },
+    ])
   })
 })
 

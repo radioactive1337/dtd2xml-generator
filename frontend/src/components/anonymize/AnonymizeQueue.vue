@@ -32,8 +32,8 @@
 
     <template v-if="items.length">
       <p class="hint">
-        Для этих полей нет правила. Подозрительные (похожие на данные) блокируют выдачу результата, пока
-        вы не примете решение.
+        Подозрительные поля блокируют выдачу, пока по ним нет решения. Подсказка уже стоит в списке
+        категории — отдельная кнопка для неё не нужна.
       </p>
 
       <div class="bulk">
@@ -41,27 +41,44 @@
           <input type="checkbox" :checked="allSelected" @change="toggleAll($event.target.checked)" />
           <span>Выбрано: {{ selected.size }}</span>
         </label>
-        <select v-model="bulkCategory" class="mini" aria-label="Категория для выбранных">
-          <option value="">Категория…</option>
-          <option v-for="c in ctx.categories" :key="c.id" :value="c.id">{{ c.label }}</option>
+        <select v-model="bulkCategory" class="mini" aria-label="Общая категория для выбранных">
+          <option value="">Подсказка каждого поля</option>
+          <optgroup v-for="group in groupedCategories" :key="group.name" :label="group.name">
+            <option v-for="c in group.items" :key="c.id" :value="c.id">{{ c.label }}</option>
+          </optgroup>
         </select>
-        <button type="button" class="btn-secondary btn-sm" :disabled="!selected.size || !bulkCategory" @click="bulkReplace">
-          Это ПДн
+        <button
+          type="button"
+          class="btn-primary btn-sm"
+          :disabled="!replaceCount"
+          :title="bulkReplaceTitle"
+          @click="bulkReplace"
+        >
+          Это ПДн{{ selected.size ? ` (${replaceCount})` : '' }}
         </button>
         <button type="button" class="btn-secondary btn-sm" :disabled="!selected.size" @click="bulk('keep')">
           Не ПДн
         </button>
-        <button type="button" class="btn-secondary btn-sm" :disabled="!selected.size" @click="bulk('skip')">
+        <button type="button" class="btn-secondary btn-sm" :disabled="!selected.size" title="Не менять в этом документе, правило не создаётся" @click="bulk('skip')">
           Пропустить
         </button>
-        <button type="button" class="btn-secondary btn-sm" :disabled="!acceptableCount" @click="acceptSuggestions">
-          Принять подсказки ({{ acceptableCount }})
-        </button>
       </div>
-      <label class="check bulk-remember">
-        <input v-model="bulkRemember" type="checkbox" />
-        <span>Запоминать групповые решения как правила (для точного поля)</span>
-      </label>
+      <div class="bulk remember-row">
+        <label class="check">
+          <input v-model="rememberAll" type="checkbox" />
+          <span>Запомнить как правила</span>
+        </label>
+        <select
+          v-if="rememberAll"
+          v-model="rememberScope"
+          class="mini"
+          aria-label="Область запоминаемых правил"
+          title="Для поля без name или без атрибута область сужается до «только это поле»"
+        >
+          <option v-for="option in SCOPE_OPTIONS" :key="option.id" :value="option.id">{{ option.label }}</option>
+        </select>
+      </div>
+      <p v-if="bulkNote" class="hint">{{ bulkNote }}</p>
 
       <ul class="items">
         <li v-for="item in items" :key="item.key" class="item" :class="{ suspicious: item.suspicious }">
@@ -86,58 +103,33 @@
               </button>
             </span>
           </div>
-          <div v-if="item.suggested_category || item.ai_category" class="suggest">
-            <button
-              v-if="item.suggested_category"
-              type="button"
-              class="chip"
-              :title="item.hint || 'Подсказка эвристики'"
-              @click="choose(item, item.suggested_category)"
-            >
-              Эвристика: {{ categoryLabel(item.suggested_category) }}
-            </button>
-            <button
-              v-if="item.ai_category"
-              type="button"
-              class="chip ai"
-              title="Предложение ИИ — проверьте перед применением"
-              @click="item.ai_category === 'none' ? apply(item, 'keep') : choose(item, item.ai_category)"
-            >
-              ИИ: {{ item.ai_category === 'none' ? 'не ПДн' : categoryLabel(item.ai_category) }}
-            </button>
-          </div>
+          <p v-if="hintText(item)" class="hint">{{ hintText(item) }}</p>
 
           <div class="decide">
-            <select v-model="picked[item.key]" class="mini" :aria-label="`Категория для ${fieldLabel(item)}`">
-              <option :value="undefined">Категория…</option>
-              <option v-for="c in ctx.categories" :key="c.id" :value="c.id">{{ c.label }}</option>
+            <select
+              class="mini"
+              :value="categoryOf(item)"
+              :aria-label="`Категория для ${fieldLabel(item)}`"
+              @change="picked[item.key] = $event.target.value"
+            >
+              <option value="">Категория…</option>
+              <optgroup v-for="group in groupedCategories" :key="group.name" :label="group.name">
+                <option v-for="c in group.items" :key="c.id" :value="c.id">{{ c.label }}</option>
+              </optgroup>
             </select>
             <button
               type="button"
               class="btn-primary btn-sm"
-              :disabled="!(picked[item.key] || item.suggested_category)"
-              @click="apply(item, 'replace', picked[item.key] || item.suggested_category)"
+              :disabled="!categoryOf(item)"
+              :title="categoryOf(item) ? `Заменить как «${categoryLabel(categoryOf(item))}»` : 'Выберите категорию'"
+              @click="apply(item, 'replace', categoryOf(item))"
             >
               Это ПДн
             </button>
-            <button type="button" class="btn-secondary btn-sm" @click="apply(item, 'keep')">Не ПДн, оставить</button>
-            <button type="button" class="btn-secondary btn-sm" @click="apply(item, 'skip')" title="Не менять в этом документе, правило не создаётся">
-              Пропустить здесь
+            <button type="button" class="btn-secondary btn-sm" @click="apply(item, 'keep')">Не ПДн</button>
+            <button type="button" class="btn-secondary btn-sm" title="Не менять в этом документе, правило не создаётся" @click="apply(item, 'skip')">
+              Пропустить
             </button>
-          </div>
-          <div class="remember">
-            <label class="check">
-              <input v-model="remember[item.key]" type="checkbox" />
-              <span>Запомнить как правило</span>
-            </label>
-            <select
-              v-if="remember[item.key]"
-              v-model="scopes[item.key]"
-              class="mini scope"
-              :aria-label="`Область правила для ${fieldLabel(item)}`"
-            >
-              <option v-for="s in ruleScopeOptions(item)" :key="s.id" :value="s.id">{{ s.label }}</option>
-            </select>
           </div>
         </li>
       </ul>
@@ -158,30 +150,71 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
-import { fieldLabel, ruleScopeOptions } from '../../utils/anonymize'
+import { computed, reactive, ref, watch } from 'vue'
+import { effectiveCategory, fieldLabel, groupCategoriesByGroup, planBulkReplace, TEXT_ATTR } from '../../utils/anonymize'
 
 const props = defineProps({ ctx: { type: Object, required: true } })
 defineEmits(['go-to-line'])
 
+const SCOPE_OPTIONS = [
+  { id: 'exact', label: 'Только это поле' },
+  { id: 'attr', label: 'Любой элемент с таким атрибутом' },
+  { id: 'name', label: 'Любой элемент с таким name' },
+]
+
 const picked = reactive({})
-const remember = reactive({})
-const scopes = reactive({})
 const selected = ref(new Set())
 const bulkCategory = ref('')
-const bulkRemember = ref(false)
+const rememberAll = ref(false)
+const rememberScope = ref('exact')
+const bulkNote = ref('')
 
 const items = computed(() => props.ctx.queue)
 const allSelected = computed(() => items.value.length > 0 && selected.value.size === items.value.length)
 const decided = computed(() => Object.entries(props.ctx.overrides))
 const categoryById = computed(() => new Map(props.ctx.categories.map((c) => [c.id, c.label])))
+const groupedCategories = computed(() => groupCategoriesByGroup(props.ctx.categories))
 
-const acceptableCount = computed(
-  () => items.value.filter((i) => selected.value.has(i.key) && (i.ai_category || i.suggested_category)).length,
-)
+const replacePlan = computed(() => {
+  const chosen = {}
+  for (const item of selectedItems()) {
+    if (Object.prototype.hasOwnProperty.call(picked, item.key)) chosen[item.key] = picked[item.key]
+  }
+  return planBulkReplace(selectedItems(), { commonCategory: bulkCategory.value, picked: chosen })
+})
+const replaceCount = computed(() => replacePlan.value.ready.length)
+
+const bulkReplaceTitle = computed(() => {
+  if (!selected.value.size) return 'Отметьте поля галочками'
+  if (!replaceCount.value) return 'У отмеченных полей нет подсказки — выберите общую категорию'
+  if (!bulkCategory.value && replacePlan.value.skipped.length) {
+    return `${replacePlan.value.skipped.length} без подсказки будут пропущены — для них выберите общую категорию`
+  }
+  if (!bulkCategory.value) return 'Каждому отмеченному полю — его подсказка'
+  return 'Одна категория для всех отмеченных'
+})
 
 function categoryLabel(id) {
   return categoryById.value.get(id) || id
+}
+
+function categoryOf(item) {
+  const choice = Object.prototype.hasOwnProperty.call(picked, item.key) ? picked[item.key] : undefined
+  return effectiveCategory(item, choice)
+}
+
+function hintText(item) {
+  const ai = item.ai_category
+  const heuristic = item.suggested_category
+  if (ai && ai !== 'none' && heuristic && ai !== heuristic) {
+    return `Эвристика: ${categoryLabel(heuristic)}. ИИ: ${categoryLabel(ai)} — в списке стоит вариант ИИ.`
+  }
+  if (ai === 'none') {
+    return heuristic
+      ? `ИИ: не ПДн. Эвристика предлагает «${categoryLabel(heuristic)}».`
+      : 'ИИ: не ПДн.'
+  }
+  return ''
 }
 
 function decisionLabel(d) {
@@ -195,57 +228,75 @@ function toggle(key, on) {
   if (on) next.add(key)
   else next.delete(key)
   selected.value = next
+  bulkNote.value = ''
 }
 
 function toggleAll(on) {
   selected.value = on ? new Set(items.value.map((i) => i.key)) : new Set()
-}
-
-function choose(item, category) {
-  picked[item.key] = category
-}
-
-async function apply(item, action, category = null) {
-  if (remember[item.key] && action !== 'skip') {
-    await props.ctx.remember(item, scopes[item.key] || 'exact', action, category)
-  } else {
-    props.ctx.decide(item.key, action, category)
-  }
+  bulkNote.value = ''
 }
 
 function selectedItems() {
   return items.value.filter((i) => selected.value.has(i.key))
 }
 
+function scopeFor(item) {
+  if (rememberScope.value === 'name' && item.name) return 'name'
+  if (rememberScope.value === 'attr' && item.attr !== TEXT_ATTR && item.element) return 'attr'
+  return 'exact'
+}
+
+async function commit(entries) {
+  if (!entries.length) return false
+  if (rememberAll.value) {
+    return props.ctx.rememberDecisions(
+      entries.map((entry) => ({
+        item: entry.item,
+        scope: scopeFor(entry.item),
+        action: entry.action,
+        category: entry.category,
+      })),
+    )
+  }
+  props.ctx.decideEach(entries.map((entry) => ({ key: entry.item.key, action: entry.action, category: entry.category })))
+  return true
+}
+
+async function apply(item, action, category = null) {
+  bulkNote.value = ''
+  await commit([{ item, action, category }])
+}
+
 async function bulk(action, category = null) {
   const list = selectedItems()
   if (!list.length) return
-  if (bulkRemember.value && action !== 'skip') {
-    await props.ctx.rememberMany(list, 'exact', action, category)
-  } else {
-    props.ctx.decideMany(list.map((i) => i.key), action, category)
-  }
-  selected.value = new Set()
+  bulkNote.value = ''
+  const ok = await commit(list.map((item) => ({ item, action, category })))
+  if (ok) selected.value = new Set()
 }
 
-function bulkReplace() {
-  return bulk('replace', bulkCategory.value)
+async function bulkReplace() {
+  const list = selectedItems()
+  const plan = replacePlan.value
+  const byKey = new Map(list.map((item) => [item.key, item]))
+  const entries = plan.ready.map((row) => ({
+    item: byKey.get(row.key),
+    action: 'replace',
+    category: row.category,
+  }))
+  const ok = await commit(entries)
+  if (!ok) return
+  selected.value = new Set(plan.skipped)
+  bulkNote.value = plan.skipped.length
+    ? `Без подсказки осталось ${plan.skipped.length} — выберите общую категорию.`
+    : ''
 }
 
-async function acceptSuggestions() {
-  const list = selectedItems().filter((i) => i.ai_category || i.suggested_category)
-  for (const item of list) {
-    const category = item.suggested_category || item.ai_category
-    if (category === 'none') {
-      props.ctx.decide(item.key, 'keep')
-    } else if (bulkRemember.value) {
-      await props.ctx.remember(item, 'exact', 'replace', category)
-    } else {
-      props.ctx.decide(item.key, 'replace', category)
-    }
-  }
-  selected.value = new Set()
-}
+watch(items, (list) => {
+  const keys = new Set(list.map((item) => item.key))
+  const next = new Set([...selected.value].filter((key) => keys.has(key)))
+  if (next.size !== selected.value.size) selected.value = next
+})
 </script>
 
 <style scoped>
@@ -258,14 +309,16 @@ async function acceptSuggestions() {
 .ai-bar,
 .bulk,
 .decide,
-.remember,
 .meta,
-.suggest,
 .item-head {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.remember-row {
+  margin-top: -4px;
 }
 
 .empty,
@@ -288,14 +341,9 @@ async function acceptSuggestions() {
 
 .mini {
   width: auto;
-  max-width: 190px;
+  max-width: 220px;
   padding: 4px 8px;
   font-size: 12px;
-}
-
-.mini.scope {
-  max-width: 100%;
-  flex: 1;
 }
 
 .check {
@@ -325,17 +373,17 @@ async function acceptSuggestions() {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .item {
-  padding: 10px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface2);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .item.suspicious {
@@ -390,21 +438,6 @@ async function acceptSuggestions() {
 
 .line-link + .line-link {
   margin-left: 4px;
-}
-
-.chip {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-}
-
-.chip.ai {
-  background: color-mix(in srgb, var(--llm-accent) 14%, transparent);
-  color: var(--llm-accent);
-  border-color: color-mix(in srgb, var(--llm-accent) 35%, var(--border));
 }
 
 .decided {
