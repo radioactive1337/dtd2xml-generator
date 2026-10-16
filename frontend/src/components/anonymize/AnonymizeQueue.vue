@@ -178,7 +178,9 @@ const groupedCategories = computed(() => groupCategoriesByGroup(props.ctx.catego
 const replacePlan = computed(() => {
   const chosen = {}
   for (const item of selectedItems()) {
-    if (Object.prototype.hasOwnProperty.call(picked, item.key)) chosen[item.key] = picked[item.key]
+    // Read through the reactive proxy so a newly chosen category retriggers this.
+    const choice = picked[item.key]
+    if (choice !== undefined) chosen[item.key] = choice
   }
   return planBulkReplace(selectedItems(), { commonCategory: bulkCategory.value, picked: chosen })
 })
@@ -199,7 +201,8 @@ function categoryLabel(id) {
 }
 
 function categoryOf(item) {
-  const choice = Object.prototype.hasOwnProperty.call(picked, item.key) ? picked[item.key] : undefined
+  // `picked[key]` (not hasOwnProperty) so Vue notices the first choice for this field.
+  const choice = picked[item.key]
   return effectiveCategory(item, choice)
 }
 
