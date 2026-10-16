@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "rules": [
+    { "id": "ex-inn", "attr": "inn", "action": "replace", "category": "inn", "source": "manual" },
+    { "id": "ex-snils", "attr": "snils", "action": "replace", "category": "snils", "source": "manual" },
+    { "id": "ex-email", "attr": "email", "action": "replace", "category": "email", "source": "manual" },
+    { "id": "ex-phone", "attr": "phone", "action": "replace", "category": "phone", "source": "manual" },
+    { "id": "ex-status", "attr": "status", "action": "keep", "source": "manual" },
+    { "id": "ex-cs-name", "element": "cs:attribute", "attr": "name", "action": "keep", "source": "manual" },
+    {
+      "id": "ex-cs-last-name",
+      "element": "cs:attribute",
+      "attr": "value",
+      "name": "LastName",
+      "action": "replace",
+      "category": "person_last",
+      "source": "manual",
+      "note": "значение пары <cs:attribute name=\"LastName\" value=\"...\"/>"
+    }
+  ]
+}
